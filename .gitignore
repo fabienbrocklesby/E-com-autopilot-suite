@@ -1,0 +1,35 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Deno
+.deno/
+deno.lock
+
+# Node / Frontend
+node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/dist/
+
+# Build artifacts
+api/dist/
+
+# Docker volumes
+postgres_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+IMPLEMENTATION_PLAN.md
