@@ -3,8 +3,8 @@
  * Raw HTTP calls to the Gmail REST API v1.
  * Reference: https://developers.google.com/gmail/api/reference/rest
  */
-import { queryOne, execute } from "../db/client.ts";
-import { AppError, GmailMessage, GmailThread, OAuthToken } from "../types/index.ts";
+import { queryOne, execute, query } from "../db/client.ts";
+import { AppError, GmailMessage, GmailThread, OAuthToken, Category } from "../types/index.ts";
 import { categoriseAndDraft } from "./categorisation.ts";
 
 const GMAIL_BASE = "https://www.googleapis.com/gmail/v1/users";
@@ -123,12 +123,13 @@ export async function processNewMessages(
   email: string,
   historyId: string,
 ): Promise<void> {
-
-  // Get the last known historyId from settings to avoid re-processing.
-  const lastHistoryRow = await queryOne<{ value: string }>(
-    "SELECT value FROM settings WHERE key = 'gmail_last_history_id'",
+  // Resolve workspace for this connected email.
+  const tokenRow = await queryOne<{ workspace_id: number; last_history_id: string | null }>(
+    "SELECT workspace_id, last_history_id FROM oauth_tokens WHERE email = $1",
+    [email],
   );
-  const startHistoryId = lastHistoryRow?.value ?? historyId;
+  const workspaceId = tokenRow?.workspace_id ?? 1;
+  const startHistoryId = tokenRow?.last_history_id ?? historyId;
 
   const history = await gmailGet<{
     history?: Array<{
@@ -140,10 +141,8 @@ export async function processNewMessages(
   if (!history.history?.length) {
     // No new messages — update the stored historyId and return.
     await execute(
-      `INSERT INTO settings (key, value)
-       VALUES ('gmail_last_history_id', $1)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [historyId],
+      "UPDATE oauth_tokens SET last_history_id = $1 WHERE email = $2",
+      [historyId, email],
     );
     return;
   }
@@ -151,16 +150,14 @@ export async function processNewMessages(
   for (const entry of history.history) {
     for (const added of entry.messagesAdded ?? []) {
       const msg = added.message;
-      await ingestMessage(email, msg.id, msg.threadId);
+      await ingestMessage(email, msg.id, msg.threadId, workspaceId);
     }
   }
 
   // Persist the latest historyId.
   await execute(
-    `INSERT INTO settings (key, value)
-     VALUES ('gmail_last_history_id', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [historyId],
+    "UPDATE oauth_tokens SET last_history_id = $1 WHERE email = $2",
+    [historyId, email],
   );
 }
 
@@ -172,6 +169,7 @@ async function ingestMessage(
   email: string,
   gmailMessageId: string,
   gmailThreadId: string,
+  workspaceId: number,
 ): Promise<void> {
   // Avoid duplicate processing.
   const existing = await queryOne(
@@ -186,31 +184,64 @@ async function ingestMessage(
 
   const subject = headerValue(gmailMsg, "Subject") ?? "(no subject)";
   const from = headerValue(gmailMsg, "From") ?? "";
+  const messageIdHeader = headerValue(gmailMsg, "Message-Id") ?? headerValue(gmailMsg, "Message-ID") ?? null;
   const receivedAt = new Date(parseInt(gmailMsg.internalDate)).toISOString();
   const { plain, html } = extractBody(gmailMsg);
 
-  // Upsert the thread record.
+  // Determine message direction. Gmail's SENT label is the authoritative signal —
+  // compare against the connected account email as a secondary check.
+  const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
+  const fromNormalised = from.toLowerCase();
+  const accountNormalised = email.toLowerCase();
+  // A message is outbound if it carries SENT or was sent from the connected account.
+  const direction: "inbound" | "outbound" =
+    hasSentLabel || fromNormalised.includes(accountNormalised) ? "outbound" : "inbound";
+
+  // Build a short summary by truncating plain text to 1000 chars.
+  const threadSummary = plain.replace(/\s+/g, " ").trim().slice(0, 1000);
+
+  // Upsert the thread record, now with workspace_id and thread_summary.
   const threadRow = await queryOne<{ id: number }>(
-    `INSERT INTO threads (gmail_thread_id, subject, snippet)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (gmail_thread_id) DO UPDATE SET snippet = EXCLUDED.snippet
+    `INSERT INTO threads (workspace_id, gmail_thread_id, subject, snippet, thread_summary)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (gmail_thread_id) DO UPDATE
+       SET snippet = EXCLUDED.snippet,
+           thread_summary = EXCLUDED.thread_summary
      RETURNING id`,
-    [gmailThreadId, subject, gmailMsg.snippet],
+    [workspaceId, gmailThreadId, subject, gmailMsg.snippet, threadSummary],
   );
 
   if (!threadRow) return;
 
-  // Insert the message.
+  // Insert the message, storing the RFC 2822 Message-ID for reply threading.
   await execute(
     `INSERT INTO messages
-       (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (gmail_message_id) DO NOTHING`,
-    [threadRow.id, gmailMessageId, from, plain, html, receivedAt, "inbound"],
+    [threadRow.id, gmailMessageId, from, plain, html, receivedAt, direction, messageIdHeader],
   );
+
+  // Only run categorisation for inbound messages. Outbound messages (sent by this
+  // app or by the user) must not trigger another draft or auto-reply loop.
+  if (direction === "outbound") {
+    console.log(`[gmail] Skipping categorisation for outbound message ${gmailMessageId}`);
+    return;
+  }
 
   // Run the categorisation pipeline.
   await categoriseAndDraft(threadRow.id);
+}
+
+/**
+ * Decode a base64url string from Gmail as a proper UTF-8 string.
+ * atob() returns a Latin-1 binary string which mangles multibyte chars (e.g. smart quotes).
+ */
+function decodeBase64Utf8(base64url: string): string {
+  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 /** Extract a header value from a Gmail message. */
@@ -227,9 +258,9 @@ function extractBody(msg: GmailMessage): { plain: string; html: string } {
 
   function walk(part: GmailMessage["payload"]): void {
     if (part.mimeType === "text/plain" && part.body.data) {
-      plain += atob(part.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+      plain += decodeBase64Utf8(part.body.data);
     } else if (part.mimeType === "text/html" && part.body.data) {
-      html += atob(part.body.data.replace(/-/g, "+").replace(/_/g, "/"));
+      html += decodeBase64Utf8(part.body.data);
     }
     for (const child of part.parts ?? []) {
       walk(child);
@@ -252,19 +283,29 @@ export async function sendReply(
   subject: string,
   replyToAddress: string,
   body: string,
+  inReplyToMessageId?: string | null,
 ): Promise<void> {
-  // Build a minimal RFC 2822 message.
-  const rawMessage = [
+  // Build an RFC 2822 reply message.
+  // If we have the original email's Message-ID, use it for proper threading.
+  // The threadId in the API request also helps Gmail place the sent message.
+  const headers = [
     `From: ${email}`,
     `To: ${replyToAddress}`,
     `Subject: Re: ${subject.replace(/^Re:\s*/i, "")}`,
-    `In-Reply-To: <${gmailThreadId}>`,
-    `References: <${gmailThreadId}>`,
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
-    "",
-    body,
-  ].join("\r\n");
+  ];
+
+  if (inReplyToMessageId) {
+    // Ensure it is wrapped in angle brackets (RFC 2822 requires this).
+    const mid = inReplyToMessageId.startsWith("<")
+      ? inReplyToMessageId
+      : `<${inReplyToMessageId}>`;
+    headers.push(`In-Reply-To: ${mid}`);
+    headers.push(`References: ${mid}`);
+  }
+
+  const rawMessage = [...headers, "", body].join("\r\n");
 
   // base64url encode (no padding, URL-safe chars).
   const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
@@ -272,10 +313,14 @@ export async function sendReply(
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
-  await gmailPost(email, "/messages/send", {
-    raw: encoded,
-    threadId: gmailThreadId,
-  });
+  // Pass threadId only when we also have valid reply headers — otherwise Gmail
+  // will return 404 if the headers don't reference a message in that thread.
+  const payload: Record<string, string> = { raw: encoded };
+  if (inReplyToMessageId) {
+    payload.threadId = gmailThreadId;
+  }
+
+  await gmailPost(email, "/messages/send", payload);
 
   console.log(`[gmail] Reply sent for thread ${gmailThreadId}`);
 }
@@ -298,12 +343,133 @@ export async function setupGmailWatch(email: string): Promise<void> {
     },
   );
 
+  // Resolve workspace_id for this account so we can upsert with the composite key.
+  const tokenRow = await queryOne<{ workspace_id: number }>(
+    "SELECT workspace_id FROM oauth_tokens WHERE email = $1",
+    [email],
+  );
+  const workspaceId = tokenRow?.workspace_id ?? 1;
+
   await execute(
-    `INSERT INTO settings (key, value)
-     VALUES ('gmail_watch_expiry', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-    [result.expiration],
+    `INSERT INTO settings (workspace_id, key, value)
+     VALUES ($1, 'gmail_watch_expiry', $2)
+     ON CONFLICT (workspace_id, key) DO UPDATE SET value = EXCLUDED.value`,
+    [workspaceId, result.expiration],
   );
 
   console.log(`[gmail] Watch set up for ${email}. Expires: ${result.expiration}`);
+}
+
+// ─── Label management ─────────────────────────────────────────────────────────
+
+/**
+ * Apply a Gmail label to a thread via the modify endpoint.
+ */
+export async function applyLabel(
+  email: string,
+  gmailThreadId: string,
+  labelId: string,
+): Promise<void> {
+  await gmailPost(email, `/threads/${gmailThreadId}/modify`, {
+    addLabelIds: [labelId],
+  });
+}
+
+/**
+ * Synchronise Gmail labels with workspace categories — bidirectional.
+ *
+ * Pass 1 (categories → Gmail): For each category without a gmail_label_id,
+ *   create the Gmail label. For categories whose stored label no longer exists,
+ *   re-create it.
+ *
+ * Pass 2 (Gmail → categories): For each user-created Gmail label that has no
+ *   matching category, create the category so the AI can use it.
+ *
+ * Returns the total number of labels/categories created or linked.
+ */
+export async function syncLabels(
+  email: string,
+  workspaceId: number,
+): Promise<number> {
+  // Gmail system label prefixes/names to skip when importing.
+  const SYSTEM_LABEL_PREFIXES = ["INBOX", "SENT", "DRAFT", "SPAM", "TRASH",
+    "STARRED", "IMPORTANT", "UNREAD", "CATEGORY_", "CHAT"];
+
+  // Fetch existing Gmail labels.
+  const labelList = await gmailGet<{ labels: Array<{ id: string; name: string; type?: string }> }>(
+    email,
+    "/labels",
+  );
+  const existingLabels = labelList.labels ?? [];
+  const labelByName = new Map(existingLabels.map((l) => [l.name.toLowerCase(), l.id]));
+  const labelById   = new Map(existingLabels.map((l) => [l.id, l.name]));
+
+  const categories = await query<Category>(
+    "SELECT * FROM categories WHERE workspace_id = $1",
+    [workspaceId],
+  );
+
+  // Build a set of names already covered by a category (lowercase).
+  const coveredNames = new Set(categories.map((c) => c.name.toLowerCase()));
+
+  let synced = 0;
+
+  // ── Pass 1: categories → Gmail ─────────────────────────────────────────────
+  for (const cat of categories) {
+    // Already linked and label still exists — nothing to do.
+    if (cat.gmail_label_id && labelById.has(cat.gmail_label_id)) continue;
+
+    // A label with the same name already exists in Gmail — link it.
+    const existingId = labelByName.get(cat.name.toLowerCase());
+    if (existingId) {
+      await execute(
+        "UPDATE categories SET gmail_label_id = $1 WHERE id = $2",
+        [existingId, cat.id],
+      );
+      synced++;
+      continue;
+    }
+
+    // Create a new Gmail label for this category.
+    const created = await gmailPost<{ id: string; name: string }>(
+      email,
+      "/labels",
+      {
+        name: cat.name,
+        labelListVisibility: "labelShow",
+        messageListVisibility: "show",
+      },
+    );
+    await execute(
+      "UPDATE categories SET gmail_label_id = $1 WHERE id = $2",
+      [created.id, cat.id],
+    );
+    synced++;
+  }
+
+  // ── Pass 2: Gmail → categories ────────────────────────────────────────────
+  for (const label of existingLabels) {
+    // Skip system labels.
+    const isSystem = label.type === "system" ||
+      SYSTEM_LABEL_PREFIXES.some((p) => label.name.toUpperCase().startsWith(p));
+    if (isSystem) continue;
+
+    // Skip if a category already covers this label name.
+    if (coveredNames.has(label.name.toLowerCase())) continue;
+
+    // Create a new category for this Gmail label.
+    await execute(
+      `INSERT INTO categories
+         (workspace_id, name, description, instructions, allow_auto_reply,
+          confidence_threshold, writing_style, gmail_label_id)
+       VALUES ($1, $2, '', '', false, 0.85, 'professional', $3)`,
+      [workspaceId, label.name, label.id],
+    );
+    coveredNames.add(label.name.toLowerCase());
+    synced++;
+    console.log(`[gmail] Imported Gmail label "${label.name}" as new category`);
+  }
+
+  console.log(`[gmail] Synced ${synced} labels for workspace ${workspaceId}`);
+  return synced;
 }

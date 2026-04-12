@@ -12,8 +12,10 @@ categoriesRouter.use("*", authMiddleware);
 
 // GET /categories
 categoriesRouter.get("/", async (c) => {
+  const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   const categories = await query<Category>(
-    "SELECT * FROM categories ORDER BY name ASC",
+    "SELECT * FROM categories WHERE workspace_id = $1 ORDER BY name ASC",
+    [workspaceId],
   );
   return c.json({ categories });
 });
@@ -34,14 +36,16 @@ categoriesRouter.get("/:id", async (c) => {
 // POST /categories
 categoriesRouter.post("/", async (c) => {
   const body = await c.req.json<CreateCategoryPayload>();
+  const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   validateCategoryPayload(body);
 
   const category = await queryOne<Category>(
     `INSERT INTO categories
-       (name, description, instructions, allow_auto_reply, confidence_threshold, writing_style)
-     VALUES ($1, $2, $3, $4, $5, $6)
+       (workspace_id, name, description, instructions, allow_auto_reply, confidence_threshold, writing_style)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
+      workspaceId,
       body.name,
       body.description,
       body.instructions,

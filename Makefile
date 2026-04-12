@@ -48,3 +48,31 @@ fmt:
 # Run deno test on the api source
 test:
 	docker compose exec api deno test --allow-net --allow-env --allow-read
+
+# ─── One-time setup: Pub/Sub push subscription ──────────────────────────────────
+# Run this ONCE after first clone, or whenever you change NGROK_DOMAIN.
+# It creates (or overwrites) the Gmail push subscription pointing at your tunnel.
+# Requires: gcloud CLI authenticated + PUBSUB_TOPIC / NGROK_DOMAIN in .env
+#
+# Usage: make setup-pubsub
+setup-pubsub:
+	@set -a; . ./.env; set +a; \
+	SUBSCRIPTION_NAME=$$(echo $$PUBSUB_TOPIC | sed 's|topics/|subscriptions/|')-sub; \
+	PUSH_ENDPOINT="https://$$NGROK_DOMAIN/webhooks/gmail"; \
+	echo "→ Topic:        $$PUBSUB_TOPIC"; \
+	echo "→ Subscription: $$SUBSCRIPTION_NAME"; \
+	echo "→ Push endpoint:$$PUSH_ENDPOINT"; \
+	if gcloud pubsub subscriptions describe $$SUBSCRIPTION_NAME --format='value(name)' 2>/dev/null | grep -q $$SUBSCRIPTION_NAME; then \
+		echo "→ Subscription exists — updating push endpoint…"; \
+		gcloud pubsub subscriptions modify-push-config $$SUBSCRIPTION_NAME \
+			--push-endpoint="$$PUSH_ENDPOINT"; \
+	else \
+		echo "→ Creating subscription…"; \
+		gcloud pubsub subscriptions create $$SUBSCRIPTION_NAME \
+			--topic="$$PUBSUB_TOPIC" \
+			--push-endpoint="$$PUSH_ENDPOINT" \
+			--ack-deadline=30; \
+	fi; \
+	echo ""; \
+	echo "✓ Done. Add this to .env if not already set:"; \
+	echo "  PUBSUB_SUBSCRIPTION=$$SUBSCRIPTION_NAME"

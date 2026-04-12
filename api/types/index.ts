@@ -2,23 +2,37 @@
 
 // ─── Database row types ───────────────────────────────────────────────────────
 
+export interface Workspace {
+  id: number;
+  name: string;
+  gmail_address: string | null;
+  sheet_id: string | null;
+  sheet_name: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface Category {
   id: number;
+  workspace_id: number;
   name: string;
   description: string;
   instructions: string;
   allow_auto_reply: boolean;
   confidence_threshold: number;
   writing_style: string;
+  gmail_label_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
 export interface Thread {
   id: number;
+  workspace_id: number;
   gmail_thread_id: string;
   subject: string;
   snippet: string;
+  thread_summary: string | null;
   category_id: number | null;
   status: ThreadStatus;
   auto_replied: boolean;
@@ -37,6 +51,7 @@ export interface Message {
   body_html: string;
   received_at: Date;
   direction: MessageDirection;
+  message_id_header: string | null;
 }
 
 export type MessageDirection = "inbound" | "outbound";
@@ -46,6 +61,11 @@ export interface Draft {
   thread_id: number;
   body: string;
   status: DraftStatus;
+  was_auto_sent: boolean;
+  was_edited: boolean;
+  final_body: string | null;
+  sent_at: Date | null;
+  ai_model_used: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -54,6 +74,7 @@ export type DraftStatus = "pending" | "approved" | "rejected" | "sent";
 
 export interface Setting {
   id: number;
+  workspace_id: number;
   key: string;
   value: string;
   updated_at: Date;
@@ -61,12 +82,49 @@ export interface Setting {
 
 export interface OAuthToken {
   id: number;
+  workspace_id: number;
   email: string;
   access_token: string;
   refresh_token: string;
   expiry: Date;
+  last_history_id: string | null;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface SheetColumn {
+  id: number;
+  workspace_id: number;
+  column_letter: string;
+  header_name: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface SheetUpdate {
+  id: number;
+  workspace_id: number;
+  thread_id: number | null;
+  column_letter: string;
+  match_column: string;
+  match_value: string;
+  new_value: string;
+  applied: boolean;
+  error: string | null;
+  created_at: Date;
+}
+
+export interface Interaction {
+  id: number;
+  workspace_id: number;
+  thread_id: number | null;
+  category_id: number | null;
+  draft_id: number | null;
+  outcome: "approved" | "rejected" | "edited";
+  original_body: string | null;
+  final_body: string | null;
+  was_edited: boolean;
+  created_at: Date;
 }
 
 // ─── API request/response payloads ────────────────────────────────────────────
@@ -100,11 +158,21 @@ export type UpdateCategoryPayload = Partial<CreateCategoryPayload>;
 
 export interface UpdateDraftStatusPayload {
   status: DraftStatus;
+  body?: string; // allow submitting edited body on approval
 }
 
 export interface UpdateSettingPayload {
   value: string;
 }
+
+export interface CreateWorkspacePayload {
+  name: string;
+  gmail_address?: string;
+  sheet_id?: string;
+  sheet_name?: string;
+}
+
+export type UpdateWorkspacePayload = Partial<CreateWorkspacePayload>;
 
 export interface GmailPushNotificationPayload {
   message: {
@@ -132,11 +200,6 @@ export interface DraftReplyResult {
   body: string;
 }
 
-export interface ThreadWithMessages {
-  thread: Thread;
-  messages: Message[];
-}
-
 // ─── Gmail API types ─────────────────────────────────────────────────────────
 
 export interface GmailMessage {
@@ -161,6 +224,60 @@ export interface GmailThread {
   historyId: string;
   messages: GmailMessage[];
 }
+
+// ─── Sheet Rules ──────────────────────────────────────────────────────────────
+
+/** A single column update definition stored in sheet_rules.updates JSONB. */
+export interface RuleUpdateDefinition {
+  column: string;         // sheet column header name
+  mode: "fixed" | "ai";
+  value?: string;         // used when mode = "fixed"
+  instruction?: string;   // used when mode = "ai"
+}
+
+export interface SheetRule {
+  id: number;
+  workspace_id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+  category_ids: number[] | null;
+  match_instruction: string;
+  match_column: string;
+  updates: RuleUpdateDefinition[];
+  auto_apply: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export type SheetRuleExecutionStatus = "pending" | "approved" | "rejected" | "applied" | "failed";
+
+export interface SheetRuleExecution {
+  id: number;
+  workspace_id: number;
+  rule_id: number;
+  thread_id: number | null;
+  row_number: number | null;
+  match_value: string | null;
+  proposed_updates: Record<string, string>;
+  status: SheetRuleExecutionStatus;
+  applied_at: Date | null;
+  error: string | null;
+  created_at: Date;
+}
+
+export interface CreateSheetRulePayload {
+  name: string;
+  description: string;
+  is_active: boolean;
+  category_ids: number[] | null;
+  match_instruction: string;
+  match_column: string;
+  updates: RuleUpdateDefinition[];
+  auto_apply: boolean;
+}
+
+export type UpdateSheetRulePayload = Partial<CreateSheetRulePayload>;
 
 // ─── App error type ───────────────────────────────────────────────────────────
 

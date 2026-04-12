@@ -3,6 +3,9 @@ FROM denoland/deno:latest AS development
 
 WORKDIR /app
 
+# Install curl for the Docker healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 COPY deno.json .
 COPY . .
 
@@ -17,6 +20,9 @@ CMD ["deno", "run", "--watch", "--allow-net", "--allow-env", "--allow-read", "ma
 FROM denoland/deno:latest AS production
 
 WORKDIR /app
+
+# Install curl for the Docker healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN addgroup --system --gid 1001 deno_group && \

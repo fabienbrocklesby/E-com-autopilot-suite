@@ -87,6 +87,11 @@ export interface Draft {
 	thread_id: number;
 	body: string;
 	status: 'pending' | 'approved' | 'rejected' | 'sent';
+	was_auto_sent: boolean;
+	was_edited: boolean;
+	final_body: string | null;
+	sent_at: string | null;
+	ai_model_used: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -123,10 +128,10 @@ export const threadsApi = {
 		}>(`/threads/${id}/categorise`, { method: 'POST' });
 	},
 
-	updateDraftStatus(threadId: number, draftId: number, status: Draft['status']) {
+	updateDraftStatus(threadId: number, draftId: number, status: Draft['status'], body?: string) {
 		return request<{ draft: Draft }>(`/threads/${threadId}/drafts/${draftId}`, {
 			method: 'PATCH',
-			body: JSON.stringify({ status })
+			body: JSON.stringify({ status, ...(body !== undefined ? { body } : {}) })
 		});
 	}
 };
@@ -209,5 +214,217 @@ export const authApi = {
 	/** Returns the OAuth start URL the user should be redirected to. */
 	startOAuthUrl(): string {
 		return `${BASE_URL}/auth/google/start`;
+	}
+};
+
+// ─── Workspaces ───────────────────────────────────────────────────────────────
+
+export interface Workspace {
+	id: number;
+	name: string;
+	gmail_address: string | null;
+	sheet_id: string | null;
+	sheet_name: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface WorkspacePayload {
+	name: string;
+	gmail_address?: string;
+	sheet_id?: string;
+	sheet_name?: string;
+}
+
+export const workspacesApi = {
+	list() {
+		return request<{ workspaces: Workspace[] }>('/workspaces');
+	},
+
+	get(id: number) {
+		return request<{ workspace: Workspace }>(`/workspaces/${id}`);
+	},
+
+	create(payload: WorkspacePayload) {
+		return request<{ workspace: Workspace }>('/workspaces', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		});
+	},
+
+	update(id: number, payload: Partial<WorkspacePayload>) {
+		return request<{ workspace: Workspace }>(`/workspaces/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify(payload)
+		});
+	},
+
+	syncLabels(id: number) {
+		return request<{ synced: number }>(`/workspaces/${id}/sync-labels`, { method: 'POST' });
+	}
+};
+
+// ─── Sheets ───────────────────────────────────────────────────────────────────
+
+export interface SheetColumn {
+	id: number;
+	workspace_id: number;
+	column_letter: string;
+	header_name: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface SheetUpdate {
+	id: number;
+	workspace_id: number;
+	thread_id: number | null;
+	column_letter: string;
+	match_column: string;
+	match_value: string;
+	new_value: string;
+	applied: boolean;
+	error: string | null;
+	created_at: string;
+}
+
+export const sheetsApi = {
+	getColumns(workspaceId = 1) {
+		return request<{ columns: SheetColumn[] }>(`/sheets/columns?workspace_id=${workspaceId}`);
+	},
+
+	syncColumns(workspaceId = 1) {
+		return request<{ columns: Array<{ column_letter: string; header_name: string }> }>(
+			`/sheets/sync-columns?workspace_id=${workspaceId}`,
+			{ method: 'POST' }
+		);
+	},
+
+	getUpdates(workspaceId = 1, limit = 50, offset = 0) {
+		return request<{ updates: SheetUpdate[]; limit: number; offset: number }>(
+			`/sheets/updates?workspace_id=${workspaceId}&limit=${limit}&offset=${offset}`
+		);
+	}
+};
+
+// ─── Labels ───────────────────────────────────────────────────────────────────
+
+export const labelsApi = {
+	sync(workspaceId = 1) {
+		return request<{ synced: number }>(`/labels/sync?workspace_id=${workspaceId}`, {
+			method: 'POST'
+		});
+	}
+};
+
+// ─── Sheet Rules ──────────────────────────────────────────────────────────────
+
+export interface RuleUpdateDefinition {
+	column: string;
+	mode: 'fixed' | 'ai';
+	value?: string;
+	instruction?: string;
+}
+
+export interface SheetRule {
+	id: number;
+	workspace_id: number;
+	name: string;
+	description: string;
+	is_active: boolean;
+	category_ids: number[] | null;
+	match_instruction: string;
+	match_column: string;
+	updates: RuleUpdateDefinition[];
+	auto_apply: boolean;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface SheetRulePayload {
+	name: string;
+	description: string;
+	is_active: boolean;
+	category_ids: number[] | null;
+	match_instruction: string;
+	match_column: string;
+	updates: RuleUpdateDefinition[];
+	auto_apply: boolean;
+}
+
+export interface SheetRuleExecution {
+	id: number;
+	workspace_id: number;
+	rule_id: number;
+	rule_name: string;
+	thread_id: number | null;
+	thread_subject: string | null;
+	row_number: number | null;
+	match_value: string | null;
+	proposed_updates: Record<string, string>;
+	status: 'pending' | 'approved' | 'rejected' | 'applied' | 'failed';
+	applied_at: string | null;
+	error: string | null;
+	created_at: string;
+}
+
+export const sheetRulesApi = {
+	list(workspaceId = 1) {
+		return request<{ rules: SheetRule[] }>(`/sheet-rules?workspace_id=${workspaceId}`);
+	},
+
+	get(id: number) {
+		return request<{ rule: SheetRule }>(`/sheet-rules/${id}`);
+	},
+
+	create(payload: SheetRulePayload, workspaceId = 1) {
+		return request<{ rule: SheetRule }>(`/sheet-rules?workspace_id=${workspaceId}`, {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		});
+	},
+
+	update(id: number, payload: SheetRulePayload) {
+		return request<{ rule: SheetRule }>(`/sheet-rules/${id}`, {
+			method: 'PUT',
+			body: JSON.stringify(payload)
+		});
+	},
+
+	patch(id: number, payload: Partial<SheetRulePayload>) {
+		return request<{ rule: SheetRule }>(`/sheet-rules/${id}`, {
+			method: 'PATCH',
+			body: JSON.stringify(payload)
+		});
+	},
+
+	delete(id: number) {
+		return request<{ deleted: boolean }>(`/sheet-rules/${id}`, { method: 'DELETE' });
+	},
+
+	listExecutions(workspaceId = 1, status?: string, limit = 50, offset = 0) {
+		const qs = new URLSearchParams({ workspace_id: String(workspaceId), limit: String(limit), offset: String(offset) });
+		if (status) qs.set('status', status);
+		return request<{ executions: SheetRuleExecution[]; limit: number; offset: number }>(
+			`/sheet-rules/executions?${qs.toString()}`
+		);
+	},
+
+	approveExecution(id: number) {
+		return request<{ execution: SheetRuleExecution }>(`/sheet-rules/executions/${id}/approve`, {
+			method: 'POST'
+		});
+	},
+
+	rejectExecution(id: number) {
+		return request<{ execution: SheetRuleExecution }>(`/sheet-rules/executions/${id}/reject`, {
+			method: 'POST'
+		});
+	},
+
+	retryExecution(id: number) {
+		return request<{ execution: SheetRuleExecution }>(`/sheet-rules/executions/${id}/retry`, {
+			method: 'POST'
+		});
 	}
 };

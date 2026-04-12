@@ -27,6 +27,14 @@
 
   let form = $state<CategoryPayload>(emptyForm());
 
+  let confidenceWarning = $derived(
+    form.confidence_threshold < 0.5
+      ? `Very low — almost every email will match this category (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
+      : form.confidence_threshold > 0.95
+        ? `Very strict — the AI must be extremely confident before matching (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
+        : null
+  );
+
   async function load() {
     loading = true;
     error = null;
@@ -210,36 +218,43 @@
       >
         <label class="field">
           <span class="label">Name *</span>
-          <input class="input" type="text" bind:value={form.name} required />
+          <input class="input" type="text" bind:value={form.name} required placeholder="e.g. Refund Requests" />
         </label>
 
         <label class="field">
           <span class="label">Description</span>
-          <input class="input" type="text" bind:value={form.description} />
+          <input class="input" type="text" bind:value={form.description} placeholder="e.g. Emails where customers are asking for a refund or return" />
         </label>
 
-        <label class="field">
+        <div class="field">
           <span class="label">Instructions (for AI)</span>
+          <p class="field-hint">
+            Describe this category to the AI — when to match it, tone, and any special handling.
+            These instructions are also used when generating replies.
+          </p>
           <textarea
             class="input textarea"
             bind:value={form.instructions}
             rows={5}
+            placeholder="e.g. This category is for customer refund or return requests. Be empathetic and professional. Confirm receipt and state that the team will review within 1–2 business days."
           ></textarea>
-        </label>
+        </div>
 
-        <label class="field">
+        <div class="field">
           <span class="label">Writing style</span>
+          <p class="field-hint">Style guidelines for the AI when drafting replies in this category.</p>
           <input
             class="input"
             type="text"
             bind:value={form.writing_style}
-            placeholder="e.g. Professional and concise"
+            placeholder="e.g. Professional and concise. Use the customer's first name if known. Avoid jargon."
           />
-        </label>
+        </div>
 
         <div class="field-row">
-          <label class="field field-half">
-            <span class="label">Confidence threshold</span>
+          <div class="field field-half">
+            <span class="label">Confidence threshold — {Math.round(form.confidence_threshold * 100)}%</span>
+            <p class="field-hint">How certain the AI must be before assigning this category. 70–85% works well for most cases.</p>
             <input
               class="input"
               type="number"
@@ -248,7 +263,10 @@
               step="0.01"
               bind:value={form.confidence_threshold}
             />
-          </label>
+            {#if confidenceWarning}
+              <div class="field-warning">⚠ {confidenceWarning}</div>
+            {/if}
+          </div>
 
           <label class="field field-half toggle-field">
             <span class="label">Allow auto-reply</span>
@@ -445,6 +463,23 @@
     font-size: 12px;
     font-weight: 600;
     color: var(--color-text-muted);
+  }
+
+  .field-hint {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    line-height: 1.6;
+  }
+
+  .field-warning {
+    background: rgba(245 158 11 / 0.12);
+    border: 1px solid rgba(245 158 11 / 0.35);
+    border-radius: var(--radius);
+    color: var(--color-warning);
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    margin-top: 4px;
   }
 
   .input {

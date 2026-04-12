@@ -1,14 +1,25 @@
 /**
  * Categorisation service.
  * Orchestrates fetching thread data, calling the AI service, storing results,
- * and optionally triggering an auto-reply.
+ * and optionally triggering an auto-reply and Gmail labelling.
+ * Sheet rule evaluation is handled by evaluateRules() after the reply decision.
  */
 import { query, queryOne, execute } from "../db/client.ts";
-import { AppError, Thread, Message, Category, Setting } from "../types/index.ts";
+import {
+  AppError,
+  Thread,
+  Message,
+  Category,
+  Setting,
+  OAuthToken,
+} from "../types/index.ts";
 import { categoriseEmail, draftReply } from "./ai.ts";
+import { applyLabel, sendReply } from "./gmail.ts";
+import { evaluateRules } from "./sheet-rules.ts";
 
 /**
  * Categorise a thread and generate a draft reply if the category allows it.
+ * Also applies a Gmail label and triggers any sheet updates the AI detects.
  * Called both by the webhook pipeline and the manual "re-categorise" endpoint.
  */
 export async function categoriseAndDraft(threadId: number): Promise<{
@@ -24,13 +35,21 @@ export async function categoriseAndDraft(threadId: number): Promise<{
   );
   if (!thread) throw new AppError(404, "Thread not found");
 
+  const workspaceId = thread.workspace_id;
+
   const [messages, categories, settingRows] = await Promise.all([
     query<Message>(
       "SELECT * FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
       [threadId],
     ),
-    query<Category>("SELECT * FROM categories ORDER BY name ASC"),
-    query<Setting>("SELECT key, value FROM settings"),
+    query<Category>(
+      "SELECT * FROM categories WHERE workspace_id = $1 ORDER BY name ASC",
+      [workspaceId],
+    ),
+    query<Setting>(
+      "SELECT key, value FROM settings WHERE workspace_id = $1",
+      [workspaceId],
+    ),
   ]);
 
   const globalSettings = Object.fromEntries(settingRows.map((s) => [s.key, s.value]));
@@ -39,6 +58,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     thread,
     messages,
     categories,
+    workspaceId,
   );
 
   // Persist the categorisation result.
@@ -47,29 +67,93 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     [categoryId, threadId],
   );
 
-  // Determine whether to auto-draft.
   const category = categories.find((c) => c.id === categoryId) ?? null;
+
+  // Apply Gmail label — fire-and-forget, don't fail categorisation on label errors.
+  if (category?.gmail_label_id) {
+    const tokenRow = await queryOne<OAuthToken>(
+      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+      [workspaceId],
+    );
+    if (tokenRow) {
+      applyLabel(tokenRow.email, thread.gmail_thread_id, category.gmail_label_id).catch(
+        (err) => console.error("[categorisation] Failed to apply Gmail label:", err),
+      );
+    }
+  }
+
+  // Determine whether to auto-draft or auto-send.
+  // Auto-reply is gated solely on the per-category toggle and threshold — no global switch.
   const globalThreshold = parseFloat(globalSettings["default_confidence_threshold"] ?? "0.8");
-  const autoReplyEnabled = globalSettings["auto_reply_enabled"] === "true";
   const categoryThreshold = category?.confidence_threshold ?? globalThreshold;
 
   let draftCreated = false;
 
-  if (
-    category &&
-    category.allow_auto_reply &&
-    autoReplyEnabled &&
-    confidence >= categoryThreshold
-  ) {
-    const { body } = await draftReply(thread, messages, category, globalSettings);
-
-    await execute(
-      "INSERT INTO drafts (thread_id, body, status) VALUES ($1, $2, $3)",
-      [threadId, body, "pending"],
+  if (category && category.allow_auto_reply && confidence >= categoryThreshold) {
+    const modelSetting = await queryOne<Setting>(
+      "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'openai_model'",
+      [workspaceId],
     );
+    const { body } = await draftReply(thread, messages, category, globalSettings, workspaceId);
+
+    // Resolve the connected email. Use the last *inbound* message as reply target
+    // so we never accidentally reply to our own sent messages.
+    const tokenRow = await queryOne<OAuthToken>(
+      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+      [workspaceId],
+    );
+    const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound") ?? null;
+
+    // Replace any existing pending draft — one draft per thread at a time.
+    await execute(
+      "DELETE FROM drafts WHERE thread_id = $1 AND status = 'pending'",
+      [threadId],
+    );
+
+    if (tokenRow && lastInbound?.from_address) {
+      try {
+        await sendReply(
+          tokenRow.email,
+          thread.gmail_thread_id,
+          thread.subject,
+          lastInbound.from_address,
+          body,
+          lastInbound.message_id_header,
+        );
+        await execute(
+          "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used, sent_at) VALUES ($1, $2, 'sent', true, $3, now())",
+          [threadId, body, modelSetting?.value ?? null],
+        );
+        // Mark thread as replied and flag that it was auto-handled.
+        await execute(
+          "UPDATE threads SET status = 'replied', auto_replied = true WHERE id = $1",
+          [threadId],
+        );
+        console.log(`[categorisation] Auto-sent reply for thread ${threadId}`);
+      } catch (err) {
+        // Send failed — fall back to pending draft for manual review.
+        console.error(`[categorisation] Auto-send failed for thread ${threadId}, saving as draft:`, err);
+        await execute(
+          "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
+          [threadId, body, modelSetting?.value ?? null],
+        );
+      }
+    } else {
+      // No token or no inbound sender — fall back to pending draft.
+      await execute(
+        "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
+        [threadId, body, modelSetting?.value ?? null],
+      );
+    }
 
     draftCreated = true;
   }
+
+  // Evaluate sheet rules after the reply decision. Must not block or affect the
+  // email flow — failures are logged and stored but never propagated up.
+  evaluateRules(threadId, workspaceId).catch(
+    (err: unknown) => console.error("[categorisation] Sheet rule evaluation error:", err),
+  );
 
   const updatedThread = await queryOne<Thread>(
     "SELECT * FROM threads WHERE id = $1",

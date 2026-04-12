@@ -22,6 +22,15 @@ webhooksRouter.post("/gmail", async (c) => {
     throw new AppError(400, "Invalid Pub/Sub message envelope");
   }
 
+  // Validate that the push came from the expected Pub/Sub subscription.
+  const expectedSubscription = Deno.env.get("PUBSUB_SUBSCRIPTION");
+  if (expectedSubscription && body.subscription !== expectedSubscription) {
+    console.warn(
+      `[webhook/gmail] Rejected push from unknown subscription: ${body.subscription}`,
+    );
+    throw new AppError(403, "Unknown Pub/Sub subscription");
+  }
+
   // Decode the base64url-encoded data field
   const decoded = atob(body.message.data.replace(/-/g, "+").replace(/_/g, "/"));
   let pushData: GmailPushData;

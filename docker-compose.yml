@@ -77,6 +77,23 @@ services:
       retries: 5
       start_period: 20s
 
+  # Tunnels :8000 on the api container to a stable public HTTPS URL.
+  # Uses the free ngrok static domain so the URL never changes between restarts.
+  # Requires NGROK_AUTHTOKEN and NGROK_DOMAIN to be set in .env.
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    command: http --url=${NGROK_DOMAIN} api:8000
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"  # ngrok inspector dashboard → http://localhost:4040
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - internal
+
 volumes:
   postgres_data:
 

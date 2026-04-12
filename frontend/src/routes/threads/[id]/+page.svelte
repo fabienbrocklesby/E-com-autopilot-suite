@@ -8,7 +8,7 @@
   import { threadsApi } from "$lib/api";
   import type { ThreadDetail, Draft } from "$lib/api";
 
-  const threadId = parseInt($page.params.id);
+  const threadId = parseInt($page.params.id ?? "0");
   let thread = $state<ThreadDetail | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);

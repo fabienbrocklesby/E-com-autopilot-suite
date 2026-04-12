@@ -4,8 +4,8 @@
  * Reference: https://platform.openai.com/docs/api-reference/chat/create
  */
 import { AppError, CategorisationResult, Category, DraftReplyResult, Thread, Message } from "../types/index.ts";
-import { queryOne } from "../db/client.ts";
-import { Setting } from "../types/index.ts";
+import { queryOne, query } from "../db/client.ts";
+import { Setting, Interaction } from "../types/index.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -15,9 +15,10 @@ function getApiKey(): string {
   return key;
 }
 
-async function getModel(): Promise<string> {
+async function getModel(workspaceId = 1): Promise<string> {
   const setting = await queryOne<Setting>(
-    "SELECT value FROM settings WHERE key = 'openai_model'",
+    "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'openai_model'",
+    [workspaceId],
   );
   return setting?.value ?? Deno.env.get("OPENAI_MODEL") ?? "gpt-4o";
 }
@@ -88,6 +89,26 @@ async function chatCompletion(
 }
 
 /**
+ * Load up to `limit` recent approved/edited interactions for a workspace
+ * to use as few-shot examples in AI prompts.
+ */
+async function getFewShotExamples(
+  workspaceId: number,
+  limit = 5,
+): Promise<Interaction[]> {
+  return query<Interaction>(
+    `SELECT * FROM interactions
+     WHERE workspace_id = $1
+       AND outcome IN ('approved', 'edited')
+       AND original_body IS NOT NULL
+       AND final_body IS NOT NULL
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [workspaceId, limit],
+  );
+}
+
+/**
  * Categorise an email thread by matching it against the available categories.
  *
  * @returns categoryId (null if no category meets the threshold), confidence 0–1,
@@ -97,12 +118,14 @@ export async function categoriseEmail(
   thread: Thread,
   messages: Message[],
   categories: Category[],
+  workspaceId = 1,
 ): Promise<CategorisationResult> {
   if (categories.length === 0) {
     return { categoryId: null, confidence: 0, reasoning: "No categories defined" };
   }
 
-  const model = await getModel();
+  const model = await getModel(workspaceId);
+  const examples = await getFewShotExamples(workspaceId);
 
   const categoryDescriptions = categories
     .map((cat) =>
@@ -113,6 +136,21 @@ export async function categoriseEmail(
   const messageHistory = messages
     .map((m) => `From: ${m.from_address}\n${m.body_plain}`)
     .join("\n\n---\n\n");
+
+  const exampleMessages: ChatMessage[] = examples.flatMap((ex) => [
+    {
+      role: "user" as const,
+      content: `Email:\n${ex.original_body ?? ""}`,
+    },
+    {
+      role: "assistant" as const,
+      content: JSON.stringify({
+        categoryId: ex.category_id,
+        confidence: 0.9,
+        reasoning: "From a previous approved example.",
+      }),
+    },
+  ]);
 
   const systemPrompt = `You are an email categorisation assistant. Analyse the email thread and choose the most appropriate category from the list provided. Return a JSON object with these exact fields:
 - categoryId: number (the ID of the best matching category) or null if none fits
@@ -130,6 +168,7 @@ ${messageHistory}`;
   const content = await chatCompletion(
     [
       { role: "system", content: systemPrompt },
+      ...exampleMessages,
       { role: "user", content: userPrompt },
     ],
     model,
@@ -161,12 +200,21 @@ export async function draftReply(
   messages: Message[],
   category: Category,
   globalSettings: Record<string, string>,
+  workspaceId = 1,
 ): Promise<DraftReplyResult> {
-  const model = await getModel();
+  const model = await getModel(workspaceId);
+  const examples = await getFewShotExamples(workspaceId);
 
   const messageHistory = messages
     .map((m) => `From: ${m.from_address}\n${m.body_plain}`)
     .join("\n\n---\n\n");
+
+  const exampleMessages: ChatMessage[] = examples
+    .filter((ex) => ex.category_id === category.id && ex.original_body && ex.final_body)
+    .flatMap((ex) => [
+      { role: "user" as const, content: `Draft a reply to:\n${ex.original_body ?? ""}` },
+      { role: "assistant" as const, content: ex.final_body ?? "" },
+    ]);
 
   const systemPrompt = `You are an email assistant drafting a reply on behalf of a business.
 
@@ -186,6 +234,7 @@ Draft a reply.`;
   const body = await chatCompletion(
     [
       { role: "system", content: systemPrompt },
+      ...exampleMessages,
       { role: "user", content: userPrompt },
     ],
     model,

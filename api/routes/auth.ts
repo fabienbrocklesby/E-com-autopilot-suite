@@ -6,7 +6,7 @@
 import { Hono } from "hono";
 import { queryOne, execute } from "../db/client.ts";
 import { AppError, OAuthToken } from "../types/index.ts";
-import { setupGmailWatch } from "../services/gmail.ts";
+import { setupGmailWatch, syncLabels } from "../services/gmail.ts";
 
 export const authRouter = new Hono();
 
@@ -101,10 +101,11 @@ authRouter.get("/google/callback", async (c) => {
   const userInfo = await userRes.json() as { email: string };
   const expiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-  // Upsert tokens in the database.
+  // Upsert tokens in the database. workspace_id defaults to 1 on first connect;
+  // the user can reassign via the workspaces settings page.
   await execute(
-    `INSERT INTO oauth_tokens (email, access_token, refresh_token, expiry)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO oauth_tokens (workspace_id, email, access_token, refresh_token, expiry)
+     VALUES (1, $1, $2, $3, $4)
      ON CONFLICT (email) DO UPDATE
        SET access_token  = EXCLUDED.access_token,
            refresh_token = EXCLUDED.refresh_token,
@@ -112,9 +113,21 @@ authRouter.get("/google/callback", async (c) => {
     [userInfo.email, tokens.access_token, tokens.refresh_token, expiry],
   );
 
+  // Resolve which workspace this email belongs to (default = workspace 1).
+  const tokenRow = await queryOne<{ workspace_id: number }>(
+    "SELECT workspace_id FROM oauth_tokens WHERE email = $1",
+    [userInfo.email],
+  );
+  const workspaceId = tokenRow?.workspace_id ?? 1;
+
   // Register Gmail push notifications. Fire-and-forget — don't block the redirect.
   setupGmailWatch(userInfo.email).catch((err) =>
     console.error("[auth] Failed to set up Gmail watch:", err)
+  );
+
+  // Sync Gmail labels with workspace categories. Fire-and-forget.
+  syncLabels(userInfo.email, workspaceId).catch((err) =>
+    console.error("[auth] Failed to sync Gmail labels:", err)
   );
 
   return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_success=1`);
