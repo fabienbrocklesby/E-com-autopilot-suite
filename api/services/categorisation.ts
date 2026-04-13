@@ -4,7 +4,7 @@
  * and optionally triggering an auto-reply and Gmail labelling.
  * Sheet rule evaluation is handled by evaluateRules() after the reply decision.
  */
-import { query, queryOne, execute } from "../db/client.ts";
+import { query, queryOne, transaction } from "../db/client.ts";
 import {
   AppError,
   Thread,
@@ -37,6 +37,29 @@ export async function categoriseAndDraft(threadId: number): Promise<{
 
   const workspaceId = thread.workspace_id;
 
+  // Fix 2: If thread already has a category AND a pending draft, skip re-categorisation
+  // to avoid clobbering existing state. Resume logic is Phase 2.
+  if (thread.category_id !== null) {
+    const existingPendingDraft = await queryOne(
+      "SELECT id FROM drafts WHERE thread_id = $1 AND status = 'pending'",
+      [threadId],
+    );
+    if (existingPendingDraft) {
+      console.log(`[categorisation] Thread ${threadId} already categorised with pending draft — skipping`);
+      const currentThread = await queryOne<Thread>(
+        "SELECT * FROM threads WHERE id = $1",
+        [threadId],
+      ) as Thread;
+      return {
+        thread: currentThread,
+        categoryId: thread.category_id,
+        confidence: 1,
+        reasoning: "Already categorised with pending draft; skipping re-categorisation.",
+        draftCreated: false,
+      };
+    }
+  }
+
   const [messages, categories, settingRows] = await Promise.all([
     query<Message>(
       "SELECT * FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
@@ -54,17 +77,12 @@ export async function categoriseAndDraft(threadId: number): Promise<{
 
   const globalSettings = Object.fromEntries(settingRows.map((s) => [s.key, s.value]));
 
+  // AI calls — outside transaction (slow; must not hold a DB connection open).
   const { categoryId, confidence, reasoning } = await categoriseEmail(
     thread,
     messages,
     categories,
     workspaceId,
-  );
-
-  // Persist the categorisation result.
-  await execute(
-    "UPDATE threads SET category_id = $1 WHERE id = $2",
-    [categoryId, threadId],
   );
 
   const category = categories.find((c) => c.id === categoryId) ?? null;
@@ -87,14 +105,20 @@ export async function categoriseAndDraft(threadId: number): Promise<{
   const globalThreshold = parseFloat(globalSettings["default_confidence_threshold"] ?? "0.8");
   const categoryThreshold = category?.confidence_threshold ?? globalThreshold;
 
-  let draftCreated = false;
+  // Resolve draft body and send outcome before opening the transaction.
+  let draftBody: string | null = null;
+  let modelUsed: string | null = null;
+  let autoSendSuccess = false;
 
   if (category && category.allow_auto_reply && confidence >= categoryThreshold) {
     const modelSetting = await queryOne<Setting>(
       "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'openai_model'",
       [workspaceId],
     );
+    modelUsed = modelSetting?.value ?? null;
+
     const { body } = await draftReply(thread, messages, category, globalSettings, workspaceId);
+    draftBody = body;
 
     // Resolve the connected email. Use the last *inbound* message as reply target
     // so we never accidentally reply to our own sent messages.
@@ -103,12 +127,6 @@ export async function categoriseAndDraft(threadId: number): Promise<{
       [workspaceId],
     );
     const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound") ?? null;
-
-    // Replace any existing pending draft — one draft per thread at a time.
-    await execute(
-      "DELETE FROM drafts WHERE thread_id = $1 AND status = 'pending'",
-      [threadId],
-    );
 
     if (tokenRow && lastInbound?.from_address) {
       try {
@@ -120,34 +138,47 @@ export async function categoriseAndDraft(threadId: number): Promise<{
           body,
           lastInbound.message_id_header,
         );
-        await execute(
-          "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used, sent_at) VALUES ($1, $2, 'sent', true, $3, now())",
-          [threadId, body, modelSetting?.value ?? null],
-        );
-        // Mark thread as replied and flag that it was auto-handled.
-        await execute(
-          "UPDATE threads SET status = 'replied', auto_replied = true WHERE id = $1",
-          [threadId],
-        );
+        autoSendSuccess = true;
         console.log(`[categorisation] Auto-sent reply for thread ${threadId}`);
       } catch (err) {
-        // Send failed — fall back to pending draft for manual review.
         console.error(`[categorisation] Auto-send failed for thread ${threadId}, saving as draft:`, err);
-        await execute(
-          "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
-          [threadId, body, modelSetting?.value ?? null],
-        );
       }
-    } else {
-      // No token or no inbound sender — fall back to pending draft.
-      await execute(
-        "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
-        [threadId, body, modelSetting?.value ?? null],
-      );
     }
-
-    draftCreated = true;
   }
+
+  // Fix 3: Wrap all DB writes in a single transaction.
+  await transaction(async (tx) => {
+    await tx.queryObject({ text: "UPDATE threads SET category_id = $1 WHERE id = $2", args: [categoryId, threadId] });
+
+    if (draftBody !== null) {
+      // Remove any stale pending draft — one draft per thread at a time.
+      await tx.queryObject({ text: "DELETE FROM drafts WHERE thread_id = $1 AND status = 'pending'", args: [threadId] });
+
+      if (autoSendSuccess) {
+        // Auto-send succeeded — record as sent and mark thread replied.
+        await tx.queryObject({
+          text: "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used, sent_at) VALUES ($1, $2, 'sent', true, $3, now())",
+          args: [threadId, draftBody, modelUsed],
+        });
+        await tx.queryObject({
+          text: "UPDATE threads SET status = 'replied', auto_replied = true WHERE id = $1",
+          args: [threadId],
+        });
+      } else {
+        // Fix 1: Pending draft — move thread to in_review so it appears in the review queue.
+        await tx.queryObject({
+          text: "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
+          args: [threadId, draftBody, modelUsed],
+        });
+        await tx.queryObject({
+          text: "UPDATE threads SET status = 'in_review' WHERE id = $1",
+          args: [threadId],
+        });
+      }
+    }
+  });
+
+  const draftCreated = draftBody !== null;
 
   // Evaluate sheet rules after the reply decision. Must not block or affect the
   // email flow — failures are logged and stored but never propagated up.

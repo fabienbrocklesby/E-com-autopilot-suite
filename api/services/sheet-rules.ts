@@ -45,38 +45,44 @@ async function complete(
   system: string,
   user: string,
 ): Promise<string> {
-  const res = await fetch(OPENAI_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getApiKey()}`,
-    },
-    body: JSON.stringify({
-      model,
-      store: false,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
-  });
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(OPENAI_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getApiKey()}`,
+      },
+      body: JSON.stringify({
+        model,
+        store: false,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      }),
+    });
 
-  if (res.status === 429) {
-    const retryAfter = parseInt(res.headers.get("Retry-After") ?? "5");
-    await new Promise((r) => setTimeout(r, retryAfter * 1000));
-    return complete(model, system, user);
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get("Retry-After") ?? "0");
+      const delayMs = retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt) * 1000;
+      lastErr = new Error(`OpenAI rate limited (attempt ${attempt + 1})`);
+      await new Promise((r) => setTimeout(r, delayMs));
+      continue;
+    }
+
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new AppError(502, `OpenAI API error: ${res.status}`, detail);
+    }
+
+    const data = await res.json() as { choices: Array<{ message: { content: string } }> };
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new AppError(502, "OpenAI returned an empty response");
+    return content;
   }
-
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new AppError(502, `OpenAI API error: ${res.status}`, detail);
-  }
-
-  const data = await res.json() as { choices: Array<{ message: { content: string } }> };
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new AppError(502, "OpenAI returned an empty response");
-  return content;
+  throw lastErr ?? new Error("OpenAI complete failed after retries");
 }
 
 /**

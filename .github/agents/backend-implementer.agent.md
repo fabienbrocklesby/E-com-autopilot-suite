@@ -1,6 +1,6 @@
 ---
 description: 'Implements backend changes in api/. Deno + Hono + Postgres. Can edit, run commands, query DB. Will not touch frontend.'
-tools: ['search/codebase', 'edit', 'runCommands', 'mcp_postgres_query', 'mcp_context7']
+tools: [vscode, execute, read, agent, edit, search, web, browser, 'context7/*', 'filesystem/*', 'playwright/*', 'svelte/*', 'postgres/*', ms-azuretools.vscode-containers/containerToolsConfig, todo]
 model: 'Claude Sonnet 4.6'
 ---
 

@@ -103,6 +103,23 @@ async function gmailPost<T>(email: string, path: string, body: unknown): Promise
   return res.json() as Promise<T>;
 }
 
+async function gmailPatch<T>(email: string, path: string, body: unknown): Promise<T> {
+  const accessToken = await getValidAccessToken(email);
+  const res = await fetch(`${GMAIL_BASE}/${encodeURIComponent(email)}${path}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new AppError(res.status as 400 | 401 | 403 | 404 | 500, `Gmail API error on PATCH ${path}`, detail);
+  }
+  return res.json() as Promise<T>;
+}
+
 // ─── Public service methods ───────────────────────────────────────────────────
 
 /**
@@ -416,8 +433,20 @@ export async function syncLabels(
 
   // ── Pass 1: categories → Gmail ─────────────────────────────────────────────
   for (const cat of categories) {
-    // Already linked and label still exists — nothing to do.
-    if (cat.gmail_label_id && labelById.has(cat.gmail_label_id)) continue;
+    // Already linked — check if the category was renamed and propagate to Gmail.
+    if (cat.gmail_label_id && labelById.has(cat.gmail_label_id)) {
+      const gmailName = labelById.get(cat.gmail_label_id);
+      if (gmailName?.toLowerCase() !== cat.name.toLowerCase()) {
+        await gmailPatch<{ id: string; name: string }>(
+          email,
+          `/labels/${cat.gmail_label_id}`,
+          { name: cat.name },
+        );
+        synced++;
+        console.log(`[gmail] Renamed Gmail label "${gmailName}" → "${cat.name}"`);
+      }
+      continue;
+    }
 
     // A label with the same name already exists in Gmail — link it.
     const existingId = labelByName.get(cat.name.toLowerCase());
@@ -448,6 +477,9 @@ export async function syncLabels(
   }
 
   // ── Pass 2: Gmail → categories ────────────────────────────────────────────
+  // Dashboard is the source of truth. Gmail-side label creates/renames are
+  // surfaced as untracked labels (logged) rather than auto-imported — the
+  // client must create or rename categories in the dashboard.
   for (const label of existingLabels) {
     // Skip system labels.
     const isSystem = label.type === "system" ||
@@ -457,17 +489,12 @@ export async function syncLabels(
     // Skip if a category already covers this label name.
     if (coveredNames.has(label.name.toLowerCase())) continue;
 
-    // Create a new category for this Gmail label.
-    await execute(
-      `INSERT INTO categories
-         (workspace_id, name, description, instructions, allow_auto_reply,
-          confidence_threshold, writing_style, gmail_label_id)
-       VALUES ($1, $2, '', '', false, 0.85, 'professional', $3)`,
-      [workspaceId, label.name, label.id],
-    );
-    coveredNames.add(label.name.toLowerCase());
-    synced++;
-    console.log(`[gmail] Imported Gmail label "${label.name}" as new category`);
+    // Skip if a category is already linked to this label id.
+    const linkedCategory = categories.find((c) => c.gmail_label_id === label.id);
+    if (linkedCategory) continue;
+
+    // Untracked label — log it for visibility but do not auto-create a category.
+    console.log(`[gmail] Untracked Gmail label "${label.name}" (${label.id}) — create a category in the dashboard to link it`);
   }
 
   console.log(`[gmail] Synced ${synced} labels for workspace ${workspaceId}`);

@@ -165,6 +165,27 @@ These need answers before Phase 2 starts. Track resolutions here:
 
 5. **What about extract on every step vs only at thread start + customer reply?** Only at start and customer reply, to save tokens. Steps that need a value from the email content can re-extract via a sub-AI-call if absolutely needed, but should prefer reading from context.
 
+## Gmail label sync
+
+**Source of truth**: the dashboard. Gmail labels are a mirror, not a master.
+
+### Behaviours (settled as of Phase 0)
+
+| Scenario | Behaviour |
+|---|---|
+| Create category in dashboard | Gmail label created with same name on next `/labels/sync` |
+| Rename category in dashboard | Gmail label renamed via `users.labels.patch` on next sync |
+| Delete category in dashboard | Gmail label is NOT deleted automatically (manual cleanup) |
+| Create label in Gmail | Logged as "untracked label"; no category auto-created |
+| Rename label in Gmail | On next sync, dashboard sees the old linked label id still exists, so no rename propagates back — the Gmail label takes the dashboard name on next rename sync |
+
+### Implementation
+
+- `syncLabels(email, workspaceId)` in `api/services/gmail.ts`
+- Pass 1: categories → Gmail (create missing labels, rename mismatched ones)
+- Pass 2: Gmail → dashboard (log untracked labels only; no auto-import)
+- `gmailPatch<T>` helper added for `PATCH /gmail/v1/users/{userId}/labels/{id}`
+
 ## What this engine does NOT do (yet)
 
 - External API calls beyond Gmail and Sheets (no shipping APIs, no Stripe, no Slack — those are step types we add later)
