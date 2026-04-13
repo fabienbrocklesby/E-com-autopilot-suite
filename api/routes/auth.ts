@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { queryOne, execute } from "../db/client.ts";
 import { AppError, OAuthToken } from "../types/index.ts";
 import { setupGmailWatch, syncLabels } from "../services/gmail.ts";
+import { encryptToken } from "../services/google-auth.ts";
 
 export const authRouter = new Hono();
 
@@ -30,12 +31,13 @@ const SCOPES = [
 ].join(" ");
 
 // GET /auth/google/start — redirect to Google consent screen
-authRouter.get("/google/start", (c) => {
+authRouter.get("/google/start", async (c) => {
   if (!CLIENT_ID) throw new AppError(500, "GOOGLE_CLIENT_ID is not configured");
 
-  // Use a random state parameter to prevent CSRF.
-  // In production this should be stored in a short-lived server-side session.
   const state = crypto.randomUUID();
+
+  // Persist the state so the callback can verify it (CSRF protection).
+  await execute("INSERT INTO oauth_states (state) VALUES ($1)", [state]);
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -54,10 +56,29 @@ authRouter.get("/google/start", (c) => {
 authRouter.get("/google/callback", async (c) => {
   const code = c.req.query("code");
   const error = c.req.query("error");
+  const state = c.req.query("state");
 
   if (error) {
     return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=${encodeURIComponent(error)}`);
   }
+
+  // Verify CSRF state: must exist in DB and be less than 10 minutes old.
+  if (!state) {
+    return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=missing_state`);
+  }
+  const storedState = await queryOne<{ state: string; created_at: Date }>(
+    "SELECT state, created_at FROM oauth_states WHERE state = $1",
+    [state],
+  );
+  if (!storedState) {
+    return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=invalid_state`);
+  }
+  const ageMs = Date.now() - new Date(storedState.created_at).getTime();
+  if (ageMs > 10 * 60 * 1000) {
+    await execute("DELETE FROM oauth_states WHERE state = $1", [state]);
+    return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=expired_state`);
+  }
+  await execute("DELETE FROM oauth_states WHERE state = $1", [state]);
 
   if (!code) throw new AppError(400, "Missing authorization code");
 
@@ -101,16 +122,18 @@ authRouter.get("/google/callback", async (c) => {
   const userInfo = await userRes.json() as { email: string };
   const expiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
 
-  // Upsert tokens in the database. workspace_id defaults to 1 on first connect;
-  // the user can reassign via the workspaces settings page.
+  // Upsert tokens in the database (encrypted). workspace_id defaults to 1 on first connect.
+  const encAccess = await encryptToken(tokens.access_token);
+  const encRefresh = await encryptToken(tokens.refresh_token!);
   await execute(
-    `INSERT INTO oauth_tokens (workspace_id, email, access_token, refresh_token, expiry)
+    `INSERT INTO oauth_tokens
+       (workspace_id, email, expiry, access_token_encrypted, refresh_token_encrypted)
      VALUES (1, $1, $2, $3, $4)
      ON CONFLICT (email) DO UPDATE
-       SET access_token  = EXCLUDED.access_token,
-           refresh_token = EXCLUDED.refresh_token,
-           expiry        = EXCLUDED.expiry`,
-    [userInfo.email, tokens.access_token, tokens.refresh_token, expiry],
+       SET expiry                  = EXCLUDED.expiry,
+           access_token_encrypted  = EXCLUDED.access_token_encrypted,
+           refresh_token_encrypted = EXCLUDED.refresh_token_encrypted`,
+    [userInfo.email, expiry, encAccess, encRefresh],
   );
 
   // Resolve which workspace this email belongs to (default = workspace 1).
