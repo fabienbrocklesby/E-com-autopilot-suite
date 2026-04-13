@@ -7,8 +7,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 import { loggerMiddleware } from "./middleware/logger.ts";
-import { AppError } from "./types/index.ts";
-import type { ErrorResponse } from "./middleware/error.ts";
+import { AppError, ErrorResponse } from "./types/index.ts";
 
 import { threadsRouter } from "./routes/threads.ts";
 import { categoriesRouter } from "./routes/categories.ts";

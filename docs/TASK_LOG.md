@@ -47,6 +47,65 @@ Each entry:
 
 ---
 
+## 2026-04-13 — Phase 1: Cleanup and Consolidation
+
+**Phase**: Phase 1
+**Status**: complete
+
+### What was done
+
+**Task 1 — Consolidate token refresh into `services/google-auth.ts`**
+- Created `api/services/google-auth.ts`: single `getGoogleAccessToken(email)` function, AES-256-GCM encrypt/decrypt helpers (`encryptToken`, `decryptToken`).
+- Deleted local token refresh from `gmail.ts`, `sheets.ts`, `sheet-rules.ts`. All now import from `google-auth.ts`.
+- `GOOGLE_TOKEN_URL` constant deduplicated.
+
+**Task 2 — Consolidate OpenAI calls through `ai.ts`**
+- Exported `getModel` and `chatCompletion` from `api/services/ai.ts`.
+- Deleted local `getApiKey`, `getModel`, `complete`, `OPENAI_API_URL` from `sheet-rules.ts`. Both call sites (`findMatchingRow`, `resolveAiUpdateValue`) now use `chatCompletion()` from `ai.ts`.
+
+**Task 3 — Encrypt OAuth tokens at rest**
+- Created migrations `006_encrypt_oauth_tokens.sql` and `007_drop_plain_oauth_tokens.sql`.
+- `google-auth.ts` reads/writes only `access_token_encrypted`/`refresh_token_encrypted` (BYTEA). No plaintext fallback.
+- `auth.ts` OAuth callback encrypts both tokens before upsert.
+- `ENCRYPTION_KEY` (AES-256, 32 bytes, base64) added to `.env`.
+- Backfill/verify script at `api/scripts/encrypt_tokens.ts`.
+
+**Task 4 — Fix OAuth CSRF (state verification)**
+- Created migration `008_oauth_states.sql`: `oauth_states(state TEXT PK, created_at TIMESTAMPTZ)`.
+- `/auth/google/start`: generates random state, stores in `oauth_states`, includes in redirect URL.
+- `/auth/google/callback`: reads state from query, verifies it exists in DB and was created < 10 min ago, deletes it. Rejects with 400 if missing/expired.
+
+**Task 5 — Delete dead code**
+- Deleted `api/middleware/error.ts` (`errorMiddleware` had zero callers; `ErrorResponse` type moved to `types/index.ts`).
+- Deleted `findRowByValue`, `applyUpdates`, `readThreadsSheet`, `sheetsAppend`, `sheetsPut` from `sheets.ts`.
+- Created migration `009_drop_sheet_updates.sql`: drops `sheet_updates` table.
+- Fixed `main.ts` import of `ErrorResponse` (now from `types/index.ts`).
+
+### Validation
+
+- API starts cleanly: `[migrate] All migrations are up to date.` and `GET /health 200` continuously.
+- `ENCRYPTION_KEY` confirmed present in container (`docker compose exec api sh -c 'echo ENCRYPTION_KEY=$ENCRYPTION_KEY'`).
+- `GET /auth/status` returns `{ connected: true, email: "justfabienscoot@gmail.com" }`.
+- No remaining references to plaintext `access_token`/`refresh_token` DB columns anywhere in `api/` (grep verified).
+- All four deprecated functions removed from `sheets.ts`; no callers existed.
+
+### Decisions made
+
+- DB was already ahead of codebase: plaintext token columns were already dropped, and migrations 006–010 (match_strategy_confidence, sheet_rule_feedback, flows, flow_links, unified_pipeline) already applied. Removed all transition/fallback code entirely rather than adding compatibility shims.
+- Migration numbering collision: our new 006–009 files coexist with pre-existing 006_match_strategy_confidence through 010_unified_pipeline. No conflict because `schema_migrations` tracks by full filename, not number prefix.
+- `ENCRYPTION_KEY` generated with `openssl rand -base64 32` and written to `.env`. Must be added to Dokploy env before deploying.
+
+### Open questions / blockers
+
+- Existing `oauth_tokens` row has `access_token_encrypted = NULL` and `refresh_token_encrypted = NULL`. The system will throw 401 on any Gmail/Sheets call until the user re-authenticates via Settings → Connect Google Account.
+
+### Next
+
+- **User action required**: re-authenticate via Settings → Connect Google Account (OAuth flow will write encrypted tokens).
+- Run Phase 2 (`/phase-2-playbook-engine`): playbook engine — data model, step executor, inbound email resume logic.
+
+---
+
 ## 2026-04-13 — Phase 0: Stop the Bleeding
 
 **Phase**: Phase 0
