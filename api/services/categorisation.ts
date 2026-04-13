@@ -16,6 +16,8 @@ import {
 import { categoriseEmail, draftReply } from "./ai.ts";
 import { applyLabel, sendReply } from "./gmail.ts";
 import { evaluateRules } from "./sheet-rules.ts";
+import { startRun } from "./playbook/executor.ts";
+import type { Playbook } from "./playbook/types.ts";
 
 /**
  * Categorise a thread and generate a draft reply if the category allows it.
@@ -97,6 +99,44 @@ export async function categoriseAndDraft(threadId: number): Promise<{
       applyLabel(tokenRow.email, thread.gmail_thread_id, category.gmail_label_id).catch(
         (err) => console.error("[categorisation] Failed to apply Gmail label:", err),
       );
+    }
+  }
+
+  // Phase 2: If the chosen category has an active playbook, route to the playbook engine
+  // instead of the legacy draft flow.
+  if (categoryId) {
+    const playbook = await queryOne<Playbook>(
+      "SELECT * FROM playbooks WHERE category_id = $1 AND is_active = true ORDER BY version DESC LIMIT 1",
+      [categoryId],
+    );
+    if (playbook) {
+      // Set the category on the thread first
+      await transaction(async (tx) => {
+        await tx.queryObject({
+          text: "UPDATE threads SET category_id = $1 WHERE id = $2",
+          args: [categoryId, threadId],
+        });
+      });
+
+      console.log(`[categorisation] Category ${categoryId} has playbook "${playbook.name}" — routing to engine`);
+      try {
+        await startRun(workspaceId, threadId, playbook.id);
+      } catch (err) {
+        console.error(`[categorisation] Playbook run failed for thread ${threadId}:`, err);
+      }
+
+      const updatedThread = await queryOne<Thread>(
+        "SELECT * FROM threads WHERE id = $1",
+        [threadId],
+      ) as Thread;
+
+      return {
+        thread: updatedThread,
+        categoryId,
+        confidence,
+        reasoning,
+        draftCreated: false,
+      };
     }
   }
 

@@ -7,6 +7,8 @@ import { queryOne, execute, query } from "../db/client.ts";
 import { AppError, GmailMessage, GmailThread, Category } from "../types/index.ts";
 import { categoriseAndDraft } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
+import { resumeRun } from "./playbook/executor.ts";
+import type { PlaybookRun } from "./playbook/types.ts";
 
 const GMAIL_BASE = "https://www.googleapis.com/gmail/v1/users";
 
@@ -184,7 +186,25 @@ async function ingestMessage(
     return;
   }
 
-  // Run the categorisation pipeline.
+  // Phase 2: Check if this thread has an active playbook run waiting for customer reply.
+  const activeRun = await queryOne<PlaybookRun>(
+    `SELECT * FROM playbook_runs
+     WHERE thread_id = $1 AND status = 'waiting_for_customer'
+     ORDER BY created_at DESC LIMIT 1`,
+    [threadRow.id],
+  );
+
+  if (activeRun) {
+    console.log(`[gmail] Thread ${threadRow.id} has active playbook run ${activeRun.id} — resuming`);
+    try {
+      await resumeRun(activeRun.id);
+    } catch (err) {
+      console.error(`[gmail] Failed to resume playbook run ${activeRun.id}:`, err);
+    }
+    return;
+  }
+
+  // Run the categorisation pipeline (which may route to a playbook for new threads).
   await categoriseAndDraft(threadRow.id);
 }
 

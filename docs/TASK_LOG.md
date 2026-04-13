@@ -47,6 +47,72 @@ Each entry:
 
 ---
 
+## 2026-04-13 — Phase 2: Playbook Engine Foundation
+
+**Phase**: Phase 2
+**Status**: complete
+
+### What was done
+
+**Task 1 — Migrations (010, 011, 012)**
+- `api/db/migrations/010_playbooks.sql`: `playbooks` table with workspace/category FKs, JSONB steps, version, is_active, updated_at trigger.
+- `api/db/migrations/011_playbook_runs.sql`: `playbook_runs` table with thread/playbook FKs, JSONB context bag, status CHECK constraint, indexes on thread and (workspace_id, status).
+- `api/db/migrations/012_playbook_step_executions.sql`: `playbook_step_executions` table with run FK, step_id, input/output/error/ai_calls JSONB, status CHECK.
+
+**Task 2 — Step types and executor**
+- `api/services/playbook/types.ts`: Full type definitions for all 9 step types, `Playbook`, `PlaybookRun`, `StepExecution`, `RunContext`, `StepResult`, `StepHandler` interface.
+- `api/services/playbook/executor.ts`: `advanceRun(runId)` dispatch loop with max-iteration safety, `resumeRun(runId)` for paused runs (handles `waiting_for_customer` via `on_reply_goto`), `startRun(workspaceId, threadId, playbookId)` to create and execute a new run.
+- `api/services/playbook/registry.ts`: Maps step_type strings to handler implementations.
+- `api/services/playbook/mod.ts`: Barrel export file.
+
+**Task 3 — Handlers (7 implemented, 2 stubs)**
+- `handlers/extract.ts`: AI-powered variable extraction from thread transcript using `chatCompletion`.
+- `handlers/branch.ts`: Condition evaluator supporting `context.X != null`, `context.X == null`, `context.X` (truthy).
+- `handlers/ask_customer.ts`: Sends a reply via Gmail and pauses as `waiting_for_customer`.
+- `handlers/send_reply.ts`: Sends a reply with `{{variable}}` template interpolation and advances.
+- `handlers/complete.ts`: Marks run as complete.
+- `handlers/escalate.ts`: Marks run as failed/escalated.
+- `handlers/manual_approval.ts`: Pauses as `waiting_for_human`.
+- `handlers/find_sheet_row.ts`: Stub (Phase 4).
+- `handlers/update_sheet.ts`: Stub (Phase 4).
+
+**Task 4 — Resume mechanism**
+- `api/services/gmail.ts` `ingestMessage`: Before calling `categoriseAndDraft`, checks for an active `playbook_runs` row with `status = 'waiting_for_customer'` on the thread. If found, calls `resumeRun()` instead.
+
+**Task 5 — New-thread routing**
+- `api/services/categorisation.ts` `categoriseAndDraft`: After categorisation, checks if the chosen category has an active playbook. If yes, sets category on thread and calls `startRun()` instead of the legacy draft/auto-reply flow. Legacy path untouched for categories without playbooks.
+
+**Task 6 — Test playbook seeded**
+- `api/scripts/seed_playbook.ts`: Created "Tracking Request" category (id=5) and playbook (id=1) in workspace 1.
+- Playbook steps: extract_1 → branch_1 → (ask_1 or send_1) → complete_1.
+
+### Validation
+
+- All 3 migrations applied: `playbooks`, `playbook_runs`, `playbook_step_executions` tables verified via `\d` in psql.
+- API starts cleanly with zero compilation/import errors from the new playbook module.
+- Health checks passing continuously (`GET /health 200`).
+- Playbook seeded: `SELECT * FROM playbooks` confirms id=1 with correct steps JSONB.
+- Legacy `categoriseAndDraft` path still intact for categories without playbooks (no code removed).
+
+### Decisions made
+
+- Branch condition evaluator uses simple regex matching for v1 (`context.X != null`, `context.X == null`, `context.X`). No sandboxed eval. Can extend later.
+- `send_reply` supports `{{variable}}` template interpolation in string messages. AI-generated and from_template modes deferred.
+- Thread status updated by executor: `complete` → 'replied', `waiting_*` → 'in_review', `failed/escalated` → 'in_review'.
+- Max 50 iterations safety valve in executor loop to prevent infinite playbook loops.
+
+### Open questions / blockers
+
+- End-to-end test with real Gmail requires OAuth tokens to be present (user must re-authenticate per Phase 1 note).
+- `find_sheet_row` and `update_sheet` are stubs — will be implemented in Phase 4.
+
+### Next
+
+- **User action required**: re-authenticate OAuth if not already done, then send test emails to verify the full tracking playbook flow.
+- Run Phase 3: Playbook UI (create/edit playbooks, view run traces, manual approval queue).
+
+---
+
 ## 2026-04-13 — Phase 1: Cleanup and Consolidation
 
 **Phase**: Phase 1
