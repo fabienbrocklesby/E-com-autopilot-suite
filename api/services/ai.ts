@@ -15,7 +15,7 @@ function getApiKey(): string {
   return key;
 }
 
-async function getModel(workspaceId = 1): Promise<string> {
+export async function getModel(workspaceId = 1): Promise<string> {
   const setting = await queryOne<Setting>(
     "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'openai_model'",
     [workspaceId],
@@ -40,7 +40,7 @@ interface OpenAIResponse {
  * Make a chat completion request to OpenAI. Handles rate limiting (429) with a
  * single retry after the duration specified in the Retry-After header.
  */
-async function chatCompletion(
+export async function chatCompletion(
   messages: ChatMessage[],
   model: string,
   responseFormat?: { type: "json_object" },
