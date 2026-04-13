@@ -1,12 +1,12 @@
 <!--
   /review — Manual reply queue
   Shows threads needing human review with draft approval UI.
-  Supports inline editing of draft body before approval.
+  Also surfaces playbook runs waiting for human approval (manual_approval steps).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { threadsApi } from "$lib/api";
-  import type { ThreadListItem, ThreadDetail, Draft } from "$lib/api";
+  import { threadsApi, playbooksApi } from "$lib/api";
+  import type { ThreadListItem, ThreadDetail, Draft, PlaybookRun } from "$lib/api";
 
   let reviewThreads = $state<ThreadListItem[]>([]);
   let expandedThread = $state<ThreadDetail | null>(null);
@@ -15,15 +15,32 @@
   let error = $state<string | null>(null);
   let successMessage = $state<string | null>(null);
 
+  // Playbook runs waiting for human
+  let pendingRuns = $state<PlaybookRun[]>([]);
+  let runActioning = $state<number | null>(null);
+
   // Per-draft edit state: draftId → edited body
   let editingBodies = $state<Record<number, string>>({});
+
+  // Group pending runs by reason
+  let runsByReason = $derived(
+    pendingRuns.reduce<Record<string, PlaybookRun[]>>((acc, run) => {
+      const key = run.step_reason ?? "Approval required";
+      (acc[key] ??= []).push(run);
+      return acc;
+    }, {})
+  );
 
   async function load() {
     loading = true;
     error = null;
     try {
-      const res = await threadsApi.list({ status: "in_review" });
-      reviewThreads = res.threads;
+      const [threadsRes, runsRes] = await Promise.all([
+        threadsApi.list({ status: "in_review" }),
+        playbooksApi.listRuns({ status: "waiting_for_human" }),
+      ]);
+      reviewThreads = threadsRes.threads;
+      pendingRuns = runsRes.runs;
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load review queue";
     } finally {
@@ -36,7 +53,6 @@
     try {
       const res = await threadsApi.get(id);
       expandedThread = res.thread;
-      // Initialise edit state for pending drafts with their current body.
       for (const d of res.thread.drafts) {
         if (d.status === "pending") {
           editingBodies[d.id] = d.body;
@@ -55,21 +71,11 @@
     status: Draft["status"],
   ) {
     try {
-      // Pass the edited body when approving, so the server can detect edits.
       const editedBody =
         status === "approved" ? editingBodies[draft.id] : undefined;
-      await threadsApi.updateDraftStatus(
-        threadId,
-        draft.id,
-        status,
-        editedBody,
-      );
+      await threadsApi.updateDraftStatus(threadId, draft.id, status, editedBody);
       successMessage = `Draft ${status}.`;
-      setTimeout(() => {
-        successMessage = null;
-      }, 3000);
-
-      // Refresh the expanded thread view.
+      setTimeout(() => { successMessage = null; }, 3000);
       if (expandedThread?.id === threadId) {
         const res = await threadsApi.get(threadId);
         expandedThread = res.thread;
@@ -77,6 +83,36 @@
       await load();
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to update draft";
+    }
+  }
+
+  async function approveRun(runId: number) {
+    runActioning = runId;
+    error = null;
+    try {
+      await playbooksApi.approveRun(runId);
+      successMessage = "Approved — playbook resumed.";
+      setTimeout(() => { successMessage = null; }, 3000);
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to approve";
+    } finally {
+      runActioning = null;
+    }
+  }
+
+  async function rejectRun(runId: number) {
+    runActioning = runId;
+    error = null;
+    try {
+      await playbooksApi.rejectRun(runId);
+      successMessage = "Rejected — run escalated.";
+      setTimeout(() => { successMessage = null; }, 3000);
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to reject";
+    } finally {
+      runActioning = null;
     }
   }
 
@@ -91,7 +127,7 @@
 
 <div class="page-header">
   <h1>Review Queue</h1>
-  <span class="count">{reviewThreads.length} pending</span>
+  <span class="count">{reviewThreads.length} thread{reviewThreads.length !== 1 ? "s" : ""} · {pendingRuns.length} approval{pendingRuns.length !== 1 ? "s" : ""}</span>
 </div>
 
 {#if error}
@@ -104,11 +140,51 @@
 
 {#if loading}
   <div class="loading">Loading review queue…</div>
-{:else if reviewThreads.length === 0}
+{:else}
+
+{#if pendingRuns.length > 0}
+  <section class="approvals-section">
+    <h2>Playbook approvals</h2>
+    {#each Object.entries(runsByReason) as [reason, runs]}
+      <div class="reason-group">
+        <div class="reason-label">{reason}</div>
+        {#each runs as run (run.id)}
+          <div class="approval-card card">
+            <div class="approval-info">
+              <span class="approval-playbook">{run.playbook_name ?? `Playbook #${run.playbook_id}`}</span>
+              <span class="approval-meta">Run #{run.id} · <a href="/threads/{run.thread_id}" class="thread-link">Thread #{run.thread_id}</a></span>
+              <span class="approval-time">{new Date(run.updated_at).toLocaleString()}</span>
+            </div>
+            <div class="approval-actions">
+              <button
+                class="btn btn-primary"
+                onclick={() => approveRun(run.id)}
+                disabled={runActioning === run.id}
+              >
+                {runActioning === run.id ? "…" : "Approve"}
+              </button>
+              <button
+                class="btn btn-ghost"
+                onclick={() => rejectRun(run.id)}
+                disabled={runActioning === run.id}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/each}
+  </section>
+{/if}
+
+{#if reviewThreads.length === 0 && pendingRuns.length === 0}
   <div class="empty">
     <div class="empty-icon">✓</div>
     <p>No threads need review right now.</p>
   </div>
+{:else if reviewThreads.length === 0}
+  <div class="empty-small">No draft threads in queue.</div>
 {:else}
   <div class="review-layout">
     <div class="thread-list">
@@ -243,6 +319,8 @@
   </div>
 {/if}
 
+{/if}
+
 <style>
   .page-header {
     display: flex;
@@ -270,6 +348,80 @@
     color: var(--color-text-muted);
     padding: 40px;
     text-align: center;
+  }
+
+  .empty-small {
+    color: var(--color-text-muted);
+    font-size: 13px;
+    padding: 12px 0 20px;
+  }
+
+  /* ─── Playbook approvals ─────────────────────────────────────────────────── */
+
+  .approvals-section {
+    margin-bottom: 28px;
+  }
+
+  .approvals-section h2 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+  }
+
+  .reason-group {
+    margin-bottom: 16px;
+  }
+
+  .reason-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fb923c;
+    margin-bottom: 8px;
+    padding-left: 2px;
+  }
+
+  .approval-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    margin-bottom: 6px;
+  }
+
+  .approval-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .approval-playbook {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .approval-meta {
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+
+  .thread-link {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+
+  .approval-time {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .approval-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
   }
 
   .empty-icon {

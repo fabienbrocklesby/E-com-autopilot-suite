@@ -18,6 +18,7 @@ import { workspacesRouter } from "./routes/workspaces.ts";
 import { labelsRouter } from "./routes/labels.ts";
 import { sheetsRouter } from "./routes/sheets.ts";
 import { sheetRulesRouter } from "./routes/sheet-rules.ts";
+import { playbooksRouter } from "./routes/playbooks.ts";
 
 import { runMigrations } from "./db/migrate.ts";
 import { startWatchRenewalLoop, startFallbackPoller } from "./services/watch.ts";
@@ -66,6 +67,7 @@ app.route("/workspaces", workspacesRouter);
 app.route("/labels", labelsRouter);
 app.route("/sheets", sheetsRouter);
 app.route("/sheet-rules", sheetRulesRouter);
+app.route("/playbooks", playbooksRouter);
 
 // ─── 404 fallback ─────────────────────────────────────────────────────────────
 app.notFound((c) => c.json({ error: { message: "Not found", status: 404 } }, 404));

@@ -60,6 +60,34 @@ async function gmailPatch<T>(email: string, path: string, body: unknown): Promis
   return res.json() as Promise<T>;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Retry an async operation up to `maxAttempts` times when it throws an
+ * AppError with statusCode 404. Waits `baseDelayMs * attempt` between tries.
+ */
+async function retryOn404<T>(
+  fn: () => Promise<T>,
+  maxAttempts = 4,
+  baseDelayMs = 1500,
+): Promise<T> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof AppError && err.statusCode === 404 && attempt < maxAttempts) {
+        const delay = baseDelayMs * attempt;
+        console.warn(`[gmail] 404 on attempt ${attempt}/${maxAttempts}, retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  // unreachable, but satisfies TypeScript
+  throw new Error("retryOn404: exhausted attempts");
+}
+
 // ─── Public service methods ───────────────────────────────────────────────────
 
 /**
@@ -107,7 +135,17 @@ export async function processNewMessages(
   for (const entry of history.history) {
     for (const added of entry.messagesAdded ?? []) {
       const msg = added.message;
-      await ingestMessage(email, msg.id, msg.threadId, workspaceId);
+      try {
+        await ingestMessage(email, msg.id, msg.threadId, workspaceId);
+      } catch (err) {
+        // If all retries are exhausted the thread genuinely doesn't exist.
+        // Log and skip rather than aborting the whole history batch.
+        if (err instanceof AppError && err.statusCode === 404) {
+          console.warn(`[webhook/gmail] Thread ${msg.threadId} not found after retries, skipping (message ${msg.id})`);
+          continue;
+        }
+        throw err;
+      }
     }
   }
 
@@ -135,7 +173,7 @@ async function ingestMessage(
   );
   if (existing) return;
 
-  const gmailThread = await fetchGmailThread(email, gmailThreadId);
+  const gmailThread = await retryOn404(() => fetchGmailThread(email, gmailThreadId));
   const gmailMsg = gmailThread.messages.find((m) => m.id === gmailMessageId);
   if (!gmailMsg) return;
 
@@ -259,6 +297,9 @@ export async function sendReply(
   replyToAddress: string,
   body: string,
   inReplyToMessageId?: string | null,
+  /** DB thread.id — when provided the sent message is written immediately so
+   *  it appears in the dashboard without waiting for the Pub/Sub webhook. */
+  dbThreadId?: number,
 ): Promise<void> {
   // Build an RFC 2822 reply message.
   // If we have the original email's Message-ID, use it for proper threading.
@@ -295,9 +336,22 @@ export async function sendReply(
     payload.threadId = gmailThreadId;
   }
 
-  await gmailPost(email, "/messages/send", payload);
+  const sent = await gmailPost<{ id: string }>(email, "/messages/send", payload);
 
-  console.log(`[gmail] Reply sent for thread ${gmailThreadId}`);
+  console.log(`[gmail] Reply sent for thread ${gmailThreadId} (message ${sent.id})`);
+
+  // Immediately record the outbound message so it appears in the dashboard
+  // without waiting for the Pub/Sub webhook (which can take minutes).
+  // The webhook will hit ON CONFLICT DO NOTHING when it eventually fires.
+  if (dbThreadId) {
+    await execute(
+      `INSERT INTO messages
+         (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
+       VALUES ($1, $2, $3, $4, $5, $6, 'outbound', NULL)
+       ON CONFLICT (gmail_message_id) DO NOTHING`,
+      [dbThreadId, sent.id, email, body, "", new Date().toISOString()],
+    );
+  }
 }
 
 /**

@@ -47,6 +47,75 @@ Each entry:
 
 ---
 
+## 2026-04-13 — Phase 3: Playbook UI
+
+**Phase**: Phase 3
+**Status**: complete
+
+### What was done
+
+**Task 1 — Parser service**
+- `api/services/playbook/parser.ts`: `parsePlaybook(description, workspaceId)` — builds context-aware system prompt (step type reference, workspace sheet context, category list), calls `chatCompletion` with `json_object` response format, validates step types and cross-references (on_reply_goto, if_true/false, on_approve/reject), returns `{ steps, warnings }`.
+
+**Task 2 — Dry-run service**
+- `api/services/playbook/dry-run.ts`: `dryRunPlaybook(playbookId, emailContent, workspaceId)` — sandbox execution. Calls AI for `extract` steps (real AI call, no Gmail), simulates branches using real condition eval, captures messages that `ask_customer`/`send_reply` would send, skips sheet writes. Returns `{ finalStatus, context, trace }` with per-step trace entries.
+
+**Task 3 — Playbooks route**
+- `api/routes/playbooks.ts`: Full CRUD (`GET/POST /playbooks`, `GET/PUT/DELETE /playbooks/:id`), `POST /playbooks/:id/activate`, `POST /playbooks/:id/deactivate`, `POST /playbooks/:id/dry-run`, `POST /playbooks/parse`.
+- Run management: `GET /playbooks/runs` (with thread_id/playbook_id/status filters, includes step_reason via JSONB query), `GET /playbooks/runs/:runId` (with step executions), `POST /playbooks/runs/:runId/approve` (looks up manual_approval step's on_approve, jumps there, calls advanceRun), `POST /playbooks/runs/:runId/reject` (same but on_reject).
+- Route registered in `api/main.ts`, services exported in `api/services/playbook/mod.ts`.
+
+**Task 4 — Frontend API client**
+- `frontend/src/lib/api.ts`: Added `Playbook`, `PlaybookRun`, `StepExecution`, `DryRunTraceEntry`, `DryRunResult` types. Added `playbooksApi` with all methods: list, get, create, update, delete, parse, dryRun, activate, deactivate, listRuns, getRun, approveRun, rejectRun.
+
+**Task 5 — Playbooks list page**
+- `frontend/src/routes/playbooks/+page.svelte`: Table of all playbooks (name, category, version, step count, active, last edited). New Playbook button creates via API and redirects. Duplicate, Activate/Deactivate, Delete actions.
+
+**Task 6 — Playbook editor page**
+- `frontend/src/routes/playbooks/[id]/+page.svelte`: Full editor with category selector + name field (top), plain-language textarea + "Generate Steps" button with warning display (left), step pipeline cards with type icons + summaries + move/edit/delete controls (right), save and save-and-activate buttons (bottom).
+- Per-step edit modals for all 9 step types: extract (variables list), find_sheet_row (match_attempts), update_sheet (row_var + updates), ask_customer (message + on_reply_goto), branch (condition + if_true + if_false), manual_approval (reason + draft_template + on_approve + on_reject), send_reply (text or AI voice mode), complete (no config), escalate (reason).
+- Dry-run modal: paste example email → simulate → shows finalStatus, context bag, full trace with per-step conditions/messages/extracted vars.
+
+**Task 7 — Thread detail observability**
+- `frontend/src/routes/threads/[id]/+page.svelte`: Added playbook runs panel. Loads `playbooksApi.listRuns({ thread_id })` alongside thread data. Collapsible run cards show: playbook name/version, status with color dot, current step ID. Expanded view shows: context bag key-value table, step execution log with status, timing, output, AI calls (collapsible).
+
+**Task 8 — Review queue update**
+- `frontend/src/routes/review/+page.svelte`: Now loads `waiting_for_human` playbook runs alongside in_review threads. Playbook approvals section groups runs by `step_reason`. Approve button calls `approveRun` (resumes playbook at on_approve step), Reject calls `rejectRun` (goes to on_reject step → typically escalate). Header shows combined count.
+
+**Task 9 — Nav**
+- `frontend/src/routes/+layout.svelte`: Added Playbooks link between Categories and Sheet Rules.
+
+### Validation
+
+- `GET /playbooks?workspace_id=1` returns seeded "Tracking Request" playbook — confirmed.
+- `POST /playbooks` creates new playbook with id, version=1, is_active=false — confirmed.
+- `PUT /playbooks/:id` with changed steps bumps version from 1 → 2 — confirmed.
+- `DELETE /playbooks/:id` returns `{ok: true}` — confirmed.
+- `GET /playbooks/runs?status=waiting_for_human` returns empty array (none yet) — confirmed.
+- Frontend serves with "Playbooks" in nav — confirmed.
+- No new TypeScript errors introduced (1 pre-existing env variable check error unrelated to Phase 3).
+
+### Decisions made
+
+- Parser uses "gpt-4o" hardcoded (not workspace model setting) — parser needs best reasoning for step generation.
+- Dry-run simulates `find_sheet_row` and `update_sheet` without actually hitting the sheet (returns mock row_number=1), to avoid needing OAuth in testing.
+- Approve/reject endpoints look up current `manual_approval` step's `on_approve`/`on_reject` from the playbook steps array — runs don't store these separately.
+- Version bumped only if steps JSON actually changed (PUT compares serialized JSON).
+- `step_reason` field on runs list is extracted via JSONB query from `playbooks.steps` array inline — avoids separate round trips.
+
+### Open questions / blockers
+
+- Playwright E2E test not implemented yet (MCP tools not available in this session). Manual smoke test confirms routes and frontend renders correctly.
+- Parse endpoint requires real OpenAI API key in the container to actually call the AI. Safe to call with an empty key — it will return a 500 from chatCompletion, which surfaces as an error to the client.
+
+### Next
+
+- Run `/phase-4-sheet-integration` to implement `find_sheet_row` and `update_sheet` handlers properly.
+- Playwright E2E test for the full playbook create → dry-run → activate → trigger flow.
+- Per-playbook `customer_silence_hours` config (currently missing from the data model).
+
+---
+
 ## 2026-04-13 — Phase 2: Playbook Engine Foundation
 
 **Phase**: Phase 2

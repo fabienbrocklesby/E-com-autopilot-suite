@@ -428,3 +428,139 @@ export const sheetRulesApi = {
 		});
 	}
 };
+// ─── Playbooks ────────────────────────────────────────────────────────────────
+
+export type PlaybookStep = Record<string, unknown> & { id: string; type: string };
+
+export interface Playbook {
+        id: number;
+        workspace_id: number;
+        category_id: number | null;
+        category_name?: string | null;
+        name: string;
+        plain_language_description: string | null;
+        steps: PlaybookStep[];
+        version: number;
+        is_active: boolean;
+        created_at: string;
+        updated_at: string;
+}
+
+export interface PlaybookRun {
+        id: number;
+        workspace_id: number;
+        thread_id: number;
+        playbook_id: number;
+        playbook_version: number;
+        current_step_id: string | null;
+        status: 'running' | 'waiting_for_customer' | 'waiting_for_human' | 'complete' | 'failed' | 'escalated';
+        context: Record<string, unknown>;
+        created_at: string;
+        updated_at: string;
+        playbook_name?: string;
+        step_reason?: string | null;
+}
+
+export interface StepExecution {
+        id: number;
+        run_id: number;
+        step_id: string;
+        step_type: string;
+        status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+        input: Record<string, unknown> | null;
+        output: Record<string, unknown> | null;
+        error: string | null;
+        ai_calls: Array<{ model: string; prompt: string; response: string; tokens: number }> | null;
+        created_at: string;
+        completed_at: string | null;
+}
+
+export interface DryRunTraceEntry {
+        stepId: string;
+        stepType: string;
+        status: 'success' | 'skipped' | 'paused' | 'failed';
+        summary: string;
+        extractedVars?: Record<string, unknown>;
+        messageSent?: string;
+        condition?: { expression: string; result: boolean };
+        aiCall?: { prompt: string; response: string };
+}
+
+export interface DryRunResult {
+        playbookId: number;
+        playbookName: string;
+        finalStatus: string;
+        context: Record<string, unknown>;
+        trace: DryRunTraceEntry[];
+}
+
+export const playbooksApi = {
+        list(workspaceId = 1) {
+                return request<{ playbooks: Playbook[] }>(`/playbooks?workspace_id=${workspaceId}`);
+        },
+
+        get(id: number) {
+                return request<{ playbook: Playbook }>(`/playbooks/${id}`);
+        },
+
+        create(payload: { name: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[] }) {
+                return request<{ playbook: Playbook }>('/playbooks', {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                });
+        },
+
+        update(id: number, payload: { name?: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; is_active?: boolean }) {
+                return request<{ playbook: Playbook }>(`/playbooks/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(payload)
+                });
+        },
+
+        delete(id: number) {
+                return request<{ ok: boolean }>(`/playbooks/${id}`, { method: 'DELETE' });
+        },
+
+        parse(payload: { description: string; workspace_id?: number }) {
+                return request<{ steps: PlaybookStep[]; warnings: string[] }>('/playbooks/parse', {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                });
+        },
+
+        dryRun(id: number, emailContent: string, workspaceId = 1) {
+                return request<DryRunResult>(`/playbooks/${id}/dry-run?workspace_id=${workspaceId}`, {
+                        method: 'POST',
+                        body: JSON.stringify({ email_content: emailContent })
+                });
+        },
+
+        activate(id: number) {
+                return request<{ playbook: Playbook }>(`/playbooks/${id}/activate`, { method: 'POST' });
+        },
+
+        deactivate(id: number) {
+                return request<{ playbook: Playbook }>(`/playbooks/${id}/deactivate`, { method: 'POST' });
+        },
+
+        listRuns(params: { thread_id?: number; playbook_id?: number; workspace_id?: number; status?: string }) {
+                const qs = new URLSearchParams();
+                if (params.thread_id !== undefined) qs.set('thread_id', String(params.thread_id));
+                if (params.playbook_id !== undefined) qs.set('playbook_id', String(params.playbook_id));
+                if (params.workspace_id !== undefined) qs.set('workspace_id', String(params.workspace_id));
+                if (params.status) qs.set('status', params.status);
+                return request<{ runs: PlaybookRun[] }>(`/playbooks/runs?${qs.toString()}`);
+        },
+
+        getRun(runId: number) {
+                return request<{ run: PlaybookRun; executions: StepExecution[] }>(`/playbooks/runs/${runId}`);
+        },
+
+        approveRun(runId: number) {
+                return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/approve`, { method: 'POST' });
+        },
+
+        rejectRun(runId: number) {
+                return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/reject`, { method: 'POST' });
+        }
+};

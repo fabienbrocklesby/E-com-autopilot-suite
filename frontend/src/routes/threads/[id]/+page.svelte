@@ -5,8 +5,8 @@
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { threadsApi } from "$lib/api";
-  import type { ThreadDetail, Draft } from "$lib/api";
+  import { threadsApi, playbooksApi } from "$lib/api";
+  import type { ThreadDetail, Draft, PlaybookRun, StepExecution } from "$lib/api";
 
   const threadId = parseInt($page.params.id ?? "0");
   let thread = $state<ThreadDetail | null>(null);
@@ -15,12 +15,56 @@
   let success = $state<string | null>(null);
   let categorising = $state(false);
 
+  // Playbook run observability
+  let runs = $state<PlaybookRun[]>([]);
+  let expandedRunId = $state<number | null>(null);
+  let runDetail = $state<{ run: PlaybookRun; executions: StepExecution[] } | null>(null);
+  let runDetailLoading = $state(false);
+
+  async function loadRunDetail(runId: number) {
+    if (expandedRunId === runId) {
+      expandedRunId = null;
+      runDetail = null;
+      return;
+    }
+    expandedRunId = runId;
+    runDetailLoading = true;
+    try {
+      runDetail = await playbooksApi.getRun(runId);
+    } catch {
+      runDetail = null;
+    } finally {
+      runDetailLoading = false;
+    }
+  }
+
+  function runStatusColor(status: string): string {
+    const map: Record<string, string> = {
+      running: "#6366f1",
+      waiting_for_customer: "#f59e0b",
+      waiting_for_human: "#f97316",
+      complete: "#10b981",
+      failed: "#ef4444",
+      escalated: "#ef4444",
+    };
+    return map[status] ?? "#64748b";
+  }
+
+  function stepStatusColor(status: string): string {
+    const map: Record<string, string> = { success: "#10b981", failed: "#ef4444", running: "#6366f1", skipped: "#64748b", pending: "#64748b" };
+    return map[status] ?? "#64748b";
+  }
+
   async function load() {
     loading = true;
     error = null;
     try {
-      const res = await threadsApi.get(threadId);
-      thread = res.thread;
+      const [threadRes, runsRes] = await Promise.all([
+        threadsApi.get(threadId),
+        playbooksApi.listRuns({ thread_id: threadId }),
+      ]);
+      thread = threadRes.thread;
+      runs = runsRes.runs;
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load thread";
     } finally {
@@ -176,6 +220,101 @@
                 >
                   Reject
                 </button>
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </section>
+    {/if}
+
+    {#if runs.length > 0}
+      <section class="runs-section">
+        <h2>Playbook Runs ({runs.length})</h2>
+        {#each runs as run (run.id)}
+          <div class="run-card card">
+            <div class="run-header" onclick={() => loadRunDetail(run.id)} role="button" tabindex="0" onkeydown={(e) => e.key === "Enter" && loadRunDetail(run.id)}>
+              <div class="run-info">
+                <span class="run-name">{run.playbook_name ?? `Playbook #${run.playbook_id}`}</span>
+                <span class="run-meta">v{run.playbook_version} · run #{run.id}</span>
+              </div>
+              <div class="run-right">
+                <span class="run-status-dot" style="background: {runStatusColor(run.status)}"></span>
+                <span class="run-status">{run.status.replace(/_/g, " ")}</span>
+                {#if run.current_step_id}
+                  <span class="run-step">at: {run.current_step_id}</span>
+                {/if}
+                <span class="run-toggle">{expandedRunId === run.id ? "▲" : "▼"}</span>
+              </div>
+            </div>
+
+            {#if expandedRunId === run.id}
+              <div class="run-detail">
+                {#if runDetailLoading}
+                  <div class="run-loading">Loading run detail…</div>
+                {:else if runDetail}
+                  <!-- Context bag -->
+                  {#if Object.keys(runDetail.run.context ?? {}).length > 0}
+                    <div class="detail-section">
+                      <h4>Context bag</h4>
+                      <table class="ctx-table">
+                        <tbody>
+                        {#each Object.entries(runDetail.run.context) as [k, v]}
+                          <tr><td class="ctx-key">{k}</td><td class="ctx-val">{String(v)}</td></tr>
+                        {/each}
+                        </tbody>
+                      </table>
+                    </div>
+                  {/if}
+
+                  <!-- Step execution log -->
+                  <div class="detail-section">
+                    <h4>Execution log ({runDetail.executions.length} step{runDetail.executions.length !== 1 ? "s" : ""})</h4>
+                    {#if runDetail.executions.length === 0}
+                      <p class="text-muted">No executions recorded yet.</p>
+                    {:else}
+                      <div class="exec-list">
+                        {#each runDetail.executions as exec (exec.id)}
+                          <div class="exec-entry">
+                            <div class="exec-header">
+                              <span class="exec-dot" style="background: {stepStatusColor(exec.status)}"></span>
+                              <span class="exec-type">{exec.step_type}</span>
+                              <code class="exec-step-id">{exec.step_id}</code>
+                              <span class="exec-status">{exec.status}</span>
+                              <span class="exec-time">{new Date(exec.created_at).toLocaleTimeString()}</span>
+                            </div>
+                            {#if exec.error}
+                              <div class="exec-error">{exec.error}</div>
+                            {/if}
+                            {#if exec.output && Object.keys(exec.output).length > 0}
+                              <details class="exec-details">
+                                <summary>Output</summary>
+                                <pre class="exec-json">{JSON.stringify(exec.output, null, 2)}</pre>
+                              </details>
+                            {/if}
+                            {#if exec.ai_calls && exec.ai_calls.length > 0}
+                              <details class="exec-details">
+                                <summary>AI calls ({exec.ai_calls.length})</summary>
+                                {#each exec.ai_calls as call, ci}
+                                  <div class="ai-call">
+                                    <div class="ai-call-model">{call.model} · {call.tokens ?? "?"} tokens</div>
+                                    <details class="ai-call-detail">
+                                      <summary>Prompt</summary>
+                                      <pre class="exec-json">{call.prompt}</pre>
+                                    </details>
+                                    <details class="ai-call-detail">
+                                      <summary>Response</summary>
+                                      <pre class="exec-json">{call.response}</pre>
+                                    </details>
+                                  </div>
+                                {/each}
+                              </details>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
               </div>
             {/if}
           </div>
@@ -390,4 +529,68 @@
     display: flex;
     gap: 10px;
   }
+
+  /* ─── Playbook runs ──────────────────────────────────────────────────────── */
+
+  .runs-section h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+
+  .run-card { margin-bottom: 10px; overflow: hidden; }
+
+  .run-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .run-header:hover { background: var(--color-surface-2); }
+
+  .run-info { display: flex; flex-direction: column; gap: 2px; }
+  .run-name { font-size: 13px; font-weight: 600; }
+  .run-meta { font-size: 11px; color: var(--color-text-muted); }
+
+  .run-right { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .run-status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .run-status { font-weight: 600; text-transform: capitalize; }
+  .run-step { color: var(--color-text-muted); font-family: monospace; font-size: 11px; }
+  .run-toggle { color: var(--color-text-muted); font-size: 10px; }
+
+  .run-detail { border-top: 1px solid var(--color-border); padding: 16px; }
+  .run-loading { color: var(--color-text-muted); font-size: 13px; }
+
+  .detail-section { margin-bottom: 16px; }
+  .detail-section h4 { font-size: 12px; font-weight: 700; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+
+  .ctx-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .ctx-key { color: var(--color-text-muted); padding: 3px 12px 3px 0; font-family: monospace; white-space: nowrap; }
+  .ctx-val { color: var(--color-text); padding: 3px 0; word-break: break-all; }
+
+  .exec-list { display: flex; flex-direction: column; gap: 6px; }
+
+  .exec-entry {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .exec-header { display: flex; align-items: center; gap: 8px; }
+  .exec-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .exec-type { font-weight: 600; }
+  .exec-step-id { color: var(--color-text-muted); font-size: 11px; }
+  .exec-status { color: var(--color-text-muted); margin-left: auto; text-transform: capitalize; }
+  .exec-time { color: var(--color-text-muted); font-size: 11px; }
+
+  .exec-error { color: var(--color-danger); margin-top: 6px; font-family: monospace; font-size: 11px; }
+
+  .exec-details { margin-top: 6px; }
+  .exec-details summary { color: var(--color-text-muted); cursor: pointer; font-size: 11px; }
+  .exec-json { margin-top: 4px; background: var(--color-bg); padding: 8px; border-radius: 4px; font-size: 11px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+
+  .ai-call { margin-top: 8px; padding: 8px; background: var(--color-bg); border-radius: 4px; }
+  .ai-call-model { font-weight: 600; font-size: 11px; color: var(--color-text-muted); margin-bottom: 4px; }
+  .ai-call-detail summary { color: var(--color-text-muted); cursor: pointer; font-size: 11px; margin-top: 4px; }
 </style>

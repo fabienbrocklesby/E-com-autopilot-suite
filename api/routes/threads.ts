@@ -157,6 +157,7 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
       lastInbound.from_address,
       finalBody,
       lastInbound.message_id_header,
+      thread.id,
     );
 
     // Mark draft as sent with full tracking metadata.

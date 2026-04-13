@@ -8,6 +8,7 @@
 		{ href: '/', label: 'Threads' },
 		{ href: '/review', label: 'Review Queue' },
 		{ href: '/categories', label: 'Categories' },
+		{ href: '/playbooks', label: 'Playbooks' },
 		{ href: '/sheet-rules', label: 'Sheet Rules' },
 		{ href: '/sheet-updates', label: 'Sheet Updates' },
 		{ href: '/settings', label: 'Settings' }

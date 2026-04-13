@@ -35,6 +35,7 @@ export const sendReplyHandler: StepHandler = {
       lastInbound.from_address,
       body,
       lastInbound.message_id_header,
+      ctx.threadId,
     );
 
     console.log(`[playbook] send_reply: sent reply for run ${ctx.run.id}`);

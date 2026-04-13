@@ -177,6 +177,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
           lastInbound.from_address,
           body,
           lastInbound.message_id_header,
+          threadId,
         );
         autoSendSuccess = true;
         console.log(`[categorisation] Auto-sent reply for thread ${threadId}`);

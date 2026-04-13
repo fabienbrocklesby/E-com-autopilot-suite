@@ -25,6 +25,7 @@ export const askCustomerHandler: StepHandler = {
       lastInbound.from_address,
       askStep.message,
       lastInbound.message_id_header,
+      ctx.threadId,
     );
 
     console.log(`[playbook] ask_customer: sent question for run ${ctx.run.id}, waiting for reply`);
