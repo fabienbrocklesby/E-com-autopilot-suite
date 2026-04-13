@@ -97,14 +97,14 @@ export interface Draft {
 }
 
 export const threadsApi = {
-	list(params?: { status?: string; limit?: number; offset?: number }) {
+	list(params?: { status?: string; limit?: number; offset?: number; workspaceId?: number }) {
 		const qs = new URLSearchParams();
+		qs.set('workspace_id', String(params?.workspaceId ?? 1));
 		if (params?.status) qs.set('status', params.status);
 		if (params?.limit !== undefined) qs.set('limit', String(params.limit));
 		if (params?.offset !== undefined) qs.set('offset', String(params.offset));
-		const query = qs.toString() ? `?${qs.toString()}` : '';
 		return request<{ threads: ThreadListItem[]; limit: number; offset: number }>(
-			`/threads${query}`
+			`/threads?${qs.toString()}`
 		);
 	},
 
@@ -160,8 +160,8 @@ export interface CategoryPayload {
 }
 
 export const categoriesApi = {
-	list() {
-		return request<{ categories: Category[] }>('/categories');
+	list(workspaceId = 1) {
+		return request<{ categories: Category[] }>(`/categories?workspace_id=${workspaceId}`);
 	},
 
 	get(id: number) {

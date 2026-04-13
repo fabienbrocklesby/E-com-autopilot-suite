@@ -5,7 +5,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { threadsApi } from "$lib/api";
-  import { threadsStore } from "$lib/stores";
+  import { threadsStore, workspaceStore } from "$lib/stores";
   import type { ThreadListItem } from "$lib/api";
 
   const STATUSES = ["all", "new", "in_review", "replied", "ignored", "closed"];
@@ -13,13 +13,21 @@
   let threads = $state<ThreadListItem[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let currentWorkspaceId = $state(1);
+
+  const unsubWs = workspaceStore.subscribe((id) => {
+    currentWorkspaceId = id;
+    loadThreads(selectedStatus === "all" ? undefined : selectedStatus);
+  });
 
   async function loadThreads(status?: string) {
     loading = true;
     error = null;
     try {
       const res = await threadsApi.list(
-        status && status !== "all" ? { status } : undefined,
+        status && status !== "all"
+          ? { status, workspaceId: currentWorkspaceId }
+          : { workspaceId: currentWorkspaceId },
       );
       threads = res.threads;
       threadsStore.update((s) => ({ ...s, items: res.threads }));

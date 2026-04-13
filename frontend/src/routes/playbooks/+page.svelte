@@ -6,6 +6,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { playbooksApi, categoriesApi } from "$lib/api";
+  import { workspaceStore } from "$lib/stores";
   import type { Playbook, Category } from "$lib/api";
 
   let playbooks = $state<Playbook[]>([]);
@@ -14,14 +15,20 @@
   let error = $state<string | null>(null);
   let success = $state<string | null>(null);
   let creating = $state(false);
+  let currentWorkspaceId = $state(1);
+
+  const unsubWs = workspaceStore.subscribe((id) => {
+    currentWorkspaceId = id;
+    load();
+  });
 
   async function load() {
     loading = true;
     error = null;
     try {
       const [pbRes, catRes] = await Promise.all([
-        playbooksApi.list(),
-        categoriesApi.list(),
+        playbooksApi.list(currentWorkspaceId),
+        categoriesApi.list(currentWorkspaceId),
       ]);
       playbooks = pbRes.playbooks;
       categories = catRes.categories;

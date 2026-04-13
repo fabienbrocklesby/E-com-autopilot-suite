@@ -15,6 +15,75 @@ Each entry:
 
 ---
 
+## 2026-04-13 — Phase 4: Migration and Polish
+
+**Phase**: Phase 4
+**Status**: in progress
+
+### What was done
+
+**Task 1 — Implement find_sheet_row handler**
+- `api/services/playbook/handlers/find_sheet_row.ts`: Full implementation. Tries each `match_attempt` in order: resolves column letter from `sheet_columns` (by letter or header_name), reads column values via Sheets REST API, calls AI to find the best matching row. Writes `row_number` to context (or null if no match found). Always advances — playbook should branch on `context.row_number != null`.
+
+**Task 2 — Implement update_sheet handler**
+- `api/services/playbook/handlers/update_sheet.ts`: Full implementation. Reads row_number from context via `row_var`, resolves each column letter from `sheet_columns`, interpolates `{{variable}}` and `{variable}` placeholders from context, writes each cell via Sheets REST API.
+
+**Task 3 — Sheet rules migration script**
+- `api/scripts/migrate_sheet_rules_to_playbooks.ts`: For each active `sheet_rules` row, generates a playbook with `extract → branch → find_sheet_row → branch → update_sheet → complete` steps. Links to the rule's first category. Marks rule as `is_active = false`. Supports `--dry-run` flag. Idempotent (skips already-migrated rules).
+
+**Task 4 — Fix dry-run.ts exhaustive switch narrowing**
+- `api/services/playbook/dry-run.ts`: Pre-existing TypeScript error in `default:` case of switch (step narrowed to `never`). Fixed by casting to `{ id?: string; type?: string }`.
+
+**Task 5 — Multi-workspace UI**
+- `frontend/src/lib/stores.ts`: Added `workspaceStore` — writable store persisted to localStorage under `selected_workspace_id`.
+- `frontend/src/lib/api.ts`: Added `workspaceId` param to `threadsApi.list()` and `categoriesApi.list()`.
+- `frontend/src/routes/+layout.svelte`: Workspace selector dropdown in sidebar (only shown when more than 1 workspace exists). Loads workspaces on mount, persists selection via `workspaceStore`.
+- `frontend/src/routes/+page.svelte`: Subscribes to `workspaceStore`, reloads threads on workspace switch.
+- `frontend/src/routes/playbooks/+page.svelte`: Subscribes to `workspaceStore`, passes workspace_id to API calls.
+
+**Task 6 — Error boundary**
+- `frontend/src/routes/+error.svelte`: Global SvelteKit error page. Shows HTTP status code, error message, "Back to Threads" and "Go back" buttons.
+
+**Task 7 — Documentation**
+- `docs/CLIENT_GUIDE.md`: How to write a playbook, interpret the thread timeline, handle stuck threads, add categories, use dry-run, use review queue.
+- `docs/OPERATIONS.md`: Deployment (Dokploy), rollback, DB inspection queries, Gmail OAuth re-auth, quota limits, migrations, log monitoring.
+- `docs/ARCHITECTURE.md`: Canonical architecture reference (stack, data model, step types, inbound email flow, executor loop, handler files, frontend routes, security, known limitations).
+
+### Validation
+
+- `deno check main.ts` passes with 0 errors.
+- `svelte-check` passes with 0 errors (28 pre-existing accessibility warnings).
+- `find_sheet_row` and `update_sheet` handlers: type-checked individually, no errors.
+- Migration script: type-checked, no errors.
+
+### Decisions made
+
+- `find_sheet_row` always advances (never fails), setting `row_number = null` on no match. The playbook branches on `context.row_number != null`. This is more composable than failing the run on no-match.
+- `update_sheet` interpolates both `{{var}}` (send_reply style) and `{var}` (parser step reference style) for compatibility with AI-generated steps.
+- Sheet rules migration sets created playbooks to `is_active = false` — must be manually reviewed and activated to avoid immediate production impact.
+- `workspaceStore` only shows the selector when >1 workspace exists, to avoid UI clutter for single-workspace installs.
+
+### Open questions / blockers
+
+- Category migration: each production category needs a playbook written for it before `categoriseAndDraft` legacy path can be removed. Requires Fabien to write 5 playbooks (tracking, refund, order changes, damaged/wrong, general). Use the playbook editor with dry-run.
+- Sheet rules → playbook migration: run `migrate_sheet_rules_to_playbooks.ts --dry-run` first, review, then run without flag. Activate the created playbooks manually after review.
+- Legacy `categoriseAndDraft` deletion: blocked until every production category has an active playbook. Do not delete until all categories are covered and monitored for 2+ weeks.
+- `013_drop_sheet_rules.sql` migration: blocked until sheet rules have been migrated and the system has run stably for 2 weeks without sheet rules.
+- Per-playbook `customer_silence_hours` config still missing from the data model (noted in Phase 3). Add as a migration and executor check in a follow-up.
+- Real-time updates (SSE/polling) on review queue and thread detail: not yet implemented.
+- Retry buttons on failed step executions: not yet implemented.
+- Search on threads page: not yet implemented.
+
+### Next
+
+1. Fabien writes playbooks for each production category using the editor.
+2. Run `migrate_sheet_rules_to_playbooks.ts --dry-run` to preview migration, then run it.
+3. Activate migrated playbooks one at a time; monitor for 24 hours each.
+4. Once all categories have active playbooks and 2 weeks of stable operation: delete legacy path.
+5. Schedule `013_drop_sheet_rules.sql` when sheet rules have been cleanly migrated.
+
+---
+
 ## YYYY-MM-DD — Initial setup
 
 **Phase**: Setup

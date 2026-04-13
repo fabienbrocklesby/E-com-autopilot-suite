@@ -1,26 +1,71 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import type { Snippet } from 'svelte';
+        import { onMount, onDestroy } from 'svelte';
+        import type { Snippet } from 'svelte';
+        import { workspacesApi, type Workspace } from '$lib/api';
+        import { workspaceStore } from '$lib/stores';
 
-	let { children }: { children: Snippet } = $props();
+        let { children }: { children: Snippet } = $props();
 
-	const navLinks = [
-		{ href: '/', label: 'Threads' },
-		{ href: '/review', label: 'Review Queue' },
-		{ href: '/categories', label: 'Categories' },
-		{ href: '/playbooks', label: 'Playbooks' },
-		{ href: '/sheet-rules', label: 'Sheet Rules' },
-		{ href: '/sheet-updates', label: 'Sheet Updates' },
-		{ href: '/settings', label: 'Settings' }
-	];
+        let workspaces = $state<Workspace[]>([]);
+        let selectedId = $state(1);
+
+        // Sync store → local state
+        const unsubWs = workspaceStore.subscribe((id) => { selectedId = id; });
+
+        onMount(async () => {
+                try {
+                        const res = await workspacesApi.list();
+                        workspaces = res.workspaces;
+                        // If stored workspace no longer exists, fall back to first.
+                        if (!workspaces.find((w) => w.id === selectedId) && workspaces.length > 0) {
+                                workspaceStore.set(workspaces[0].id);
+                        }
+                } catch {
+                        // Non-critical; layout still functions without the list.
+                }
+        });
+
+        onDestroy(() => unsubWs());
+
+        function onWorkspaceChange(event: Event) {
+                const id = parseInt((event.target as HTMLSelectElement).value, 10);
+                if (Number.isFinite(id)) workspaceStore.set(id);
+        }
+
+        const navLinks = [
+                { href: '/', label: 'Threads' },
+                { href: '/review', label: 'Review Queue' },
+                { href: '/categories', label: 'Categories' },
+                { href: '/playbooks', label: 'Playbooks' },
+                { href: '/sheet-rules', label: 'Sheet Rules' },
+                { href: '/sheet-updates', label: 'Sheet Updates' },
+                { href: '/settings', label: 'Settings' }
+        ];
 </script>
 
 <div class="app">
-	<nav class="sidebar">
-		<div class="brand">
-			<span class="brand-icon">✉</span>
-			<span class="brand-name">Email Dash</span>
-		</div>
+        <nav class="sidebar">
+                <div class="brand">
+                        <span class="brand-icon">✉</span>
+                        <span class="brand-name">Email Dash</span>
+                </div>
+
+                {#if workspaces.length > 1}
+                <div class="workspace-selector">
+                        <label class="ws-label" for="workspace-select">Workspace</label>
+                        <select
+                                id="workspace-select"
+                                class="ws-select"
+                                value={selectedId}
+                                onchange={onWorkspaceChange}
+                        >
+                                {#each workspaces as ws}
+                                        <option value={ws.id}>{ws.name}</option>
+                                {/each}
+                        </select>
+                </div>
+                {/if}
 
 		<ul class="nav-links">
 			{#each navLinks as link}
@@ -181,6 +226,32 @@
 		border-bottom: 1px solid var(--color-border);
 		margin-bottom: 12px;
 	}
+
+        .workspace-selector {
+                padding: 0 16px 12px;
+                border-bottom: 1px solid var(--color-border);
+                margin-bottom: 8px;
+        }
+
+        .ws-label {
+                display: block;
+                font-size: 11px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--color-text-muted);
+                margin-bottom: 4px;
+        }
+
+        .ws-select {
+                width: 100%;
+                background: var(--color-surface-2);
+                border: 1px solid var(--color-border);
+                border-radius: var(--radius);
+                color: var(--color-text);
+                font-size: 13px;
+                padding: 5px 8px;
+        }
 
 	.brand-icon {
 		font-size: 20px;

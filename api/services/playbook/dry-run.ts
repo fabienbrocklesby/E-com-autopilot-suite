@@ -233,8 +233,9 @@ export async function dryRunPlaybook(
       }
 
       default: {
-        trace.push({ stepId: step.id, stepType: step.type, status: "skipped", summary: `Unknown step type` });
-        currentStepId = nextStep(steps, step.id);
+        const unknownStep = step as { id?: string; type?: string };
+        trace.push({ stepId: unknownStep.id ?? "?", stepType: unknownStep.type ?? "unknown", status: "skipped", summary: `Unknown step type` });
+        currentStepId = nextStep(steps, unknownStep.id ?? "");
       }
     }
   }

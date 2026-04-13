@@ -4,6 +4,34 @@
 import { writable, derived } from 'svelte/store';
 import type { ThreadListItem, Category } from '$lib/api';
 
+// ─── Workspace ────────────────────────────────────────────────────────────────
+
+function createWorkspaceStore() {
+	const STORAGE_KEY = 'selected_workspace_id';
+
+	function readFromStorage(): number {
+		if (typeof localStorage === 'undefined') return 1;
+		const raw = localStorage.getItem(STORAGE_KEY);
+		const parsed = raw ? parseInt(raw, 10) : NaN;
+		return Number.isFinite(parsed) ? parsed : 1;
+	}
+
+	const { subscribe, set, update } = writable<number>(readFromStorage());
+
+	return {
+		subscribe,
+		set(id: number) {
+			if (typeof localStorage !== 'undefined') {
+				localStorage.setItem(STORAGE_KEY, String(id));
+			}
+			set(id);
+		},
+		update,
+	};
+}
+
+export const workspaceStore = createWorkspaceStore();
+
 // ─── Threads ──────────────────────────────────────────────────────────────────
 
 export interface ThreadsState {
