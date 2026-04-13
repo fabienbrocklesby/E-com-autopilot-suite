@@ -4,78 +4,16 @@
  * Reference: https://developers.google.com/gmail/api/reference/rest
  */
 import { queryOne, execute, query } from "../db/client.ts";
-import { AppError, GmailMessage, GmailThread, OAuthToken, Category } from "../types/index.ts";
+import { AppError, GmailMessage, GmailThread, Category } from "../types/index.ts";
 import { categoriseAndDraft } from "./categorisation.ts";
+import { getGoogleAccessToken } from "./google-auth.ts";
 
 const GMAIL_BASE = "https://www.googleapis.com/gmail/v1/users";
-const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-
-// ─── Token management ─────────────────────────────────────────────────────────
-
-/**
- * Return a valid access token for the given email, refreshing if it is within
- * 60 seconds of expiry.
- */
-async function getValidAccessToken(email: string): Promise<string> {
-  const tokenRow = await queryOne<OAuthToken>(
-    "SELECT * FROM oauth_tokens WHERE email = $1",
-    [email],
-  );
-  if (!tokenRow) {
-    throw new AppError(401, `No OAuth token stored for ${email}`);
-  }
-
-  const expiryMs = new Date(tokenRow.expiry).getTime();
-  const bufferMs = 60 * 1000;
-
-  if (Date.now() < expiryMs - bufferMs) {
-    return tokenRow.access_token;
-  }
-
-  // Token is expired or about to expire — refresh it.
-  return refreshAccessToken(email, tokenRow.refresh_token);
-}
-
-/** Exchange a refresh token for a new access token and persist it. */
-async function refreshAccessToken(email: string, refreshToken: string): Promise<string> {
-  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
-  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
-
-  if (!clientId || !clientSecret) {
-    throw new AppError(500, "Google OAuth credentials are not configured");
-  }
-
-  const res = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }).toString(),
-  });
-
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new AppError(502, "Failed to refresh Google access token", detail);
-  }
-
-  const data = await res.json() as { access_token: string; expires_in: number };
-  const expiry = new Date(Date.now() + data.expires_in * 1000).toISOString();
-
-  await execute(
-    "UPDATE oauth_tokens SET access_token = $1, expiry = $2 WHERE email = $3",
-    [data.access_token, expiry, email],
-  );
-
-  return data.access_token;
-}
 
 // ─── Gmail API helpers ────────────────────────────────────────────────────────
 
 async function gmailGet<T>(email: string, path: string): Promise<T> {
-  const accessToken = await getValidAccessToken(email);
+  const { token: accessToken } = await getGoogleAccessToken(email);
   const res = await fetch(`${GMAIL_BASE}/${encodeURIComponent(email)}${path}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -87,7 +25,7 @@ async function gmailGet<T>(email: string, path: string): Promise<T> {
 }
 
 async function gmailPost<T>(email: string, path: string, body: unknown): Promise<T> {
-  const accessToken = await getValidAccessToken(email);
+  const { token: accessToken } = await getGoogleAccessToken(email);
   const res = await fetch(`${GMAIL_BASE}/${encodeURIComponent(email)}${path}`, {
     method: "POST",
     headers: {
@@ -104,7 +42,7 @@ async function gmailPost<T>(email: string, path: string, body: unknown): Promise
 }
 
 async function gmailPatch<T>(email: string, path: string, body: unknown): Promise<T> {
-  const accessToken = await getValidAccessToken(email);
+  const { token: accessToken } = await getGoogleAccessToken(email);
   const res = await fetch(`${GMAIL_BASE}/${encodeURIComponent(email)}${path}`, {
     method: "PATCH",
     headers: {

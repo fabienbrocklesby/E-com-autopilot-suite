@@ -84,12 +84,12 @@ export interface OAuthToken {
   id: number;
   workspace_id: number;
   email: string;
-  access_token: string;
-  refresh_token: string;
   expiry: Date;
   last_history_id: string | null;
   created_at: Date;
   updated_at: Date;
+  access_token_encrypted: Uint8Array | null;
+  refresh_token_encrypted: Uint8Array | null;
 }
 
 export interface SheetColumn {
@@ -290,4 +290,14 @@ export class AppError extends Error {
     super(message);
     this.name = "AppError";
   }
+}
+
+// ─── API error response envelope ─────────────────────────────────────────────
+
+export interface ErrorResponse {
+  error: {
+    message: string;
+    detail?: string;
+    status: number;
+  };
 }

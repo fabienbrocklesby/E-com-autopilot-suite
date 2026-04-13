@@ -12,7 +12,6 @@
 import { query, queryOne, execute } from "../db/client.ts";
 import {
   AppError,
-  OAuthToken,
   SheetColumn,
   SheetRule,
   SheetRuleExecution,
@@ -20,70 +19,10 @@ import {
   Thread,
   Workspace,
 } from "../types/index.ts";
+import { getGoogleAccessToken } from "./google-auth.ts";
+import { chatCompletion, getModel } from "./ai.ts";
 
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
-const GOOGLE_TOKEN_URL_SR = "https://oauth2.googleapis.com/token";
-
-function getApiKey(): string {
-  const key = Deno.env.get("OPENAI_API_KEY");
-  if (!key) throw new AppError(500, "OPENAI_API_KEY is not configured");
-  return key;
-}
-
-async function getModel(workspaceId: number): Promise<string> {
-  const row = await queryOne<{ value: string }>(
-    "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'openai_model'",
-    [workspaceId],
-  );
-  return row?.value ?? Deno.env.get("OPENAI_MODEL") ?? "gpt-4o";
-}
-
-/** Single-purpose chat completion — returns the raw content string. */
-async function complete(
-  model: string,
-  system: string,
-  user: string,
-): Promise<string> {
-  let lastErr: Error | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(OPENAI_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getApiKey()}`,
-      },
-      body: JSON.stringify({
-        model,
-        store: false,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: user },
-        ],
-      }),
-    });
-
-    if (res.status === 429) {
-      const retryAfter = parseInt(res.headers.get("Retry-After") ?? "0");
-      const delayMs = retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt) * 1000;
-      lastErr = new Error(`OpenAI rate limited (attempt ${attempt + 1})`);
-      await new Promise((r) => setTimeout(r, delayMs));
-      continue;
-    }
-
-    if (!res.ok) {
-      const detail = await res.text();
-      throw new AppError(502, `OpenAI API error: ${res.status}`, detail);
-    }
-
-    const data = await res.json() as { choices: Array<{ message: { content: string } }> };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) throw new AppError(502, "OpenAI returned an empty response");
-    return content;
-  }
-  throw lastErr ?? new Error("OpenAI complete failed after retries");
-}
 
 /**
  * Use AI to find the best matching row number from a list of candidate cell values.
@@ -122,7 +61,11 @@ If you cannot confidently identify a match, return:
 
 Be liberal but sensible — e.g. "john@smith.com" can reasonably match "John Smith".`;
 
-  const content = await complete(model, system, threadContent);
+  const content = await chatCompletion(
+    [{ role: "system", content: system }, { role: "user", content: threadContent }],
+    model,
+    { type: "json_object" },
+  );
 
   let parsed: { row: number | null; matched_value: string | null };
   try {
@@ -150,7 +93,11 @@ Column: ${column}
 Instruction: ${instruction}
 Return a JSON object: { "value": "determined value" }`;
 
-  const content = await complete(model, system, threadContent);
+  const content = await chatCompletion(
+    [{ role: "system", content: system }, { role: "user", content: threadContent }],
+    model,
+    { type: "json_object" },
+  );
 
   let parsed: { value: string };
   try {
@@ -203,7 +150,7 @@ async function writeToSheet(
   proposedUpdates: Record<string, string>,
   workspaceId: number,
 ): Promise<void> {
-  const accessToken = await getAccessToken(email);
+  const { token: accessToken } = await getGoogleAccessToken(email);
 
   for (const [columnLetter, value] of Object.entries(proposedUpdates)) {
     const cellRange = `${sheetName}!${columnLetter}${rowNumber}`;
@@ -236,52 +183,13 @@ async function writeToSheet(
   }
 }
 
-/** Get a fresh access token for the email — delegates to stored token with refresh. */
-async function getAccessToken(email: string): Promise<string> {
-  const tokenRow = await queryOne<OAuthToken>(
-    "SELECT * FROM oauth_tokens WHERE email = $1",
-    [email],
-  );
-  if (!tokenRow) throw new AppError(401, `No OAuth token stored for ${email}`);
-
-  const expiryMs = new Date(tokenRow.expiry).getTime();
-  if (Date.now() < expiryMs - 60_000) return tokenRow.access_token;
-
-  const clientId = Deno.env.get("GOOGLE_CLIENT_ID");
-  const clientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
-  if (!clientId || !clientSecret) throw new AppError(500, "Google OAuth credentials not configured");
-
-  const res = await fetch(GOOGLE_TOKEN_URL_SR, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: tokenRow.refresh_token,
-      grant_type: "refresh_token",
-    }).toString(),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new AppError(502, "Failed to refresh Google access token", detail);
-  }
-
-  const data = await res.json() as { access_token: string; expires_in: number };
-  const expiry = new Date(Date.now() + data.expires_in * 1000).toISOString();
-  await execute(
-    "UPDATE oauth_tokens SET access_token = $1, expiry = $2 WHERE email = $3",
-    [data.access_token, expiry, email],
-  );
-  return data.access_token;
-}
-
 /** Read a single column range from a sheet, returns a flat array of cell values (row 2 onward). */
 async function sheetsGetColumn(
   email: string,
   spreadsheetId: string,
   range: string,
 ): Promise<string[]> {
-  const accessToken = await getAccessToken(email);
+  const { token: accessToken } = await getGoogleAccessToken(email);
   const res = await fetch(
     `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}`,
     { headers: { Authorization: `Bearer ${accessToken}` } },
@@ -308,12 +216,6 @@ export async function evaluateRules(threadId: number, workspaceId: number): Prom
   );
   if (!workspace?.sheet_id) return;
   if (!workspace.gmail_address) return;
-
-  const tokenRow = await queryOne<OAuthToken>(
-    "SELECT * FROM oauth_tokens WHERE email = $1",
-    [workspace.gmail_address],
-  );
-  if (!tokenRow) return;
 
   const thread = await queryOne<Thread>(
     "SELECT * FROM threads WHERE id = $1",
@@ -356,7 +258,6 @@ export async function evaluateRules(threadId: number, workspaceId: number): Prom
       thread,
       threadContent,
       workspace,
-      tokenRow,
       model,
       workspaceId,
     );
@@ -368,7 +269,6 @@ async function evaluateSingleRule(
   thread: Thread,
   threadContent: string,
   workspace: Workspace,
-  tokenRow: OAuthToken,
   model: string,
   workspaceId: number,
 ): Promise<void> {
@@ -398,7 +298,7 @@ async function evaluateSingleRule(
     // best matches the instruction (handles fuzzy names, email→name inference, etc.)
     const range = `${workspace.sheet_name}!${matchCol.column_letter}2:${matchCol.column_letter}`;
     const sheetData = await sheetsGetColumn(
-      tokenRow.email,
+      workspace.gmail_address!,
       workspace.sheet_id!,
       range,
     );
@@ -431,7 +331,7 @@ async function evaluateSingleRule(
       // Write to sheet immediately.
       try {
         await writeToSheet(
-          tokenRow.email,
+          workspace.gmail_address!,
           workspace.sheet_id!,
           workspace.sheet_name,
           rowNumber,
@@ -552,18 +452,12 @@ export async function approveExecution(executionId: number): Promise<void> {
   if (!workspace?.sheet_id) throw new AppError(422, "No sheet configured for workspace");
   if (!workspace.gmail_address) throw new AppError(422, "No Gmail address configured for workspace");
 
-  const tokenRow = await queryOne<OAuthToken>(
-    "SELECT * FROM oauth_tokens WHERE email = $1",
-    [workspace.gmail_address],
-  );
-  if (!tokenRow) throw new AppError(500, "No OAuth token for workspace");
-
   if (exec.row_number === null) {
     throw new AppError(422, "Execution has no row number — cannot write to sheet");
   }
 
   await writeToSheet(
-    tokenRow.email,
+    workspace.gmail_address,
     workspace.sheet_id,
     workspace.sheet_name,
     exec.row_number,
@@ -620,16 +514,10 @@ export async function retryExecution(executionId: number): Promise<void> {
   if (!workspace?.sheet_id) throw new AppError(422, "No sheet configured");
   if (!workspace.gmail_address) throw new AppError(422, "No Gmail address configured for workspace");
 
-  const tokenRow = await queryOne<OAuthToken>(
-    "SELECT * FROM oauth_tokens WHERE email = $1",
-    [workspace.gmail_address],
-  );
-  if (!tokenRow) throw new AppError(500, "No OAuth token for workspace");
-
   // Fast path: we already have a row number and proposed updates — just re-write.
   if (exec.row_number !== null && Object.keys(exec.proposed_updates).length > 0) {
     await writeToSheet(
-      tokenRow.email,
+      workspace.gmail_address,
       workspace.sheet_id,
       workspace.sheet_name,
       exec.row_number,
@@ -672,5 +560,5 @@ export async function retryExecution(executionId: number): Promise<void> {
   // Remove the old failed record before creating a new one.
   await execute("DELETE FROM sheet_rule_executions WHERE id = $1", [executionId]);
 
-  await evaluateSingleRule(rule, thread, threadContent, workspace, tokenRow, model, exec.workspace_id);
+  await evaluateSingleRule(rule, thread, threadContent, workspace, model, exec.workspace_id);
 }
