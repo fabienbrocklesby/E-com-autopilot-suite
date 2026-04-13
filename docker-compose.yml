@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: ${PGUSER:-emaildash}
       POSTGRES_PASSWORD: ${PGPASSWORD:-changeme}
       POSTGRES_DB: ${PGDATABASE:-emaildash}
+    ports:
+      - "${PGPORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:

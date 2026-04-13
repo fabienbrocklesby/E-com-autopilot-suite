@@ -1,0 +1,183 @@
+# Playbook Engine — Architecture Reference
+
+This is the canonical reference for the playbook engine. Every Phase 2+ piece of work must align with this document. If reality diverges from this doc, update this doc first, then code.
+
+## The shift
+
+Today, categories are tags with settings. Categorisation, drafting, sheet rules, and auto-reply are sibling primitives that the user must wire together mentally.
+
+Tomorrow, **categories own playbooks**. A playbook is a multi-step flow: extract info, find sheet rows, ask the customer for missing info, update sheets, hold for human approval, send replies. Each thread runs an isolated instance of a playbook with its own context bag and step cursor.
+
+The user's mental model: "I'm writing a SOP for a new staff member, and the AI follows it."
+
+## Core concepts
+
+### Playbook
+A named, versioned sequence of steps attached to a category. Owned by a workspace.
+
+### Step
+A unit of work. Has a unique ID within the playbook, a type, and type-specific config.
+
+### Run
+A per-thread execution of a playbook. Has a context bag (variables collected so far), a current step cursor, and a status.
+
+### Step execution
+A record of one step running. Captures inputs, outputs, AI calls, errors, timing.
+
+### Context bag
+A `Record<string, unknown>` per run. Stores extracted variables (`order_number`, `customer_name`), references (`row_number`), and any state collected by steps. Persists across pauses.
+
+## Data model
+
+```
+playbooks
+  id, workspace_id, category_id, name,
+  plain_language_description (the source-of-truth text the user wrote),
+  steps (jsonb array of structured step definitions),
+  version (incremented on edit), is_active
+
+playbook_runs
+  id, workspace_id, thread_id, playbook_id, playbook_version,
+  current_step_id (text id of step the run is positioned at),
+  status (running, waiting_for_customer, waiting_for_human, complete, failed, escalated),
+  context (jsonb)
+
+playbook_step_executions
+  id, run_id, step_id, step_type,
+  status (pending, running, success, failed, skipped),
+  input (jsonb), output (jsonb), error,
+  ai_calls (jsonb array of {model, prompt, response, tokens}),
+  created_at, completed_at
+```
+
+## Step types
+
+| Type | Purpose | Config | Decision |
+|---|---|---|---|
+| `extract` | AI reads thread, pulls named variables into context | `variables: string[]` | advance |
+| `find_sheet_row` | Search sheet for a matching row, save row number to context | `match_attempts: [{column, context_var}]` | advance / fail |
+| `update_sheet` | Write specific columns on a row | `row_var: string, updates: [{column, value_or_var}]` | advance |
+| `ask_customer` | Send a question, pause until customer replies | `message: string, on_reply_goto: string` | pause(waiting_for_customer) |
+| `branch` | Route based on condition over context | `condition: string, if_true: string, if_false: string` | advance to chosen step |
+| `manual_approval` | Hold for human, optionally with pre-drafted reply | `reason: string, draft_template?: string, on_approve: string, on_reject: string` | pause(waiting_for_human) |
+| `send_reply` | Send reply (template or AI-generated) | `message: string \| { from_template: string } \| { ai_generate_using_category_voice: true }` | advance |
+| `complete` | End the run cleanly | none | complete |
+| `escalate` | End the run, flag for human, leave thread in review | `reason: string` | fail |
+
+## Step execution flow
+
+```
+┌─────────────────────────────────────────┐
+│  Inbound email arrives on thread T      │
+└─────────────────┬───────────────────────┘
+                  │
+                  ▼
+       ┌──────────────────┐
+       │ Active run on T? │
+       └────┬─────────┬───┘
+            │ yes     │ no
+            ▼         ▼
+    ┌───────────┐  ┌──────────────┐
+    │ Resume    │  │ Categorise   │
+    │ run from  │  └──────┬───────┘
+    │ current   │         ▼
+    │ step      │  ┌────────────────┐
+    └─────┬─────┘  │ Category has   │
+          │        │ active playbook?│
+          │        └────┬───────┬───┘
+          │             │ yes   │ no
+          │             ▼       ▼
+          │      ┌──────────┐ ┌──────────────┐
+          │      │ Create   │ │ Legacy:      │
+          │      │ run, run │ │ categorise + │
+          │      │ from     │ │ draft +      │
+          │      │ step 1   │ │ auto-reply   │
+          │      └────┬─────┘ └──────────────┘
+          │           │
+          ▼           ▼
+       ┌───────────────────────┐
+       │ Step executor loop:   │
+       │ - load step           │
+       │ - run handler         │
+       │ - apply decision      │
+       │ - persist execution   │
+       │ - if 'advance', loop  │
+       │ - if 'pause', stop    │
+       │ - if 'complete', stop │
+       │ - if 'fail', escalate │
+       └───────────────────────┘
+```
+
+## Plain-language to structured magic
+
+The client writes:
+
+> When someone asks for a refund, find their order in the sheet using their order number, name, or email. If you can't find it, ask them for the order number. If they didn't say why, ask them. Once you've got both, mark the sheet status as Refund Requested and send it to me for approval. Once I approve, reply to confirm.
+
+The parser turns this into structured steps. The system prompt tells the AI:
+
+- The available step types (table above)
+- The available context variables (from extraction history)
+- The available sheet columns for this workspace
+- The voice/tone settings for replies
+
+The AI returns JSON. We validate, render in the UI as cards, the client tunes individual steps if needed.
+
+**Edits**: when the client rewrites the description, we re-parse but preserve manual edits to specific steps where step IDs match. If a step ID is gone in the new parse, we keep the old step as orphaned and let the client decide.
+
+## UX principles
+
+1. **Plain language is the source of truth**, structured is the projection
+2. **Every step is editable individually** — don't make the user re-write the whole thing to change one question
+3. **Dry-run before activate** — paste an example email, see the trace, before turning it on
+4. **Per-thread visibility** — the thread page shows current playbook, current step, context bag, full execution log
+5. **Pause states are first-class** — "waiting for customer" and "waiting for human" must be visually distinct from "running"
+
+## Versioning
+
+When a playbook is edited, increment `version`. Active runs continue on the version they started with. New runs use the latest version.
+
+There's no automatic migration of in-flight runs to new versions. If the client wants that, they can manually escalate the run and let it re-start.
+
+## Sheet rules — the migration
+
+In Phase 4, sheet rules become single-step playbooks (or get absorbed into multi-step ones). A sheet rule with one match column and three updates becomes:
+
+```
+1. find_sheet_row { match_attempts: [{column, context_var}] }
+2. update_sheet { row_var, updates: [...] }
+3. complete
+```
+
+Sheet rules running today already produce the same effect; this is purely a code consolidation.
+
+## Open architectural questions
+
+These need answers before Phase 2 starts. Track resolutions here:
+
+1. **Where does customer-silence timeout live?** Per-step config (`pause_timeout_hours`)? Per-playbook? Workspace default? **Decision**: per-playbook setting `customer_silence_hours: int` defaulting to 168 (7 days). After timeout, run goes to `escalated`.
+
+2. **Can a playbook switch categories mid-run?** Customer asks about tracking, then mid-thread asks about a refund. **Decision** for v1: no, the run continues on the original playbook. The `manual_approval` step is the escape hatch — the human can re-categorise from the review queue.
+
+3. **Multiple playbooks per category?** v1: one per category. The category determines the playbook deterministically. If you need conditional playbook selection, do it inside one playbook with a `branch` step.
+
+4. **Variable name conventions?** Free-form per playbook for v1. Phase 4 may introduce a workspace-level "context schema" that constrains variable names for consistency.
+
+5. **What about extract on every step vs only at thread start + customer reply?** Only at start and customer reply, to save tokens. Steps that need a value from the email content can re-extract via a sub-AI-call if absolutely needed, but should prefer reading from context.
+
+## What this engine does NOT do (yet)
+
+- External API calls beyond Gmail and Sheets (no shipping APIs, no Stripe, no Slack — those are step types we add later)
+- Scheduled triggers (no "remind me in 24 hours" without a customer reply)
+- Cross-thread orchestration (each thread is independent)
+- A/B testing of playbooks (Phase 4 might add this)
+- Versioned context schemas (Phase 5+)
+
+## How this doc evolves
+
+Update this doc when:
+- A new step type is added (update the table)
+- An open question is decided (move from "open" to a settled section)
+- Architecture changes (then the code follows)
+
+Don't update this doc retroactively to match what was built. If something diverges, it's either a bug or an architecture change that needs explicit acknowledgment.
