@@ -15,6 +15,67 @@ Each entry:
 
 ---
 
+## 2026-04-14 — Phase 7: Growth — Task 1: Playbook Template Library
+
+**Phase**: Phase 7
+**Status**: complete (task 1 of 5)
+
+### What was done
+
+**Migration**
+- `api/db/migrations/017_playbook_templates.sql`: `playbook_templates` table with slug (unique), name, category, industry, description, plain_language, steps (JSONB), voice_examples, required_sheet_columns (TEXT[]), is_official. Indexes on category and industry.
+
+**Seed data**
+- `api/db/seeds/playbook_templates.sql`: 15 production-ready templates across 3 groups:
+  - E-commerce (8): refund, tracking, order change, damaged item, cancellation, address change, return, exchange
+  - Customer service (4): FAQ, feedback, complaint, compliment
+  - Operations (3): supplier query, B2B enquiry, press enquiry
+- Each template has fully-formed steps, plain language descriptions, required sheet columns, and voice examples where appropriate.
+- Idempotent via `ON CONFLICT (slug) DO NOTHING`.
+
+**Backend**
+- `api/routes/playbook-templates.ts`: Three endpoints:
+  - `GET /playbook-templates` — list with optional `?category`, `?industry`, `?search` filters
+  - `GET /playbook-templates/:slug` — single template detail
+  - `POST /playbook-templates/create-from` — creates a playbook from a template with `{template_slug, category_id, customizations?}`
+- Route registered in `api/main.ts`.
+
+**Frontend API client**
+- `frontend/src/lib/api.ts`: Added `PlaybookTemplate` interface and `playbookTemplatesApi` with `list()`, `get()`, `createFrom()`.
+
+**Frontend page**
+- `frontend/src/routes/playbooks/new/+page.svelte`: Full template browser with:
+  - "Start from Scratch" button (top right, creates blank playbook)
+  - Search input + category/industry filters
+  - Template cards grouped by category
+  - Right panel: template detail (plain language description, step list, required sheet columns, voice examples)
+  - "Use this template" → form to pick category and name → creates playbook and redirects to editor
+- `frontend/src/routes/playbooks/+page.svelte`: Updated "+ New Playbook" button to link to `/playbooks/new` instead of creating inline. Removed dead `createNew` function and `creating` state.
+
+### Validation
+
+- `deno check main.ts` passes with 0 errors.
+- `svelte-check` passes with 0 new errors (1 pre-existing `PUBLIC_API_BASE_URL` env var error, 29 pre-existing accessibility warnings).
+- `GET /playbook-templates` returns all 15 templates.
+- `GET /playbook-templates/ecom-refund` returns the refund template with full steps.
+- `GET /playbook-templates?category=tracking` correctly filters to 1 result.
+- `POST /playbook-templates/create-from` creates a playbook with the template's steps, name, and plain language description.
+- All 15 templates seeded via `INSERT 0 15`.
+
+### Decisions made
+
+- Templates are global (not workspace-scoped) since they're reference material. `is_official` flag distinguishes built-in from future user-contributed templates.
+- Create-from-template endpoint lives on `/playbook-templates/create-from` (not `/playbooks/from-template`) to keep the templates router self-contained.
+- Templates use `slug` as the URL identifier for human-readable URLs.
+- Seed data is separate from migrations (in `api/db/seeds/`) since it's reference data, not schema.
+
+### Next
+
+- Phase 7 Task 2: Playbook testing harness (when clients need confident iteration).
+- Phase 7 Task 3–5: Learning loop, richer step types, playbook routing (per client demand).
+
+---
+
 ## Phase 6: Hardening — Complete
 
 **Phase**: Phase 6

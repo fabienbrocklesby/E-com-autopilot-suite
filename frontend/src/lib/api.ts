@@ -569,6 +569,45 @@ export const playbooksApi = {
         }
 };
 
+// ─── Playbook Templates ──────────────────────────────────────────────────────
+
+export interface PlaybookTemplate {
+        id: number;
+        slug: string;
+        name: string;
+        category: string;
+        industry: string | null;
+        description: string;
+        plain_language: string;
+        steps: PlaybookStep[];
+        voice_examples: string | null;
+        required_sheet_columns: string[] | null;
+        is_official: boolean;
+        created_at: string;
+}
+
+export const playbookTemplatesApi = {
+        list(params?: { category?: string; industry?: string; search?: string }) {
+                const qs = new URLSearchParams();
+                if (params?.category) qs.set('category', params.category);
+                if (params?.industry) qs.set('industry', params.industry);
+                if (params?.search) qs.set('search', params.search);
+                const q = qs.toString();
+                return request<{ templates: PlaybookTemplate[] }>(`/playbook-templates${q ? `?${q}` : ''}`);
+        },
+
+        get(slug: string) {
+                return request<{ template: PlaybookTemplate }>(`/playbook-templates/${encodeURIComponent(slug)}`);
+        },
+
+        createFrom(payload: { template_slug: string; category_id: number; customizations?: { name?: string } }, workspaceId = 1) {
+                return request<{ playbook: Playbook; template_slug: string }>(`/playbook-templates/create-from?workspace_id=${workspaceId}`, {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                });
+        }
+};
+
 // ─── System API ───────────────────────────────────────────────────────────────
 
 export interface FailedIngestion {

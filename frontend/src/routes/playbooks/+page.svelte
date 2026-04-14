@@ -4,7 +4,6 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
   import { playbooksApi, categoriesApi } from "$lib/api";
   import { workspaceStore } from "$lib/stores";
   import type { Playbook, Category } from "$lib/api";
@@ -14,7 +13,6 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let success = $state<string | null>(null);
-  let creating = $state(false);
   let currentWorkspaceId = $state(1);
 
   const unsubWs = workspaceStore.subscribe((id) => {
@@ -36,18 +34,6 @@
       error = e instanceof Error ? e.message : "Failed to load playbooks";
     } finally {
       loading = false;
-    }
-  }
-
-  async function createNew() {
-    creating = true;
-    error = null;
-    try {
-      const res = await playbooksApi.create({ name: "New Playbook" });
-      goto(`/playbooks/${res.playbook.id}`);
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to create playbook";
-      creating = false;
     }
   }
 
@@ -114,9 +100,7 @@
 
 <div class="page-header">
   <h1>Playbooks</h1>
-  <button class="btn btn-primary" onclick={createNew} disabled={creating}>
-    {creating ? "Creating…" : "+ New Playbook"}
-  </button>
+  <a href="/playbooks/new" class="btn btn-primary">+ New Playbook</a>
 </div>
 
 {#if error}
@@ -131,9 +115,7 @@
 {:else if playbooks.length === 0}
   <div class="empty">
     <p>No playbooks yet. Create one to automate your email handling.</p>
-    <button class="btn btn-primary" onclick={createNew} disabled={creating}>
-      {creating ? "Creating…" : "+ New Playbook"}
-    </button>
+    <a href="/playbooks/new" class="btn btn-primary">+ New Playbook</a>
   </div>
 {:else}
   <div class="table-wrap card">
