@@ -15,6 +15,58 @@ Each entry:
 
 ---
 
+## 2026-04-15 — Fix: ask_customer skip routing bug
+
+**Phase**: 5.5 (urgent fix)
+**Status**: complete
+
+### What was done
+- Fixed `api/services/playbook/handlers/ask_customer.ts` deterministic pre-check
+  to return `{action: "advance"}` instead of `{action: "advance_to", stepId: on_reply_goto}`
+- Same fix applied to AI "skip" action path
+- Legacy `{message}` backward-compat path not affected — it correctly returns `pause` (no bug there)
+- Added inline documentation above the pre-check explaining routing semantics
+
+### Bug origin
+`on_reply_goto` config field was being used as the skip destination. Semantically
+`on_reply_goto` is "resume here AFTER a customer reply" — only relevant when the
+step paused. When skipping the ask entirely (no pause, no reply pending), the
+correct behaviour is sequential advance. This caused a backward loop to `extract_1`,
+triggering the loop safety-net escalation.
+
+### Verification
+- `deno check services/playbook/handlers/ask_customer.ts` — zero errors (one unrelated
+  deno.json exports warning, pre-existing)
+- Code review: deterministic path now returns `{action:"advance"}`, AI skip path now returns
+  `{action:"advance"}` with `extracted_keys` logged for observability
+- Legacy path (no `goal` field) returns `pause` — unchanged and correct
+
+### MCP usage trace
+- filesystem: read ask_customer.ts (full file), types.ts (StepDecision type), executor.ts
+  (on_reply_goto resume logic), handlers directory listing
+- context7: not required — this is a pure logic fix with no external API usage
+- postgres: pre-fix DB state available from prior diagnosis (run_id=4, playbook_id=6);
+  post-fix verification deferred to next live test email
+- svelte: not applicable (backend-only change)
+- playwright: not applicable (no UI change)
+
+### Decisions made
+- Fixed both deterministic and AI skip paths in one edit (related, atomic)
+- Did NOT touch on_reply_goto field semantics — they're correct, only the wrong
+  code path was using them
+- Did NOT regenerate the playbook — existing playbook works correctly with the fixed handler
+- Legacy backward-compat path left unchanged (already correct)
+
+### Open questions
+- send_reply message quality — track for later prompt tuning
+- Manual action banner UI not yet built — approval still requires curl (phase-5-5-task-5)
+
+### Next
+- Run /phase-5-5-task-5-banner to build the manual action banner
+- Run /phase-5-5-task-4-loop-detection for tighter loop detection
+
+---
+
 ## 2026-04-14 — Phase 7: Growth — Task 1: Playbook Template Library
 
 **Phase**: Phase 7

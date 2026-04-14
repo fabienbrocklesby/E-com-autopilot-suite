@@ -42,13 +42,23 @@ export const askCustomerHandler: StepHandler = {
     // AI-driven path
     const requiredContext = askStep.required_context ?? [];
 
+    // Routing semantics:
+    //   - on_reply_goto: where to resume AFTER a customer reply triggers re-execution.
+    //     Used only when this step actually paused for a customer reply.
+    //   - "advance": sequential next step. Used when this step did its job and
+    //     downstream steps should run.
+    //
+    // When required_context is already present, we are skipping the ask entirely.
+    // We did not pause, no customer reply is pending, so on_reply_goto is irrelevant.
+    // We must advance sequentially so that downstream steps (evaluate, etc.) execute.
+
     // 1. Deterministic pre-check: do we already have all required vars?
     const missing = requiredContext.filter((v) => ctx.variables[v] == null);
     if (missing.length === 0) {
       console.log(`[playbook] ask_customer: all required context present, skipping send for run ${ctx.run.id}`);
       return {
-        decision: { action: "advance_to", stepId: askStep.on_reply_goto },
-        output: { action: "skipped", reason: "all required context present" },
+        decision: { action: "advance" },
+        output: { action: "skipped", reason: "all required context present", skipped_message_send: true },
       };
     }
 
@@ -140,9 +150,13 @@ RULES:
     if (parsed.action === "skip") {
       console.log(`[playbook] ask_customer: AI skipped (${parsed.reasoning}) for run ${ctx.run.id}`);
       return {
-        decision: { action: "advance_to", stepId: askStep.on_reply_goto },
+        decision: { action: "advance" },
         contextUpdates: parsed.extracted ?? {},
-        output: { action: "skipped", reasoning: parsed.reasoning },
+        output: {
+          action: "skipped",
+          reasoning: parsed.reasoning,
+          extracted_keys: Object.keys(parsed.extracted ?? {}),
+        },
         aiCalls,
       };
     }
