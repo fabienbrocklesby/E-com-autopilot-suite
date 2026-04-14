@@ -9,6 +9,9 @@ import { categoriseAndDraft } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
 import { resumeRun } from "./playbook/executor.ts";
 import type { PlaybookRun } from "./playbook/types.ts";
+import { logger } from "./logger.ts";
+import { rateLimitedCall } from "./rate_limit.ts";
+import { sendAlert } from "./alerts.ts";
 
 const GMAIL_BASE = "https://www.googleapis.com/gmail/v1/users";
 
@@ -77,7 +80,7 @@ async function retryOn404<T>(
     } catch (err) {
       if (err instanceof AppError && err.statusCode === 404 && attempt < maxAttempts) {
         const delay = baseDelayMs * attempt;
-        console.warn(`[gmail] 404 on attempt ${attempt}/${maxAttempts}, retrying in ${delay}ms...`);
+        logger.warn("gmail.retry_404", { attempt, max_attempts: maxAttempts, delay_ms: delay });
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
@@ -136,15 +139,32 @@ export async function processNewMessages(
     for (const added of entry.messagesAdded ?? []) {
       const msg = added.message;
       try {
-        await ingestMessage(email, msg.id, msg.threadId, workspaceId);
+        await rateLimitedCall(workspaceId, "gmail", () =>
+          ingestMessage(email, msg.id, msg.threadId, workspaceId)
+        );
       } catch (err) {
-        // If all retries are exhausted the thread genuinely doesn't exist.
-        // Log and skip rather than aborting the whole history batch.
         if (err instanceof AppError && err.statusCode === 404) {
-          console.warn(`[webhook/gmail] Thread ${msg.threadId} not found after retries, skipping (message ${msg.id})`);
+          logger.warn("gmail.thread_not_found", { gmail_thread_id: msg.threadId, gmail_message_id: msg.id });
           continue;
         }
-        throw err;
+        // DLQ: capture failed ingestion for retry
+        logger.error("gmail.ingest_failed", {
+          workspace_id: workspaceId,
+          gmail_message_id: msg.id,
+          gmail_thread_id: msg.threadId,
+          error: String(err),
+        });
+        await execute(
+          `INSERT INTO failed_ingestions (workspace_id, gmail_message_id, gmail_thread_id, error, payload)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (workspace_id, gmail_message_id) WHERE NOT resolved
+           DO UPDATE SET attempt_count = failed_ingestions.attempt_count + 1,
+                         error = EXCLUDED.error, last_attempt_at = NOW()`,
+          [workspaceId, msg.id, msg.threadId, String(err), JSON.stringify({ msg })],
+        ).catch((dlqErr) => {
+          logger.error("gmail.dlq_insert_failed", { error: String(dlqErr) });
+        });
+        continue;
       }
     }
   }
@@ -220,7 +240,7 @@ async function ingestMessage(
   // Only run categorisation for inbound messages. Outbound messages (sent by this
   // app or by the user) must not trigger another draft or auto-reply loop.
   if (direction === "outbound") {
-    console.log(`[gmail] Skipping categorisation for outbound message ${gmailMessageId}`);
+    logger.debug("gmail.skip_outbound", { gmail_message_id: gmailMessageId });
     return;
   }
 
@@ -233,11 +253,11 @@ async function ingestMessage(
   );
 
   if (activeRun) {
-    console.log(`[gmail] Thread ${threadRow.id} has active playbook run ${activeRun.id} — resuming`);
+    logger.info("gmail.resume_playbook_run", { thread_id: threadRow.id, run_id: activeRun.id });
     try {
       await resumeRun(activeRun.id);
     } catch (err) {
-      console.error(`[gmail] Failed to resume playbook run ${activeRun.id}:`, err);
+      logger.error("gmail.resume_run_failed", { run_id: activeRun.id, error: String(err) });
     }
     return;
   }
@@ -300,6 +320,7 @@ export async function sendReply(
   /** DB thread.id — when provided the sent message is written immediately so
    *  it appears in the dashboard without waiting for the Pub/Sub webhook. */
   dbThreadId?: number,
+  workspaceId = 1,
 ): Promise<void> {
   // Build an RFC 2822 reply message.
   // If we have the original email's Message-ID, use it for proper threading.
@@ -336,9 +357,11 @@ export async function sendReply(
     payload.threadId = gmailThreadId;
   }
 
-  const sent = await gmailPost<{ id: string }>(email, "/messages/send", payload);
+  const sent = await rateLimitedCall(workspaceId, "gmail", () =>
+    gmailPost<{ id: string }>(email, "/messages/send", payload)
+  );
 
-  console.log(`[gmail] Reply sent for thread ${gmailThreadId} (message ${sent.id})`);
+  logger.info("gmail.reply_sent", { gmail_thread_id: gmailThreadId, message_id: sent.id });
 
   // Immediately record the outbound message so it appears in the dashboard
   // without waiting for the Pub/Sub webhook (which can take minutes).
@@ -386,7 +409,7 @@ export async function setupGmailWatch(email: string): Promise<void> {
     [workspaceId, result.expiration],
   );
 
-  console.log(`[gmail] Watch set up for ${email}. Expires: ${result.expiration}`);
+  logger.info("gmail.watch_setup", { email, expiration: result.expiration });
 }
 
 // ─── Label management ─────────────────────────────────────────────────────────
@@ -455,7 +478,7 @@ export async function syncLabels(
           { name: cat.name },
         );
         synced++;
-        console.log(`[gmail] Renamed Gmail label "${gmailName}" → "${cat.name}"`);
+        logger.info("gmail.label_renamed", { workspace_id: workspaceId, old_name: gmailName, new_name: cat.name });
       }
       continue;
     }
@@ -506,9 +529,26 @@ export async function syncLabels(
     if (linkedCategory) continue;
 
     // Untracked label — log it for visibility but do not auto-create a category.
-    console.log(`[gmail] Untracked Gmail label "${label.name}" (${label.id}) — create a category in the dashboard to link it`);
+    logger.debug("gmail.untracked_label", { workspace_id: workspaceId, label_name: label.name, label_id: label.id });
   }
 
-  console.log(`[gmail] Synced ${synced} labels for workspace ${workspaceId}`);
+  logger.info("gmail.labels_synced", { workspace_id: workspaceId, synced });
   return synced;
+}
+
+/**
+ * Re-ingest a specific Gmail message — used by the retry worker to replay
+ * failed ingestions from the dead letter queue.
+ */
+export async function retryIngest(
+  workspaceId: number,
+  gmailMessageId: string,
+  gmailThreadId: string,
+): Promise<void> {
+  const tokenRow = await queryOne<{ email: string }>(
+    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+    [workspaceId],
+  );
+  if (!tokenRow) throw new Error(`No OAuth token for workspace ${workspaceId}`);
+  await ingestMessage(tokenRow.email, gmailMessageId, gmailThreadId, workspaceId);
 }

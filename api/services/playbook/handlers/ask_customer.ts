@@ -30,6 +30,7 @@ export const askCustomerHandler: StepHandler = {
         message,
         lastInbound.message_id_header,
         ctx.threadId,
+        ctx.workspaceId,
       );
       console.log(`[playbook] ask_customer (legacy): sent literal message for run ${ctx.run.id}`);
       return {
@@ -164,6 +165,7 @@ RULES:
         parsed.message,
         lastInbound.message_id_header,
         ctx.threadId,
+        ctx.workspaceId,
       );
       console.log(`[playbook] ask_customer: AI-drafted message sent for run ${ctx.run.id}`);
       return {

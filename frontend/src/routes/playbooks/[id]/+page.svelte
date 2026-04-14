@@ -26,6 +26,7 @@
   let categoryId = $state<number | null>(null);
   let description = $state("");
   let steps = $state<PlaybookStep[]>([]);
+  let customerSilenceHours = $state(168);
 
   // Per-step edit modal
   let editingStep = $state<PlaybookStep | null>(null);
@@ -89,6 +90,7 @@
       name = playbook.name;
       categoryId = playbook.category_id;
       description = playbook.plain_language_description ?? "";
+      customerSilenceHours = playbook.customer_silence_hours ?? 168;
       steps = Array.isArray(playbook.steps)
         ? playbook.steps
         : typeof playbook.steps === "string"
@@ -132,6 +134,7 @@
         plain_language_description: description,
         steps,
         is_active: andActivate ? true : playbook?.is_active,
+        customer_silence_hours: customerSilenceHours,
       });
       if (andActivate) {
         await playbooksApi.activate(playbookId);
@@ -309,6 +312,10 @@
             <option value={cat.id}>{cat.name}</option>
           {/each}
         </select>
+      </div>
+      <div class="field">
+        <label title="Escalate the run if the customer hasn't replied after this many hours">Customer silence timeout (hours)</label>
+        <input type="number" bind:value={customerSilenceHours} min="0" step="1" style="width:100px" />
       </div>
     </div>
 

@@ -248,6 +248,7 @@ playbooksRouter.post("/", async (c) => {
     category_id?: number | null;
     plain_language_description?: string;
     steps?: PlaybookStep[];
+    customer_silence_hours?: number;
   }>();
 
   if (!body.name || typeof body.name !== "string") {
@@ -255,8 +256,8 @@ playbooksRouter.post("/", async (c) => {
   }
 
   const row = await queryOne<Playbook>(
-    `INSERT INTO playbooks (workspace_id, category_id, name, plain_language_description, steps, version, is_active)
-     VALUES ($1, $2, $3, $4, $5::jsonb, 1, false)
+    `INSERT INTO playbooks (workspace_id, category_id, name, plain_language_description, steps, version, is_active, customer_silence_hours)
+     VALUES ($1, $2, $3, $4, $5::jsonb, 1, false, $6)
      RETURNING *`,
     [
       workspaceId,
@@ -264,6 +265,7 @@ playbooksRouter.post("/", async (c) => {
       body.name.trim(),
       body.plain_language_description ?? null,
       JSON.stringify(body.steps ?? []),
+      body.customer_silence_hours ?? 168,
     ],
   );
 
@@ -298,6 +300,7 @@ playbooksRouter.put("/:id", async (c) => {
     plain_language_description?: string;
     steps?: PlaybookStep[];
     is_active?: boolean;
+    customer_silence_hours?: number;
   }>();
 
   const existing = await queryOne<Playbook>(
@@ -321,8 +324,9 @@ playbooksRouter.put("/:id", async (c) => {
        plain_language_description = $3,
        steps = $4::jsonb,
        version = $5,
-       is_active = $6
-     WHERE id = $7
+       is_active = $6,
+       customer_silence_hours = $7
+     WHERE id = $8
      RETURNING *`,
     [
       body.name ?? existing.name,
@@ -333,6 +337,7 @@ playbooksRouter.put("/:id", async (c) => {
       newSteps,
       newVersion,
       body.is_active !== undefined ? body.is_active : existing.is_active,
+      body.customer_silence_hours !== undefined ? body.customer_silence_hours : existing.customer_silence_hours,
       id,
     ],
   );

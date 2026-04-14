@@ -3,6 +3,9 @@
  */
 import { query, queryOne, execute, transaction } from "../../db/client.ts";
 import { getHandler } from "./registry.ts";
+import { logger } from "../logger.ts";
+import { sendAlert } from "../alerts.ts";
+import { AppError } from "../../types/index.ts";
 import type {
   Playbook,
   PlaybookRun,
@@ -12,6 +15,22 @@ import type {
   AskCustomerStep,
   StepExecution,
 } from "./types.ts";
+
+// Retry delay sequence in seconds: 5min, 15min, 30min, 1h, 2h
+const RETRY_DELAYS_SEC = [300, 900, 1800, 3600, 7200];
+const MAX_RETRIES = 5;
+
+function isRetriableError(err: unknown): boolean {
+  if (err instanceof AppError) {
+    // Circuit breaker / AI unavailable
+    if (err.statusCode === 503) return true;
+    // Rate limit from any upstream API
+    if (err.statusCode === 429) return true;
+    // Gateway errors (OpenAI/Google transient)
+    if (err.statusCode === 502) return true;
+  }
+  return false;
+}
 
 interface RunMessage {
   id: number;
@@ -50,7 +69,8 @@ async function escalateRunDueToLoop(
     [runId, JSON.stringify({ reason })],
   );
   await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
-  console.error(`[playbook] Run ${runId}: escalated — ${reason}`);
+  logger.error("playbook.run_escalated", { run_id: runId, reason });
+  await sendAlert(1, "run_escalated", { run_id: runId, thread_id: threadId, reason }).catch(() => {});
   return { runId, status: "escalated", currentStepId, context: variables };
 }
 
@@ -103,6 +123,8 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
   let currentStepId = run.current_step_id;
   let status = run.status;
+  // reset to running if this is a retry that was scheduled
+  if (status === "retrying") status = "running";
 
   // If no current step, start at the first step
   if (!currentStepId && steps.length > 0) {
@@ -159,7 +181,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3 WHERE id = $4",
         ["failed", currentStepId, JSON.stringify(variables), runId],
       );
-      console.error(`[playbook] Run ${runId}: step "${currentStepId}" not found in playbook`);
+  logger.error("playbook.step_not_found", { run_id: runId, step_id: currentStepId });
       break;
     }
 
@@ -190,17 +212,38 @@ export async function advanceRun(runId: number): Promise<RunResult> {
     try {
       result = await handler.execute(step, ctx);
     } catch (err) {
-      // Handler threw — mark step and run as failed
+      // Mark step execution as failed
       await execute(
         "UPDATE playbook_step_executions SET status = 'failed', error = $1, completed_at = NOW() WHERE id = $2",
         [String(err), execId],
       );
+
+      // Check if this is a retriable transient error
+      if (isRetriableError(err) && run.retry_count < MAX_RETRIES) {
+        const delaySec = RETRY_DELAYS_SEC[Math.min(run.retry_count, RETRY_DELAYS_SEC.length - 1)];
+        await execute(
+          `UPDATE playbook_runs SET status = 'retrying', retry_count = retry_count + 1,
+            next_retry_at = NOW() + ($1 || ' seconds')::interval WHERE id = $2`,
+          [delaySec, runId],
+        );
+        logger.warn("playbook.step_retry_scheduled", {
+          run_id: runId,
+          step_id: step.id,
+          retry_count: run.retry_count + 1,
+          delay_sec: delaySec,
+          error: String(err),
+        });
+        status = "retrying";
+        return { runId, status, currentStepId, context: variables };
+      }
+
+      // Non-retriable or exhausted retries — permanent failure
       status = "failed";
       await execute(
         "UPDATE playbook_runs SET status = 'failed', current_step_id = $1, context = $2 WHERE id = $3",
         [currentStepId, JSON.stringify(variables), runId],
       );
-      console.error(`[playbook] Run ${runId}: step "${step.id}" threw:`, err);
+      logger.error("playbook.step_threw", { run_id: runId, step_id: step.id, error: String(err) });
       break;
     }
 
@@ -249,7 +292,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
           "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3 WHERE id = $4",
           [status, currentStepId, JSON.stringify(variables), runId],
         );
-        console.log(`[playbook] Run ${runId}: paused at step "${currentStepId}" with status "${status}"`);
+        logger.info("playbook.run_paused", { run_id: runId, step_id: currentStepId, status });
         return { runId, status, currentStepId, context: variables };
       }
 
@@ -260,6 +303,24 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       }
 
       case "fail": {
+        // Check if this is a retriable failure from the step handler
+        if (result.decision.retriable && run.retry_count < MAX_RETRIES) {
+          const delaySec = RETRY_DELAYS_SEC[Math.min(run.retry_count, RETRY_DELAYS_SEC.length - 1)];
+          await execute(
+            `UPDATE playbook_runs SET status = 'retrying', retry_count = retry_count + 1,
+              next_retry_at = NOW() + ($1 || ' seconds')::interval WHERE id = $2`,
+            [delaySec, runId],
+          );
+          logger.warn("playbook.step_retry_scheduled", {
+            run_id: runId,
+            step_id: step.id,
+            retry_count: run.retry_count + 1,
+            delay_sec: delaySec,
+            error: result.decision.error,
+          });
+          status = "retrying";
+          return { runId, status, currentStepId, context: variables };
+        }
         status = "failed";
         await execute(
           "UPDATE playbook_step_executions SET error = $1 WHERE id = $2",
@@ -280,7 +341,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   }
 
   if (iterations >= MAX_ITERATIONS) {
-    console.error(`[playbook] Run ${runId}: hit max iterations (${MAX_ITERATIONS}), forcing failed`);
+    logger.error("playbook.max_iterations", { run_id: runId, iterations: MAX_ITERATIONS });
     status = "failed";
     await execute(
       "UPDATE playbook_runs SET status = 'failed', context = $1 WHERE id = $2",
@@ -295,9 +356,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
     await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
   } else if (status === "escalated" || status === "failed") {
     await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
+    if (status === "escalated") {
+      await sendAlert(run.workspace_id, "run_escalated", { run_id: runId, thread_id: run.thread_id }).catch(() => {});
+    }
   }
+  // retrying: don't change thread status — the run will resume automatically
 
-  console.log(`[playbook] Run ${runId}: finished with status "${status}"`);
+  logger.info("playbook.run_finished", { run_id: runId, status });
   return { runId, status, currentStepId, context: variables };
 }
 
@@ -382,6 +447,6 @@ export async function startRun(
 
   if (!row) throw new Error("Failed to create playbook run");
 
-  console.log(`[playbook] Created run ${row.id} for thread ${threadId}, playbook "${playbook.name}" v${playbook.version}`);
+  logger.info("playbook.run_created", { run_id: row.id, thread_id: threadId, playbook_name: playbook.name, version: playbook.version });
   return advanceRun(row.id);
 }

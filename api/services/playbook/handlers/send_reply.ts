@@ -99,6 +99,7 @@ RULES:
       body,
       lastInbound.message_id_header,
       ctx.threadId,
+      ctx.workspaceId,
     );
 
     console.log(`[playbook] send_reply: sent reply for run ${ctx.run.id}`);

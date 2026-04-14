@@ -442,6 +442,7 @@ export interface Playbook {
         steps: PlaybookStep[];
         version: number;
         is_active: boolean;
+        customer_silence_hours: number;
         created_at: string;
         updated_at: string;
 }
@@ -510,7 +511,7 @@ export const playbooksApi = {
                 });
         },
 
-        update(id: number, payload: { name?: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; is_active?: boolean }) {
+        update(id: number, payload: { name?: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; is_active?: boolean; customer_silence_hours?: number }) {
                 return request<{ playbook: Playbook }>(`/playbooks/${id}`, {
                         method: 'PUT',
                         body: JSON.stringify(payload)
@@ -565,5 +566,53 @@ export const playbooksApi = {
 
         rejectRun(runId: number) {
                 return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/reject`, { method: 'POST' });
+        }
+};
+
+// ─── System API ───────────────────────────────────────────────────────────────
+
+export interface FailedIngestion {
+        id: number;
+        workspace_id: number;
+        gmail_message_id: string;
+        gmail_thread_id: string;
+        error: string;
+        attempt_count: number;
+        last_attempt_at: string;
+        resolved: boolean;
+        created_at: string;
+}
+
+export interface SystemStats {
+        active_runs: Record<string, number>;
+        escalated_last_24h: number;
+        step_timing: Record<string, { avg_ms: number; p95_ms: number }>;
+        ai_calls_24h: { count: number; total_tokens: number };
+        failed_ingestions: { unresolved_count: number; recent: FailedIngestion[] };
+        rate_limit_buckets: Array<{ api: string; tokens: number; calls_total: number; last_refilled_at: string }>;
+        circuit_breaker: { open: boolean; openedAt: number | null; failureCount: number };
+}
+
+export const systemApi = {
+        getStats(workspaceId = 1) {
+                return request<SystemStats>(`/system/stats?workspace_id=${workspaceId}`);
+        },
+
+        getFailedIngestions(workspaceId = 1, showResolved = false) {
+                return request<{ ingestions: FailedIngestion[] }>(
+                        `/system/failed-ingestions?workspace_id=${workspaceId}&resolved=${showResolved}`
+                );
+        },
+
+        retryIngestion(id: number) {
+                return request<{ ok: boolean }>(`/system/failed-ingestions/${id}/retry`, { method: 'POST' });
+        },
+
+        getCircuitBreaker() {
+                return request<{ open: boolean; openedAt: number | null; failureCount: number }>('/system/circuit-breaker');
+        },
+
+        resetCircuitBreaker() {
+                return request<{ ok: boolean; state: { open: boolean } }>('/system/circuit-breaker/reset', { method: 'POST' });
         }
 };

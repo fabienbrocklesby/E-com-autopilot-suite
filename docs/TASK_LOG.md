@@ -15,6 +15,76 @@ Each entry:
 
 ---
 
+## Phase 6: Hardening — Complete
+
+**Phase**: Phase 6
+**Status**: Complete
+**All 8 tasks implemented.**
+
+### What was built
+
+1. **Customer silence timeout** (`timeout_worker.ts`): A 30-minute interval worker queries `waiting_for_customer` runs where `updated_at` is older than `customer_silence_hours` hours. Escalates silently by setting status to `escalated`, inserting a `_silence_timeout` step execution, and firing an alert. `customer_silence_hours` is now a configurable INT on the `playbooks` table (migration 013), defaults to 168 (1 week). The playbook editor UI exposes this field.
+
+2. **AI retries + circuit breaker** (`services/ai.ts`): `chatCompletion()` retries up to 3 times on 429/5xx with exponential backoff (1s, 2s, 4s). Respects `Retry-After` header on 429. Module-level circuit breaker opens after 5 failures in 60s, cools for 2 minutes. State exposed via `getCircuitBreakerState()` / `resetCircuitBreaker()`. Manual reset available on `/system` dashboard.
+
+3. **Retry queue for failed steps** (`retry_worker.ts`): Runs marked `retrying` are re-attempted every 5 minutes. Delay schedule: 5m, 15m, 30m, 1h, 2h (capped at 5 attempts). After 5 failures the run is escalated. `playbook_runs` gained `retry_count` and `next_retry_at` (migration 014). The executor marks a step retriable when the error is an AppError 429/502/503 or when the step decision sets `retriable: true`.
+
+4. **Rate limiting** (`services/rate_limit.ts`): Token bucket per workspace per API, backed by Postgres `rate_limit_buckets` table (migration 015). Limits: Gmail 50/s, Sheets 2/s, OpenAI 1/s. `rateLimitedCall()` atomically refills and consumes tokens. `sendReply` and `processNewMessages` in `gmail.ts` are wrapped. `processRetryRuns` in the retry worker skips rate-limited calls cleanly.
+
+5. **Dead letter queue** (`services/gmail.ts` + migration 016): `processNewMessages` catches per-message errors, inserts into `failed_ingestions` (upsert — idempotent on re-runs), logs and continues. The retry worker retries each DLQ entry up to 3×, then marks resolved + sends a `ingestion_failed_permanently` alert. Admin UI at `/system/failed-ingestions`.
+
+6. **Structured logging** (`services/logger.ts`): All `console.log/warn/error` across `main.ts`, `gmail.ts`, `executor.ts`, `ai.ts` replaced with `logger.info/warn/error` emitting JSON lines: `{ timestamp, level, event, ...data }`.
+
+7. **Observability dashboard** (`routes/system.ts` + `frontend/src/routes/system/`): `GET /system/stats` returns active run counts by status, escalations in 24h, step timing avg/p95, AI call counts and tokens, failed ingestion summary, rate limit bucket states, circuit breaker state. Frontend at `/system` auto-refreshes every 30s.
+
+8. **Alerting hook** (`services/alerts.ts`): `sendAlert(workspaceId, event, data)` reads `alert_webhook_url` and `alert_events` from the `settings` table and POSTs a JSON payload. Events: `run_escalated`, `ingestion_failed_permanently`, `circuit_breaker_opened`, `rate_limit_sustained`.
+
+### Migrations (apply in order)
+- `013_playbook_timeouts.sql` — `playbooks.customer_silence_hours`, `system_state` table
+- `014_run_retries.sql` — `playbook_runs.retry_count`, `.next_retry_at`, `'retrying'` status
+- `015_rate_limit_buckets.sql` — `rate_limit_buckets` table
+- `016_failed_ingestions.sql` — `failed_ingestions` table, seeds alert settings rows
+
+### Files changed
+```
+api/db/migrations/013_playbook_timeouts.sql      (new)
+api/db/migrations/014_run_retries.sql            (new)
+api/db/migrations/015_rate_limit_buckets.sql     (new)
+api/db/migrations/016_failed_ingestions.sql      (new)
+api/services/logger.ts                           (new)
+api/services/rate_limit.ts                       (new)
+api/services/alerts.ts                           (new)
+api/services/ai.ts                               (modified — retries, circuit breaker)
+api/services/gmail.ts                            (modified — DLQ, rate limit, retryIngest)
+api/services/playbook/types.ts                   (modified — retrying status, retry fields)
+api/services/playbook/executor.ts                (modified — retry logic, logging)
+api/services/playbook/timeout_worker.ts          (new)
+api/services/playbook/retry_worker.ts            (new)
+api/services/playbook/handlers/ask_customer.ts   (modified — workspaceId passthrough)
+api/services/playbook/handlers/send_reply.ts     (modified — workspaceId passthrough)
+api/routes/system.ts                             (new)
+api/routes/playbooks.ts                          (modified — customer_silence_hours)
+api/main.ts                                      (modified — workers, system route, logging)
+frontend/src/lib/api.ts                          (modified — systemApi, types)
+frontend/src/routes/+layout.svelte               (modified — System nav link)
+frontend/src/routes/system/+page.svelte          (new — dashboard)
+frontend/src/routes/system/failed-ingestions/+page.svelte  (new — DLQ admin)
+frontend/src/routes/playbooks/[id]/+page.svelte  (modified — silence timeout input)
+```
+
+### Validation
+- `deno check main.ts` — passed, 0 errors
+- `npm run check` — 1 pre-existing env var error (PUBLIC_API_BASE_URL not set in CI), 29 pre-existing a11y warnings, 0 new errors
+
+### Decisions
+- Circuit breaker is module-level (process-scoped). Not persisted across restarts — intentional: a fresh process should probe again.
+- Token bucket stored in Postgres so multi-instance deploys share rate limit state.
+- DLQ uses `ON CONFLICT DO UPDATE` so a flapping message never creates duplicate rows.
+- `retryIngest` in gmail.ts re-uses `ingestMessage` — same path as first ingestion, DLQ logic included.
+- `sendReply` signature kept backward-compatible (workspaceId defaults to 1) so existing callers need no change.
+
+---
+
 ## 2026-04-14 — Phase 5: Smart Playbooks
 
 **Phase**: Phase 5

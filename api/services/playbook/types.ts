@@ -122,6 +122,7 @@ export interface Playbook {
   steps: PlaybookStep[];
   version: number;
   is_active: boolean;
+  customer_silence_hours: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -135,6 +136,8 @@ export interface PlaybookRun {
   current_step_id: string | null;
   status: RunStatus;
   context: Record<string, unknown>;
+  retry_count: number;
+  next_retry_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -145,7 +148,8 @@ export type RunStatus =
   | "waiting_for_human"
   | "complete"
   | "failed"
-  | "escalated";
+  | "escalated"
+  | "retrying";
 
 export interface StepExecution {
   id: number;
@@ -192,7 +196,7 @@ export type StepDecision =
   | { action: "advance_to"; stepId: string }
   | { action: "pause"; status: "waiting_for_customer" | "waiting_for_human" }
   | { action: "complete" }
-  | { action: "fail"; error: string };
+  | { action: "fail"; error: string; retriable?: boolean };
 
 export interface StepResult {
   decision: StepDecision;

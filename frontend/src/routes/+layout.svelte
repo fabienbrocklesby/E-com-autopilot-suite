@@ -40,7 +40,8 @@
                 { href: '/playbooks', label: 'Playbooks' },
                 { href: '/sheet-rules', label: 'Sheet Rules' },
                 { href: '/sheet-updates', label: 'Sheet Updates' },
-                { href: '/settings', label: 'Settings' }
+                { href: '/settings', label: 'Settings' },
+                { href: '/system', label: 'System' },
         ];
 </script>
 
