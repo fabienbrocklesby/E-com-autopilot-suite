@@ -4,6 +4,7 @@
 import type { StepHandler, StepType } from "./types.ts";
 import { extractHandler } from "./handlers/extract.ts";
 import { branchHandler } from "./handlers/branch.ts";
+import { evaluateHandler } from "./handlers/evaluate.ts";
 import { askCustomerHandler } from "./handlers/ask_customer.ts";
 import { sendReplyHandler } from "./handlers/send_reply.ts";
 import { completeHandler } from "./handlers/complete.ts";
@@ -15,6 +16,7 @@ import { updateSheetHandler } from "./handlers/update_sheet.ts";
 const handlers: Record<string, StepHandler> = {
   extract: extractHandler,
   branch: branchHandler,
+  evaluate: evaluateHandler,
   ask_customer: askCustomerHandler,
   send_reply: sendReplyHandler,
   complete: completeHandler,

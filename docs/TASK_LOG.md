@@ -15,6 +15,75 @@ Each entry:
 
 ---
 
+## 2026-04-14 — Phase 5: Smart Playbooks
+
+**Phase**: Phase 5
+**Status**: complete
+
+### What was done
+
+**Change 1 — Loop detection in executor**
+- `api/services/playbook/executor.ts`: Added `escalateRunDueToLoop()` helper. Before each step execution, queries the last 10 step executions: if the same step has fired 3+ times, or total executions exceed 50, the run is escalated with a `_loop_detected` sentinel step execution. Thread is moved to `in_review`.
+
+**Change 2 — AI-driven `ask_customer`**
+- `api/services/playbook/types.ts`: Updated `AskCustomerStep` to support `goal`, `required_context`, `voice_hint` (new) alongside legacy `message` field.
+- `api/services/playbook/handlers/ask_customer.ts`: Full rewrite. Deterministic pre-check skips sending if all `required_context` vars already present. Otherwise calls AI with full context, thread history, voice, and previous messages. AI chooses: skip (with extracted values), escalate, or ask (writes contextual message). Legacy literal `message` path preserved.
+
+**Change 3 — New `evaluate` step type**
+- `api/services/playbook/types.ts`: Added `EvaluateStep` interface. Added to `PlaybookStep` union.
+- `api/services/playbook/handlers/evaluate.ts`: New handler. If required vars present: AI confirms or escalates. If missing: AI detects if info was given in different form (`actually_have_it`) or routes to missing/escalate.
+- `api/services/playbook/registry.ts`: Registered `evaluate` handler.
+- `api/services/playbook/parser.ts`: Added `evaluate` to `VALID_STEP_TYPES`, added `evaluate` reference validation.
+- `api/services/playbook/dry-run.ts`: Handles `evaluate` in the simulation loop (deterministic routing on required_context presence).
+
+**Change 4 — AI-drafted `send_reply`**
+- `api/services/playbook/types.ts`: Updated `SendReplyStep` to support `goal`, `reference_context`, `voice_hint` alongside legacy `message` field.
+- `api/services/playbook/handlers/send_reply.ts`: Full rewrite. If `goal` is present (or legacy `ai_generate_using_category_voice`): calls AI to draft a contextual reply referencing `reference_context` values. Backward-compat literal `message` path preserved.
+- `api/services/playbook/dry-run.ts`: Shows AI-draft description in simulation trace.
+
+**Change 5 — `manual_approval` with input capture**
+- `api/services/playbook/types.ts`: Updated `ManualApprovalStep` with `capture_input`, `input_prompt`, `input_context_key`, `draft_preview`.
+- `api/services/playbook/handlers/manual_approval.ts`: Includes full config in output so review UI can render it.
+- `api/routes/playbooks.ts`: `POST /playbooks/runs/:runId/approve` now accepts optional `{ input: string }` body. Merges input into context under `input_context_key`. List query returns `step_capture_input` and `step_input_prompt` via SQL CASE expression.
+- `frontend/src/lib/api.ts`: `PlaybookRun` type includes `step_capture_input` and `step_input_prompt`. `approveRun()` accepts optional `input` string.
+- `frontend/src/routes/review/+page.svelte`: When `run.step_capture_input` is true, shows a textarea with the `input_prompt` label. Approve button submits textarea content. Per-run `runInputs` state map.
+
+**Change 6 — Parser updates**
+- `api/services/playbook/parser.ts`: Updated `STEP_TYPE_REFERENCE` with new step shapes for `ask_customer` (goal-based), `evaluate` (new), `send_reply` (goal+reference_context preferred), `manual_approval` (capture_input). Added guidance section explaining when to use branch vs evaluate, how to write ask_customer goal, when to use capture_input.
+
+**Docs**
+- `docs/PLAYBOOK_ENGINE.md`: Step types table updated with new shapes for all changed step types plus `evaluate`.
+
+### Validation
+
+- `deno check main.ts` passes with 0 errors.
+- `svelte-check` passes with 0 new errors (1 pre-existing PUBLIC_API_BASE_URL env var error, 28 pre-existing accessibility warnings).
+
+### Decisions made
+
+- `ask_customer` backward compat: if `goal` is absent, send `message` literally. Allows old playbooks to continue running.
+- `send_reply` backward compat: if `message` is a string and `goal` is absent, interpolate and send. If `goal` present, call AI.
+- Loop detection uses `_loop_detected` as step_id/step_type in the `playbook_step_executions` table (step_type is TEXT, no constraint). Status is `'failed'`.
+- `evaluate` AI confirmation when all required vars present: if AI parse fails, defaults to `satisfied` (fail-open, avoids false escalations).
+- `evaluate` missing vars: if AI parse fails, defaults to `missing` (fail-safe, routes to ask step).
+- `step_capture_input` and `step_input_prompt` are surfaced via SQL CASE expressions in the runs list query — no schema change needed.
+
+### Open questions / blockers
+
+- Refund playbook needs to be regenerated from the plain-language description in the Phase 5 prompt using the updated parser.
+- Tracking, order change, damaged playbooks also need regeneration.
+- End-to-end test with the demo thread ("I need a refund") not yet run — requires live Gmail + Sheet.
+- `dry-run.ts` `evaluate` case is deterministic (no AI call in dry-run) — the AI confirmation path only runs in real execution.
+
+### Next
+
+1. Regenerate refund playbook from plain-language description via the UI parser.
+2. Test end-to-end with the demo email.
+3. Regenerate other category playbooks.
+4. Monitor for loop detection escalations in production.
+
+---
+
 ## 2026-04-13 — Phase 4: Migration and Polish
 
 **Phase**: Phase 4

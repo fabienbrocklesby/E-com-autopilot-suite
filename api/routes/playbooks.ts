@@ -55,7 +55,7 @@ playbooksRouter.get("/runs", async (c) => {
 
   const where = conditions.join(" AND ");
 
-  const runs = await query<PlaybookRun & { playbook_name: string; step_reason: string | null }>(
+  const runs = await query<PlaybookRun & { playbook_name: string; step_reason: string | null; step_capture_input: boolean; step_input_prompt: string | null }>(
     `SELECT pr.*, p.name AS playbook_name,
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
@@ -66,7 +66,27 @@ playbooksRouter.get("/runs", async (c) => {
           LIMIT 1
         )
         ELSE NULL
-      END AS step_reason
+      END AS step_reason,
+      CASE WHEN pr.status = 'waiting_for_human'
+        THEN (
+          SELECT (step->>'capture_input')::boolean
+          FROM jsonb_array_elements(p.steps) AS step
+          WHERE step->>'id' = pr.current_step_id
+            AND step->>'type' = 'manual_approval'
+          LIMIT 1
+        )
+        ELSE false
+      END AS step_capture_input,
+      CASE WHEN pr.status = 'waiting_for_human'
+        THEN (
+          SELECT step->>'input_prompt'
+          FROM jsonb_array_elements(p.steps) AS step
+          WHERE step->>'id' = pr.current_step_id
+            AND step->>'type' = 'manual_approval'
+          LIMIT 1
+        )
+        ELSE NULL
+      END AS step_input_prompt
      FROM playbook_runs pr
      JOIN playbooks p ON p.id = pr.playbook_id
      WHERE ${where}
@@ -129,6 +149,26 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
   }
 
   const approvalStep = currentStep as ManualApprovalStep;
+
+  // Accept optional human input and merge into context
+  let body: { input?: string } = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    // no body — that's fine
+  }
+
+  if (body.input !== undefined && body.input !== null) {
+    const contextKey = approvalStep.input_context_key ?? "human_notes";
+    const currentContext =
+      typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+    currentContext[contextKey] = body.input;
+    await execute(
+      "UPDATE playbook_runs SET context = $1 WHERE id = $2",
+      [JSON.stringify(currentContext), runId],
+    );
+  }
+
   const nextStepId = approvalStep.on_approve;
 
   await execute(

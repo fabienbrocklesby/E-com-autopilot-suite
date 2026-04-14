@@ -57,10 +57,11 @@ playbook_step_executions
 | `extract` | AI reads thread, pulls named variables into context | `variables: string[]` | advance |
 | `find_sheet_row` | Search sheet for a matching row, save row number to context | `match_attempts: [{column, context_var}]` | advance / fail |
 | `update_sheet` | Write specific columns on a row | `row_var: string, updates: [{column, value_or_var}]` | advance |
-| `ask_customer` | Send a question, pause until customer replies | `message: string, on_reply_goto: string` | pause(waiting_for_customer) |
-| `branch` | Route based on condition over context | `condition: string, if_true: string, if_false: string` | advance to chosen step |
-| `manual_approval` | Hold for human, optionally with pre-drafted reply | `reason: string, draft_template?: string, on_approve: string, on_reject: string` | pause(waiting_for_human) |
-| `send_reply` | Send reply (template or AI-generated) | `message: string \| { from_template: string } \| { ai_generate_using_category_voice: true }` | advance |
+| `ask_customer` | AI-driven: writes a contextual message to gather missing info. Skips if info already present. Escalates if conversation is stuck. | `goal: string, required_context: string[], on_reply_goto: string, voice_hint?: string, message?: string` (message is legacy fallback) | pause(waiting_for_customer) or advance_to or fail |
+| `branch` | Deterministic routing on a simple condition. Use only for literal null/value checks. | `condition: string, if_true: string, if_false: string` | advance to chosen step |
+| `evaluate` | AI-driven three-way routing. Use when the decision requires judgment: "do we have enough info?", "is the conversation stuck?". | `goal: string, required_context: string[], if_satisfied_goto: string, if_missing_goto: string, if_escalate_goto: string` | advance to chosen step |
+| `manual_approval` | Hold for human. Captures free-text input (e.g. Stripe transaction ID) when `capture_input: true`. | `reason: string, capture_input?: boolean, input_prompt?: string, input_context_key?: string, on_approve: string, on_reject: string` | pause(waiting_for_human) |
+| `send_reply` | Send reply. Preferred: AI-drafted from goal + reference_context. Fallback: literal message. | `goal?: string, reference_context?: string[], voice_hint?: string, message?: string` | advance |
 | `complete` | End the run cleanly | none | complete |
 | `escalate` | End the run, flag for human, leave thread in review | `reason: string` | fail |
 

@@ -12,6 +12,7 @@ const VALID_STEP_TYPES = [
   "update_sheet",
   "ask_customer",
   "branch",
+  "evaluate",
   "manual_approval",
   "send_reply",
   "complete",
@@ -29,25 +30,30 @@ const STEP_TYPE_REFERENCE = `Available step types and their required fields (ret
 3. update_sheet — Write values to columns on a found row
    { "id": "update_1", "type": "update_sheet", "row_var": "row_number", "updates": [{"column": "Status", "value_or_var": "Refund Requested"}, {"column": "Reason", "value_or_var": "{refund_reason}"}] }
 
-4. ask_customer — Send a question to the customer and pause until they reply
-   { "id": "ask_1", "type": "ask_customer", "message": "Could you please provide your order number?", "on_reply_goto": "extract_1" }
+4. ask_customer — AI-driven: sends a contextual message to gather missing info. The AI writes the actual message at runtime based on goal + context. Do NOT write the literal message here.
+   { "id": "ask_1", "type": "ask_customer", "goal": "Get the order number and reason for refund so we can process it", "required_context": ["order_number", "refund_reason"], "on_reply_goto": "extract_1" }
 
-5. branch — Route to different steps based on whether a context variable exists
+5. branch — Deterministic routing on a simple condition. Use ONLY for literal null-checks or simple comparisons. Do NOT use for judgment calls about conversation state.
    { "id": "branch_1", "type": "branch", "condition": "context.order_number != null", "if_true": "find_1", "if_false": "ask_1" }
    Condition patterns: "context.VAR != null" | "context.VAR == null" | "context.VAR" (truthy)
 
-6. manual_approval — Pause and wait for a human to approve before continuing
-   { "id": "approval_1", "type": "manual_approval", "reason": "Refund over £50 — needs manager sign-off", "draft_template": "Hi {customer_name}, your refund has been approved.", "on_approve": "send_confirm", "on_reject": "escalate_1" }
+6. evaluate — AI-driven three-way routing. Use when the decision involves judgment: "do we have enough info?", "is the conversation stuck?", "is something wrong?". Use this instead of branch for anything requiring judgment.
+   { "id": "evaluate_1", "type": "evaluate", "goal": "Do we have a sheet row and a refund reason to proceed?", "required_context": ["row_number", "refund_reason"], "if_satisfied_goto": "update_1", "if_missing_goto": "ask_1", "if_escalate_goto": "escalate_1" }
 
-7. send_reply — Send a reply to the customer and continue
-   { "id": "send_1", "type": "send_reply", "message": "Great news — your refund is being processed. You'll see it in 3–5 business days." }
-   For AI-generated replies: { "id": "send_1", "type": "send_reply", "message": { "ai_generate_using_category_voice": true } }
+7. manual_approval — Pause and wait for a human. Set capture_input: true when the human is performing an external action (processing a refund, fixing an order, etc.) and you need their notes or transaction ID.
+   { "id": "approval_1", "type": "manual_approval", "reason": "Process this refund in Stripe. Enter transaction ID and amount when done.", "capture_input": true, "input_prompt": "Stripe transaction ID and amount (e.g. 'txn_abc123, $89.99')", "input_context_key": "refund_notes", "on_approve": "update_2", "on_reject": "escalate_1" }
+   For simple sign-off (no action required): { "id": "approval_1", "type": "manual_approval", "reason": "Review this before sending", "on_approve": "send_1", "on_reject": "escalate_1" }
 
-8. complete — End the run cleanly
+8. send_reply — Send a reply to the customer. Prefer goal + reference_context for AI-drafted contextual replies. Only use literal message for very simple fixed text.
+   AI-drafted (preferred): { "id": "send_1", "type": "send_reply", "goal": "Confirm the refund is on its way and mention the amount", "reference_context": ["refund_notes", "customer_name"] }
+   Literal (only for simple fixed text): { "id": "send_1", "type": "send_reply", "message": "Your order has been received." }
+
+9. complete — End the run cleanly
    { "id": "complete_1", "type": "complete" }
 
-9. escalate — Flag for human review and end the run
-   { "id": "escalate_1", "type": "escalate", "reason": "Could not find order in sheet" }`;
+10. escalate — Flag for human review and end the run
+    { "id": "escalate_1", "type": "escalate", "reason": "Could not find order in sheet" }`;
+
 
 export interface ParseResult {
   steps: PlaybookStep[];
@@ -83,12 +89,32 @@ ${STEP_TYPE_REFERENCE}
 
 Rules:
 - Each step id must be unique, short, and descriptive in snake_case (e.g. "extract_1", "ask_order_1").
-- Steps run sequentially unless a branch or advance_to redirects flow.
+- Steps run sequentially unless a branch/evaluate redirects flow.
 - ask_customer "on_reply_goto" must be an id that exists in the steps array.
 - branch "if_true" and "if_false" must be ids that exist in the steps array.
+- evaluate "if_satisfied_goto", "if_missing_goto", and "if_escalate_goto" must be ids that exist in the steps array.
 - manual_approval "on_approve" and "on_reject" must be ids in the steps array.
 - Always end with "complete" or "escalate".
 - Return ONLY a JSON object: { "steps": [...] }. No explanation. No markdown fences.
+
+Guidance on when to use each routing step:
+- Use "evaluate" for decisions that require judgment: "do we have enough info?", "is this stuck?", "is something off?"
+- Use "branch" ONLY for simple literal checks: "is variable X null?", "is variable X equal to some value?"
+- Never use "branch" for conversation-state decisions — use "evaluate"
+
+Guidance on ask_customer:
+- Always use the new format with "goal" and "required_context". Never write a literal message in the playbook.
+- "goal" should describe WHAT we need and WHY, in one sentence.
+
+Guidance on send_reply:
+- Almost always use "goal" + "reference_context" for AI-drafted contextual replies.
+- Only use "message" for very simple fixed text (e.g. "Your request has been received.").
+- "reference_context" lists variable names whose values should naturally appear in the reply.
+
+Guidance on manual_approval:
+- Set "capture_input": true whenever the human is taking an external action (processing payment, fixing order, contacting supplier).
+- "input_prompt" should tell the human exactly what to enter (e.g. "Stripe transaction ID and amount").
+- "input_context_key" names where the captured text lands in context (default "human_notes").
 ${sheetContext}${categoryContext}`;
 
   const content = await chatCompletion(
@@ -147,6 +173,18 @@ ${sheetContext}${categoryContext}`;
       }
       if (s.if_false && !stepIds.has(s.if_false)) {
         warnings.push(`Step "${step.id}": if_false "${s.if_false}" not found`);
+      }
+    }
+    if (step.type === "evaluate") {
+      const s = step as { if_satisfied_goto?: string; if_missing_goto?: string; if_escalate_goto?: string };
+      if (s.if_satisfied_goto && !stepIds.has(s.if_satisfied_goto)) {
+        warnings.push(`Step "${step.id}": if_satisfied_goto "${s.if_satisfied_goto}" not found`);
+      }
+      if (s.if_missing_goto && !stepIds.has(s.if_missing_goto)) {
+        warnings.push(`Step "${step.id}": if_missing_goto "${s.if_missing_goto}" not found`);
+      }
+      if (s.if_escalate_goto && !stepIds.has(s.if_escalate_goto)) {
+        warnings.push(`Step "${step.id}": if_escalate_goto "${s.if_escalate_goto}" not found`);
       }
     }
     if (step.type === "manual_approval") {

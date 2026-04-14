@@ -9,6 +9,7 @@ import type {
   PlaybookStep,
   AskCustomerStep,
   BranchStep,
+  EvaluateStep,
   SendReplyStep,
   EscalateStep,
   ManualApprovalStep,
@@ -139,12 +140,16 @@ export async function dryRunPlaybook(
 
       case "ask_customer": {
         const askStep = step as AskCustomerStep;
-        const message = interpolate(askStep.message, context);
+        const message = askStep.message
+          ? interpolate(typeof askStep.message === "string" ? askStep.message : "", context)
+          : `[AI would ask for: ${(askStep.required_context ?? []).join(", ")} — goal: ${askStep.goal ?? "gather info"}]`;
         trace.push({
           stepId: step.id,
           stepType: step.type,
           status: "paused",
-          summary: "Would send question and wait for customer reply",
+          summary: askStep.goal
+            ? `Would AI-write question to gather: ${(askStep.required_context ?? []).join(", ")}`
+            : "Would send question and wait for customer reply",
           messageSent: message,
         });
         finalStatus = "waiting_for_customer";
@@ -152,15 +157,36 @@ export async function dryRunPlaybook(
         break;
       }
 
+      case "evaluate": {
+        const evalStep = step as EvaluateStep;
+        const missing = (evalStep.required_context ?? []).filter((v) => context[v] == null);
+        const routeTo = missing.length === 0 ? evalStep.if_satisfied_goto : evalStep.if_missing_goto;
+        trace.push({
+          stepId: step.id,
+          stepType: step.type,
+          status: "success",
+          summary: missing.length === 0
+            ? `evaluate: satisfied → ${evalStep.if_satisfied_goto}`
+            : `evaluate: missing [${missing.join(", ")}] → ${evalStep.if_missing_goto}`,
+        });
+        currentStepId = routeTo;
+        break;
+      }
+
       case "send_reply": {
         const sendStep = step as SendReplyStep;
         let message: string;
-        if (typeof sendStep.message === "string") {
+        if (sendStep.goal) {
+          const refs = (sendStep.reference_context ?? []).map((k) => `${k}=${context[k] ?? "?"}`);
+          message = `[AI would draft reply — goal: "${sendStep.goal}"${refs.length > 0 ? `, referencing: ${refs.join(", ")}` : ""}]`;
+        } else if (typeof sendStep.message === "string") {
           message = interpolate(sendStep.message, context);
-        } else if ("ai_generate_using_category_voice" in sendStep.message) {
+        } else if (sendStep.message && "ai_generate_using_category_voice" in (sendStep.message as object)) {
           message = "[AI would generate reply using category voice and tone]";
-        } else {
+        } else if (sendStep.message) {
           message = interpolate((sendStep.message as { from_template: string }).from_template, context);
+        } else {
+          message = "[No message or goal configured]";
         }
         trace.push({
           stepId: step.id,
@@ -175,14 +201,14 @@ export async function dryRunPlaybook(
 
       case "manual_approval": {
         const approvalStep = step as ManualApprovalStep;
+        const captureNote = approvalStep.capture_input
+          ? ` (captures input: "${approvalStep.input_prompt ?? "notes"}" → ${approvalStep.input_context_key ?? "human_notes"})`
+          : "";
         trace.push({
           stepId: step.id,
           stepType: step.type,
           status: "paused",
-          summary: `Would pause for human approval: "${approvalStep.reason}"`,
-          messageSent: approvalStep.draft_template
-            ? interpolate(approvalStep.draft_template, context)
-            : undefined,
+          summary: `Would pause for human approval: "${approvalStep.reason}"${captureNote}`,
         });
         finalStatus = "waiting_for_human";
         currentStepId = null;

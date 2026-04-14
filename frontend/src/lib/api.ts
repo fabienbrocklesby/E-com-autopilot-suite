@@ -459,33 +459,33 @@ export interface PlaybookRun {
         updated_at: string;
         playbook_name?: string;
         step_reason?: string | null;
+	step_capture_input?: boolean | null;
+	step_input_prompt?: string | null;
 }
 
 export interface StepExecution {
-        id: number;
-        run_id: number;
-        step_id: string;
-        step_type: string;
-        status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
-        input: Record<string, unknown> | null;
-        output: Record<string, unknown> | null;
-        error: string | null;
-        ai_calls: Array<{ model: string; prompt: string; response: string; tokens: number }> | null;
-        created_at: string;
-        completed_at: string | null;
+	id: number;
+	run_id: number;
+	step_id: string;
+	step_type: string;
+	status: 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+	input: Record<string, unknown> | null;
+	output: Record<string, unknown> | null;
+	error: string | null;
+	ai_calls: Array<{ model: string; prompt: string; response: string; tokens: number }> | null;
+	created_at: string;   completed_at: string | null;
 }
 
 export interface DryRunTraceEntry {
-        stepId: string;
-        stepType: string;
-        status: 'success' | 'skipped' | 'paused' | 'failed';
-        summary: string;
-        extractedVars?: Record<string, unknown>;
-        messageSent?: string;
-        condition?: { expression: string; result: boolean };
-        aiCall?: { prompt: string; response: string };
+	stepId: string;
+	stepType: string;
+	status: 'success' | 'skipped' | 'paused' | 'failed';
+	summary: string;
+	extractedVars?: Record<string, unknown>;
+	messageSent?: string;
+	condition?: { expression: string; result: boolean };
+	aiCall?: { prompt: string; response: string };
 }
-
 export interface DryRunResult {
         playbookId: number;
         playbookName: string;
@@ -556,8 +556,11 @@ export const playbooksApi = {
                 return request<{ run: PlaybookRun; executions: StepExecution[] }>(`/playbooks/runs/${runId}`);
         },
 
-        approveRun(runId: number) {
-                return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/approve`, { method: 'POST' });
+        approveRun(runId: number, input?: string) {
+                return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/approve`, {
+                        method: 'POST',
+                        body: input !== undefined ? JSON.stringify({ input }) : undefined
+                });
         },
 
         rejectRun(runId: number) {

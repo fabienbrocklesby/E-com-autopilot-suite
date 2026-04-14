@@ -27,8 +27,13 @@ export interface UpdateSheetStep {
 export interface AskCustomerStep {
   id: string;
   type: "ask_customer";
-  message: string;
+  /** AI-driven config (preferred) */
+  goal?: string;
+  required_context?: string[];
+  voice_hint?: string;
   on_reply_goto: string;
+  /** Legacy literal message — used when goal is absent */
+  message?: string;
 }
 
 export interface BranchStep {
@@ -39,10 +44,31 @@ export interface BranchStep {
   if_false: string;
 }
 
+export interface EvaluateStep {
+  id: string;
+  type: "evaluate";
+  /** What decision are we making */
+  goal: string;
+  /** Context variable names that must be non-null to consider satisfied */
+  required_context: string[];
+  /** Step to jump to when all required_context present and AI confirms valid */
+  if_satisfied_goto: string;
+  /** Step to jump to when required info is missing */
+  if_missing_goto: string;
+  /** Step to jump to when AI detects something wrong even with info present */
+  if_escalate_goto: string;
+  optional_context?: string[];
+}
+
 export interface ManualApprovalStep {
   id: string;
   type: "manual_approval";
   reason: string;
+  capture_input?: boolean;
+  input_prompt?: string;
+  input_context_key?: string;
+  draft_preview?: { goal: string; reference_context?: string[] };
+  /** @deprecated use capture_input flow instead */
   draft_template?: string;
   on_approve: string;
   on_reject: string;
@@ -51,7 +77,13 @@ export interface ManualApprovalStep {
 export interface SendReplyStep {
   id: string;
   type: "send_reply";
-  message: string | { from_template: string } | { ai_generate_using_category_voice: true };
+  /** Literal message (legacy — if provided without goal, sent as-is) */
+  message?: string | { from_template: string } | { ai_generate_using_category_voice: true };
+  /** AI-drafted reply goal */
+  goal?: string;
+  /** Context variable names whose values should appear in the reply */
+  reference_context?: string[];
+  voice_hint?: string;
 }
 
 export interface CompleteStep {
@@ -71,6 +103,7 @@ export type PlaybookStep =
   | UpdateSheetStep
   | AskCustomerStep
   | BranchStep
+  | EvaluateStep
   | ManualApprovalStep
   | SendReplyStep
   | CompleteStep

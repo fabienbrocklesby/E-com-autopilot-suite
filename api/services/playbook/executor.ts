@@ -10,6 +10,7 @@ import type {
   RunContext,
   StepResult,
   AskCustomerStep,
+  StepExecution,
 } from "./types.ts";
 
 interface RunMessage {
@@ -26,6 +27,31 @@ export interface RunResult {
   status: PlaybookRun["status"];
   currentStepId: string | null;
   context: Record<string, unknown>;
+}
+
+/**
+ * Mark a run as escalated due to loop detection or other structural errors.
+ * Inserts a sentinel step execution record for visibility in the review queue.
+ */
+async function escalateRunDueToLoop(
+  runId: number,
+  threadId: number,
+  variables: Record<string, unknown>,
+  currentStepId: string | null,
+  reason: string,
+): Promise<RunResult> {
+  await execute(
+    "UPDATE playbook_runs SET status = 'escalated', current_step_id = $1, context = $2 WHERE id = $3",
+    [currentStepId, JSON.stringify(variables), runId],
+  );
+  await execute(
+    `INSERT INTO playbook_step_executions (run_id, step_id, step_type, status, output, completed_at)
+     VALUES ($1, '_loop_detected', '_loop_detected', 'failed', $2, NOW())`,
+    [runId, JSON.stringify({ reason })],
+  );
+  await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  console.error(`[playbook] Run ${runId}: escalated — ${reason}`);
+  return { runId, status: "escalated", currentStepId, context: variables };
 }
 
 /**
@@ -89,6 +115,42 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
   while (currentStepId && iterations < MAX_ITERATIONS) {
     iterations++;
+
+    // Loop detection: if this step has run 3+ times on this run, escalate
+    const recentExecutions = await query<StepExecution>(
+      `SELECT * FROM playbook_step_executions
+       WHERE run_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [runId],
+    );
+
+    const sameStepCount = recentExecutions.filter((e) => e.step_id === currentStepId).length;
+    if (sameStepCount >= 3) {
+      return await escalateRunDueToLoop(
+        runId,
+        run.thread_id,
+        variables,
+        currentStepId,
+        `Loop detected: step ${currentStepId} fired ${sameStepCount} times without progress`,
+      );
+    }
+
+    if (recentExecutions.length > 0) {
+      const totalRow = await queryOne<{ count: string }>(
+        "SELECT COUNT(*) as count FROM playbook_step_executions WHERE run_id = $1",
+        [runId],
+      );
+      if (parseInt(totalRow?.count ?? "0") > 50) {
+        return await escalateRunDueToLoop(
+          runId,
+          run.thread_id,
+          variables,
+          currentStepId,
+          "Exceeded 50 step executions, likely stuck in a loop",
+        );
+      }
+    }
 
     const step = steps.find((s) => s.id === currentStepId);
     if (!step) {

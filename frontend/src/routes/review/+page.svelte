@@ -19,6 +19,9 @@
   let pendingRuns = $state<PlaybookRun[]>([]);
   let runActioning = $state<number | null>(null);
 
+  // Per-run capture_input text: runId → typed text
+  let runInputs = $state<Record<number, string>>({});
+
   // Per-draft edit state: draftId → edited body
   let editingBodies = $state<Record<number, string>>({});
 
@@ -86,11 +89,12 @@
     }
   }
 
-  async function approveRun(runId: number) {
+  async function approveRun(runId: number, captureInput: boolean) {
     runActioning = runId;
     error = null;
     try {
-      await playbooksApi.approveRun(runId);
+      const input = captureInput ? runInputs[runId] : undefined;
+      await playbooksApi.approveRun(runId, input);
       successMessage = "Approved — playbook resumed.";
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
@@ -155,10 +159,25 @@
               <span class="approval-meta">Run #{run.id} · <a href="/threads/{run.thread_id}" class="thread-link">Thread #{run.thread_id}</a></span>
               <span class="approval-time">{new Date(run.updated_at).toLocaleString()}</span>
             </div>
+            {#if run.step_capture_input}
+              <div class="capture-input-area">
+                <label class="capture-label" for="run-input-{run.id}">
+                  {run.step_input_prompt ?? "Notes"}
+                </label>
+                <textarea
+                  id="run-input-{run.id}"
+                  class="capture-textarea"
+                  rows={3}
+                  placeholder={run.step_input_prompt ?? "Enter notes…"}
+                  value={runInputs[run.id] ?? ""}
+                  oninput={(e) => { runInputs[run.id] = (e.target as HTMLTextAreaElement).value; }}
+                ></textarea>
+              </div>
+            {/if}
             <div class="approval-actions">
               <button
                 class="btn btn-primary"
-                onclick={() => approveRun(run.id)}
+                onclick={() => approveRun(run.id, run.step_capture_input ?? false)}
                 disabled={runActioning === run.id}
               >
                 {runActioning === run.id ? "…" : "Approve"}
@@ -385,9 +404,8 @@
 
   .approval-card {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
+    flex-direction: column;
+    gap: 10px;
     padding: 12px 16px;
     margin-bottom: 6px;
   }
@@ -422,6 +440,36 @@
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .capture-input-area {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .capture-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+  }
+
+  .capture-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--color-surface-raised);
+    color: var(--color-text);
+    resize: vertical;
+    box-sizing: border-box;
+  }
+
+  .capture-textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
   }
 
   .empty-icon {
