@@ -415,7 +415,8 @@ export async function resumeRun(runId: number): Promise<RunResult> {
       run_id: runId,
       current_step_id: run.current_step_id,
     });
-    return { runId, status: run.status, currentStepId: run.current_step_id };
+    const context = typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+    return { runId, status: run.status, currentStepId: run.current_step_id, context };
   }
 
   return advanceRun(runId);

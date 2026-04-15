@@ -30,6 +30,12 @@ RIGHT: extract → evaluate (do we have the number?) → send_reply. Three happy
 WRONG: Adding manual_approval to a flow that just sends an automated reply.
 RIGHT: Only add manual_approval when the description says a human needs to do something.
 
+IF the description says "no need to check the sheet", "no sheet lookup", "don't look up the sheet", "no sheet", or any equivalent phrasing:
+  → Do NOT generate find_sheet_row or update_sheet steps. The client explicitly ruled them out.
+
+Sheet steps require EXPLICIT MENTION in the description. Absence of mention means absence of steps.
+When in doubt: fewer steps. The client can always add steps later. You cannot un-send a reply.
+
 ## Step array layout
 
 Happy path top to bottom. Fallbacks at the bottom. Terminals last.
@@ -227,8 +233,17 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 - `goal` (string, required): What the AI is judging.
 - `required_context` (string[], required): The MINIMUM variables needed. For any sheet-aware playbook, usually just `["row_number"]`.
 - `if_satisfied_goto` (string, required): Happy path — proceed.
-- `if_missing_goto` (string, required): Missing info — usually routes to `ask_customer`.
+- `if_missing_goto` (string, required): Missing info — routes to `ask_customer`. NEVER to `escalate`.
 - `if_escalate_goto` (string, required): Stuck/broken — routes to `escalate`.
+
+**Design rules:**
+- `if_missing_goto` MUST point to an `ask_customer` step. NEVER point it to an `escalate` step.
+  Missing a variable is not an escalation — it means we need to ask the customer.
+- `if_escalate_goto` is reserved for situations where MORE INFORMATION WON'T HELP:
+  fraud signals, policy violations, the order is cancelled, the situation is genuinely broken.
+  A variable being null because the customer didn't mention it is NOT an escalatable situation.
+- The AI inside evaluate can return "escalate" only when it detects the conversation is truly stuck
+  or the request is against policy — NOT simply because a required_context variable is absent.
 
 ### manual_approval
 
@@ -386,6 +401,45 @@ Use separate escalate steps with specific reasons for different failure paths.
 - `manual_approval.on_approve` and `on_reject` must reference existing step IDs.
 - Every playbook must end with `complete` or `escalate`.
 - Return ONLY a JSON object: `{ "steps": [...] }`. No explanation. No markdown fences.
+
+## Canonical patterns
+
+### Pattern: Ask customer for missing info, then reply
+
+Use when: the description says to ask for a piece of info if the customer didn't provide it, then reply once you have it. No sheet interaction needed.
+
+**Correct step sequence (array order matters):**
+
+```
+1. extract        — attempt to pull the variable (e.g. order_number). It will be null
+                    if the customer didn't include it. That is expected and fine.
+
+2. evaluate       — check: do we have the variable?
+                    if_satisfied_goto → send_reply  (we have it, send the reply)
+                    if_missing_goto   → ask_customer (MISSING = ASK, not escalate)
+                    if_escalate_goto  → escalate     (only for broken situations)
+
+3. send_reply     — happy path: send the reply to the customer.
+
+4. complete       — terminal success.
+
+5. ask_customer   — ask the customer for the missing variable.
+                    This PAUSES the run (status: waiting_for_customer).
+                    on_reply_goto must point back to extract_1 so the variable
+                    is extracted from the customer's reply when they respond.
+
+6. escalate       — last resort, only reached from if_escalate_goto.
+                    NOT from if_missing_goto.
+```
+
+**Critical rules for this pattern:**
+
+- `if_missing_goto` → `ask_customer`. ALWAYS. A null variable cannot escalate a run.
+- `ask_customer.on_reply_goto` → `extract_1`. Always loop back to extract so the customer's
+  reply is parsed and the variable is extracted before evaluate runs again.
+- `escalate` sits at the bottom of the array. It is ONLY reachable from `if_escalate_goto`.
+  It represents "the situation is genuinely broken" — not "we don't have the variable yet."
+- No `find_sheet_row`, no `update_sheet`, no `manual_approval` unless the description asks for them.
 
 ## Examples
 
@@ -788,3 +842,29 @@ WRONG: { "type": "manual_approval", "reason": "Review the refund request for app
 
 RIGHT: { "type": "manual_approval", "reason": "Process the refund in Stripe and enter the transaction ID", "capture_input": true, "input_prompt": "Stripe transaction ID and amount", "input_context_key": "refund_notes" }
 ```
+
+### Routing evaluate's if_missing_goto to escalate
+
+```
+WRONG:
+{
+  "type": "evaluate",
+  "required_context": ["order_number"],
+  "if_satisfied_goto": "send_1",
+  "if_missing_goto": "escalate_1",    ← WRONG: missing variable is not an escalation
+  "if_escalate_goto": "escalate_1"
+}
+
+RIGHT:
+{
+  "type": "evaluate",
+  "required_context": ["order_number"],
+  "if_satisfied_goto": "send_1",
+  "if_missing_goto": "ask_1",          ← CORRECT: ask the customer for the missing info
+  "if_escalate_goto": "escalate_1"     ← escalate only when situation is genuinely broken
+}
+```
+
+The consequence of getting this wrong: the run escalates immediately on the first email
+because the customer didn't happen to include their order number. The customer never gets
+asked. They just get treated as an unresolvable case. This is almost always wrong.

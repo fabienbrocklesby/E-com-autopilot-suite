@@ -176,7 +176,7 @@
               {#each stats.rate_limit_buckets as b}
                 <tr>
                   <td>{b.api}</td>
-                  <td>{b.tokens.toFixed(1)}</td>
+                  <td>{(+b.tokens).toFixed(1)}</td>
                   <td>{fmt(b.calls_total)}</td>
                   <td>{new Date(b.last_refilled_at).toLocaleTimeString()}</td>
                 </tr>

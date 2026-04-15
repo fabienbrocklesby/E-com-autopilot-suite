@@ -1,0 +1,237 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: ✉
+      - generic [ref=e7]: Autopilot
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - link "📥 Inbox" [ref=e10] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e11]: 📥
+          - text: Inbox
+      - listitem [ref=e12]:
+        - link "📋 Playbooks" [ref=e13] [cursor=pointer]:
+          - /url: /playbooks
+          - generic [ref=e14]: 📋
+          - text: Playbooks
+      - listitem [ref=e15]:
+        - link "⚙ Settings" [ref=e16] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e17]: ⚙
+          - text: Settings
+    - link "System" [ref=e19] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - heading "Inbox" [level=1] [ref=e22]
+      - generic [ref=e23]:
+        - generic [ref=e24]: 24 threads
+        - button "↻ Refresh" [ref=e25] [cursor=pointer]
+    - generic [ref=e26]:
+      - button "🔴 Needs attention 2 ▾" [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]: 🔴
+        - generic [ref=e29]: Needs attention
+        - generic [ref=e30]: "2"
+        - generic [ref=e31]: ▾
+      - list [ref=e32]:
+        - listitem [ref=e33]:
+          - link "Tracking Tracking Request Tracking · Failed Hey I was just curious what my tracking number is 7h ago in review" [ref=e34] [cursor=pointer]:
+            - /url: /threads/69
+            - generic [ref=e35]:
+              - generic [ref=e37]: Tracking
+              - generic [ref=e38]:
+                - generic [ref=e39]: Tracking Request
+                - generic [ref=e40]: Tracking · Failed
+                - generic [ref=e41]: Hey I was just curious what my tracking number is
+            - generic [ref=e42]:
+              - generic [ref=e43]: 7h ago
+              - generic [ref=e44]: in review
+        - listitem [ref=e45]:
+          - link "Test - refund Refund request Oi ya gronk I need a refund mate 3d ago in review" [ref=e46] [cursor=pointer]:
+            - /url: /threads/1
+            - generic [ref=e47]:
+              - generic [ref=e49]: Test - refund
+              - generic [ref=e50]:
+                - generic [ref=e51]: Refund request
+                - generic [ref=e52]: Oi ya gronk I need a refund mate
+            - generic [ref=e53]:
+              - generic [ref=e54]: 3d ago
+              - generic [ref=e55]: in review
+    - generic [ref=e56]:
+      - button "🟡 In progress 15 ▾" [ref=e57] [cursor=pointer]:
+        - generic [ref=e58]: 🟡
+        - generic [ref=e59]: In progress
+        - generic [ref=e60]: "15"
+        - generic [ref=e61]: ▾
+      - list [ref=e62]:
+        - listitem [ref=e63]:
+          - link "Kia ora! Just some good news for you...... Other Fabien Brocklesby, you have a gift offer from us! Please shop to accept it as soon as possible. ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ 6h ago new" [ref=e64] [cursor=pointer]:
+            - /url: /threads/70
+            - generic [ref=e65]:
+              - generic [ref=e67]: Kia ora! Just some good news for you......
+              - generic [ref=e68]:
+                - generic [ref=e69]: Other
+                - generic [ref=e70]: Fabien Brocklesby, you have a gift offer from us! Please shop to accept it as soon as possible. ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏
+            - generic [ref=e71]:
+              - generic [ref=e72]: 6h ago
+              - generic [ref=e73]: new
+        - listitem [ref=e74]:
+          - link "Please Confirm your offer Other Extra excitement at Apr 15, 2026 ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ 9h ago new" [ref=e75] [cursor=pointer]:
+            - /url: /threads/35
+            - generic [ref=e76]:
+              - generic [ref=e78]: Please Confirm your offer
+              - generic [ref=e79]:
+                - generic [ref=e80]: Other
+                - generic [ref=e81]: Extra excitement at Apr 15, 2026 ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌
+            - generic [ref=e82]:
+              - generic [ref=e83]: 9h ago
+              - generic [ref=e84]: new
+        - listitem [ref=e85]:
+          - link "[Task Update] Top Reddit reply opportunities for Light Lane Other Your scheduled task has been updated Task update from ChatGPT Top Reddit reply opportunities for Light Lane Your scheduled task has been updated View message ChatGPT Logo OpenAI 1455 3rd Street San 16h ago new" [ref=e86] [cursor=pointer]:
+            - /url: /threads/33
+            - generic [ref=e87]:
+              - generic [ref=e89]: "[Task Update] Top Reddit reply opportunities for Light Lane"
+              - generic [ref=e90]:
+                - generic [ref=e91]: Other
+                - generic [ref=e92]: Your scheduled task has been updated Task update from ChatGPT Top Reddit reply opportunities for Light Lane Your scheduled task has been updated View message ChatGPT Logo OpenAI 1455 3rd Street San
+            - generic [ref=e93]:
+              - generic [ref=e94]: 16h ago
+              - generic [ref=e95]: new
+        - listitem [ref=e96]:
+          - link "⚠️Your Account Will Be Deleted on 2026.04.14! Immediate Action Required Other Cloud ® Failed to attempt payment when renewing your Cloud storage subscription 0 GB 48.9GB /50 GB We failed to renew your Cloud storage Your photos and videos will be deleted!! Your payment method has 17h ago new" [ref=e97] [cursor=pointer]:
+            - /url: /threads/32
+            - generic [ref=e98]:
+              - generic [ref=e100]: ⚠️Your Account Will Be Deleted on 2026.04.14! Immediate Action Required
+              - generic [ref=e101]:
+                - generic [ref=e102]: Other
+                - generic [ref=e103]: Cloud ® Failed to attempt payment when renewing your Cloud storage subscription 0 GB 48.9GB /50 GB We failed to renew your Cloud storage Your photos and videos will be deleted!! Your payment method has
+            - generic [ref=e104]:
+              - generic [ref=e105]: 17h ago
+              - generic [ref=e106]: new
+        - listitem [ref=e107]:
+          - link "Get the ultimate guide for Seedance 2.0 Other Top tips to generate and edit with video to video on Seedance 2.0 ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ 17h ago new" [ref=e108] [cursor=pointer]:
+            - /url: /threads/31
+            - generic [ref=e109]:
+              - generic [ref=e111]: Get the ultimate guide for Seedance 2.0
+              - generic [ref=e112]:
+                - generic [ref=e113]: Other
+                - generic [ref=e114]: Top tips to generate and edit with video to video on Seedance 2.0 ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌
+            - generic [ref=e115]:
+              - generic [ref=e116]: 17h ago
+              - generic [ref=e117]: new
+        - listitem [ref=e118]:
+          - 'link "About Your Cart: A Price Went Down Other One item now has a better price. We&#39;re simply passing along the update. ✨ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ 1d ago new" [ref=e119] [cursor=pointer]':
+            - /url: /threads/27
+            - generic [ref=e120]:
+              - generic [ref=e122]: "About Your Cart: A Price Went Down"
+              - generic [ref=e123]:
+                - generic [ref=e124]: Other
+                - generic [ref=e125]: One item now has a better price. We&#39;re simply passing along the update. ✨ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌
+            - generic [ref=e126]:
+              - generic [ref=e127]: 1d ago
+              - generic [ref=e128]: new
+        - listitem [ref=e129]:
+          - link "You've unlocked a thank-you reward Other TEMU DISCOUNT CARD! We appreciate your support, Accept it ASAP. ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ 1d ago new" [ref=e130] [cursor=pointer]:
+            - /url: /threads/26
+            - generic [ref=e131]:
+              - generic [ref=e133]: You've unlocked a thank-you reward
+              - generic [ref=e134]:
+                - generic [ref=e135]: Other
+                - generic [ref=e136]: TEMU DISCOUNT CARD! We appreciate your support, Accept it ASAP. ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏
+            - generic [ref=e137]:
+              - generic [ref=e138]: 1d ago
+              - generic [ref=e139]: new
+        - listitem [ref=e140]:
+          - link "[Task Update] Top Reddit reply opportunities for Light Lane Other Your scheduled task has been updated Task update from ChatGPT Top Reddit reply opportunities for Light Lane Your scheduled task has been updated View message ChatGPT Logo OpenAI 1455 3rd Street San 1d ago new" [ref=e141] [cursor=pointer]:
+            - /url: /threads/25
+            - generic [ref=e142]:
+              - generic [ref=e144]: "[Task Update] Top Reddit reply opportunities for Light Lane"
+              - generic [ref=e145]:
+                - generic [ref=e146]: Other
+                - generic [ref=e147]: Your scheduled task has been updated Task update from ChatGPT Top Reddit reply opportunities for Light Lane Your scheduled task has been updated View message ChatGPT Logo OpenAI 1455 3rd Street San
+            - generic [ref=e148]:
+              - generic [ref=e149]: 1d ago
+              - generic [ref=e150]: new
+        - listitem [ref=e151]:
+          - 'link "Refund Refund request Refund · Waiting for customer The name is Fabien Brocklesby &gt; On 13 Apr 2026, at 11:45 PM, justfabienscoot@gmail.com wrote: &gt; &gt; Could you please provide the name or the product you ordered? 2d ago closed" [ref=e152] [cursor=pointer]':
+            - /url: /threads/19
+            - generic [ref=e153]:
+              - generic [ref=e155]: Refund
+              - generic [ref=e156]:
+                - generic [ref=e157]: Refund request
+                - generic [ref=e158]: Refund · Waiting for customer
+                - generic [ref=e159]: "The name is Fabien Brocklesby &gt; On 13 Apr 2026, at 11:45 PM, justfabienscoot@gmail.com wrote: &gt; &gt; Could you please provide the name or the product you ordered?"
+            - generic [ref=e160]:
+              - generic [ref=e161]: 2d ago
+              - generic [ref=e162]: closed
+        - listitem [ref=e163]:
+          - link "You’re all set. Other Pay only $0.01 instead of paying NZ$159.08! Shop to claim&gt; ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ 2d ago new" [ref=e164] [cursor=pointer]:
+            - /url: /threads/12
+            - generic [ref=e165]:
+              - generic [ref=e167]: You’re all set.
+              - generic [ref=e168]:
+                - generic [ref=e169]: Other
+                - generic [ref=e170]: Pay only $0.01 instead of paying NZ$159.08! Shop to claim&gt; ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌
+            - generic [ref=e171]:
+              - generic [ref=e172]: 2d ago
+              - generic [ref=e173]: new
+        - listitem [ref=e174]:
+          - link "💌You've received an amazing offer on Apr 13, 2026! Other Please unbox it ASAP&gt; ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ 2d ago new" [ref=e175] [cursor=pointer]:
+            - /url: /threads/11
+            - generic [ref=e176]:
+              - generic [ref=e178]: 💌You've received an amazing offer on Apr 13, 2026!
+              - generic [ref=e179]:
+                - generic [ref=e180]: Other
+                - generic [ref=e181]: Please unbox it ASAP&gt; ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌
+            - generic [ref=e182]:
+              - generic [ref=e183]: 2d ago
+              - generic [ref=e184]: new
+        - listitem [ref=e185]:
+          - link "Test Other Test 2d ago new" [ref=e186] [cursor=pointer]:
+            - /url: /threads/9
+            - generic [ref=e187]:
+              - generic [ref=e189]: Test
+              - generic [ref=e190]:
+                - generic [ref=e191]: Other
+                - generic [ref=e192]: Test
+            - generic [ref=e193]:
+              - generic [ref=e194]: 2d ago
+              - generic [ref=e195]: new
+        - listitem [ref=e196]:
+          - link "[Task Update] Top Reddit reply opportunities for Light Lane Other Your scheduled task has been updated Task update from ChatGPT Top Reddit reply opportunities for Light Lane Your scheduled task has been updated View message ChatGPT Logo OpenAI 1455 3rd Street San 2d ago new" [ref=e197] [cursor=pointer]:
+            - /url: /threads/8
+            - generic [ref=e198]:
+              - generic [ref=e200]: "[Task Update] Top Reddit reply opportunities for Light Lane"
+              - generic [ref=e201]:
+                - generic [ref=e202]: Other
+                - generic [ref=e203]: Your scheduled task has been updated Task update from ChatGPT Top Reddit reply opportunities for Light Lane Your scheduled task has been updated View message ChatGPT Logo OpenAI 1455 3rd Street San
+            - generic [ref=e204]:
+              - generic [ref=e205]: 2d ago
+              - generic [ref=e206]: new
+        - listitem [ref=e207]:
+          - link "You’ve earned NZ$500 for $0.01! 💖 Other Shop to confirm your eligibility and proceed with your reservation. ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ 3d ago new" [ref=e208] [cursor=pointer]:
+            - /url: /threads/7
+            - generic [ref=e209]:
+              - generic [ref=e211]: You’ve earned NZ$500 for $0.01! 💖
+              - generic [ref=e212]:
+                - generic [ref=e213]: Other
+                - generic [ref=e214]: Shop to confirm your eligibility and proceed with your reservation. ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏
+            - generic [ref=e215]:
+              - generic [ref=e216]: 3d ago
+              - generic [ref=e217]: new
+        - listitem [ref=e218]:
+          - link "Thank You! Enjoy a Blind Box Deal! Other Limited-time savings inside, grab yours now! ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ 3d ago new" [ref=e219] [cursor=pointer]:
+            - /url: /threads/4
+            - generic [ref=e220]:
+              - generic [ref=e222]: Thank You! Enjoy a Blind Box Deal!
+              - generic [ref=e223]:
+                - generic [ref=e224]: Other
+                - generic [ref=e225]: Limited-time savings inside, grab yours now! ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌ ͏ ‌
+            - generic [ref=e226]:
+              - generic [ref=e227]: 3d ago
+              - generic [ref=e228]: new
+    - button "⚪ Other 7 ▾" [ref=e230] [cursor=pointer]:
+      - generic [ref=e231]: ⚪
+      - generic [ref=e232]: Other
+      - generic [ref=e233]: "7"
+      - generic [ref=e234]: ▾

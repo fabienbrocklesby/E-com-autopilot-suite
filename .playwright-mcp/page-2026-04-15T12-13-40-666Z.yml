@@ -1,0 +1,96 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: ✉
+      - generic [ref=e7]: Autopilot
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - link "📥 Inbox" [ref=e10] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e11]: 📥
+          - text: Inbox
+      - listitem [ref=e12]:
+        - link "📋 Playbooks" [ref=e13] [cursor=pointer]:
+          - /url: /playbooks
+          - generic [ref=e14]: 📋
+          - text: Playbooks
+      - listitem [ref=e15]:
+        - link "⚙ Settings" [ref=e16] [cursor=pointer]:
+          - /url: /settings
+          - generic [ref=e17]: ⚙
+          - text: Settings
+    - link "System" [ref=e19] [cursor=pointer]:
+      - /url: /system
+  - main [ref=e20]:
+    - generic [ref=e21]:
+      - button "← Back to Inbox" [ref=e22] [cursor=pointer]
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - button "new" [ref=e25] [cursor=pointer]
+          - button "in review" [ref=e26] [cursor=pointer]
+          - button "replied" [ref=e27] [cursor=pointer]
+          - button "ignored" [ref=e28] [cursor=pointer]
+          - button "closed" [ref=e29] [cursor=pointer]
+        - button "⚡ Categorise" [ref=e30] [cursor=pointer]
+    - generic [ref=e32]:
+      - generic [ref=e33]:
+        - generic [ref=e34]:
+          - heading "Tracking" [level=1] [ref=e35]
+          - generic [ref=e36]:
+            - generic [ref=e37]: in review
+            - generic [ref=e38]: Tracking Request
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - generic [ref=e42]: Fabien Brocklesby <fabienbrocklesby@icloud.com>
+            - generic [ref=e43]: inbound
+            - generic [ref=e44]: 15/04/2026, 16:19:39
+          - generic [ref=e45]: Hey I was just curious what my tracking number is
+      - generic [ref=e47]:
+        - heading "Playbook Runs" [level=3] [ref=e48]
+        - generic [ref=e49]:
+          - button "Tracking failed · escalate_1" [active] [ref=e50] [cursor=pointer]:
+            - generic [ref=e53]: Tracking
+            - generic [ref=e54]:
+              - generic [ref=e55]: failed
+              - generic [ref=e56]: · escalate_1
+          - generic [ref=e58]:
+            - generic [ref=e59]:
+              - heading "Context" [level=4] [ref=e60]
+              - generic [ref=e61]:
+                - term [ref=e62]: row_number
+                - definition [ref=e63]: "2"
+                - term [ref=e64]: customer_name
+                - definition [ref=e65]: Fabien Brocklesby
+                - term [ref=e66]: product_description
+                - definition [ref=e67]: "null"
+            - generic [ref=e68]:
+              - heading "Steps (4)" [level=4] [ref=e69]
+              - generic [ref=e70]:
+                - generic [ref=e71]:
+                  - generic [ref=e73]: extract
+                  - code [ref=e74]: extract_1
+                  - generic [ref=e75]: success
+                - group [ref=e76]:
+                  - generic "Output" [ref=e77] [cursor=pointer]
+              - generic [ref=e78]:
+                - generic [ref=e79]:
+                  - generic [ref=e81]: find_sheet_row
+                  - code [ref=e82]: find_1
+                  - generic [ref=e83]: success
+                - group [ref=e84]:
+                  - generic "Output" [ref=e85] [cursor=pointer]
+              - generic [ref=e86]:
+                - generic [ref=e87]:
+                  - generic [ref=e89]: evaluate
+                  - code [ref=e90]: evaluate_1
+                  - generic [ref=e91]: success
+                - group [ref=e92]:
+                  - generic "Output" [ref=e93] [cursor=pointer]
+              - generic [ref=e94]:
+                - generic [ref=e95]:
+                  - generic [ref=e97]: escalate
+                  - code [ref=e98]: escalate_1
+                  - generic [ref=e99]: failed
+                - generic [ref=e100]: "Escalated: Could not provide tracking update due to missing order information"
+                - group [ref=e101]:
+                  - generic "Output" [ref=e102] [cursor=pointer]

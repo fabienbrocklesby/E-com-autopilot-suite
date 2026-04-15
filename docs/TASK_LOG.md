@@ -15,6 +15,83 @@ Each entry:
 
 ---
 
+## 2026-04-15 — Verify: evaluate → ask_customer → resume cycle audit
+
+**Phase**: 5.5 (post-fix audit)
+**Status**: complete
+
+### What was done
+
+Full audit of the evaluate → ask_customer → resume execution cycle per `fix-evaluate-ask-resume.prompt.md`.
+
+#### Step 1: Code review
+
+Read `executor.ts`, `evaluate.ts`, `ask_customer.ts`, `types.ts`, `registry.ts`.
+
+**evaluate.ts** — routing correct after the fast-path fix (`6a8f95a`):
+- Deterministic pre-check: all required_context present → `advance_to if_satisfied_goto` (zero AI, zero risk).
+- AI path (vars missing): returns `advance_to if_missing_goto`, `if_satisfied_goto`, or `if_escalate_goto` from step config. NOT hardcoded to escalate.
+- Parse failure defaults to `if_missing_goto` (safe fallback to ask_customer, not escalate).
+
+**ask_customer.ts** — routing correct after skip routing fix (`a531400`):
+- All required vars present → `{ action: "advance" }` (next step in array). Correct.
+- AI says skip → `{ action: "advance" }` (next step in array). Correct.
+- AI says ask → sends message, `{ action: "pause", status: "waiting_for_customer" }`. Correct.
+- Resume handled by `resumeRun` which sets cursor to `on_reply_goto` then calls `advanceRun`. Ask_customer is NOT re-executed on resume — the run jumps directly to the configured restart point.
+
+#### Step 2: Postgres audit of failed runs
+
+Queried `playbook_step_executions` for runs 4 and 7 (the two most recent failures on threads 28 and 69):
+
+**Run 4 (escalated, evaluate → ask → loop)**: Root cause was the OLD ask_customer code that returned `advance_to on_reply_goto` when skipping. `on_reply_goto = "extract_1"`, so every skip cycled back to extract_1 instead of advancing to evaluate_1. The loop ran 52 executions before the "total > 50" safety net escalated. FIXED in commit `a531400`.
+
+**Run 7 (failed, evaluate → escalate)**: Root cause was the OLD evaluate.ts that always called AI. The step had `required_context: ["row_number"]` with `row_number = 2`, but the `goal` field said "Do we have the customer's order number?" — AI confused goal text with required variable name and returned `escalate`. FIXED in commit `6a8f95a` (fast path bypasses AI when all required vars present).
+
+#### Step 3: Loop detection verification
+
+Current loop detection (executor.ts):
+- Per-step limit: `sameStepCount >= 3` in last 10 executions → escalate.
+- Total limit: `> 50` executions → escalate.
+
+For the happy cycle (ask once, customer replies, satisfied):
+- `ask_1` fires once (pauses). `resumeRun` sets cursor to `on_reply_goto`. `advanceRun` never re-enters `ask_1`. `sameStepCount` for ask_1 stays at 1. No false positive.
+- evaluate → ask_customer path only fires once per evaluate call; after customer replies and vars are present, evaluate takes `if_satisfied_goto` on next pass (deterministic fast path). No repeated pair.
+
+The "pair-loop" and "no-progress" detections described in the prompt do NOT exist in the code — only the two checks above. Neither can cause false positives for the happy cycle.
+
+#### Bug found and fixed: `resumeRun` missing `context` field (TypeScript)
+
+Commit `51693d0` added an early-return for `waiting_for_human` runs but omitted the `context` field required by `RunResult`. TypeScript confirmed this with `TS2741`.
+
+**Fix** (`api/services/playbook/executor.ts`):
+```typescript
+// Before:
+return { runId, status: run.status, currentStepId: run.current_step_id };
+// After:
+const context = typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+return { runId, status: run.status, currentStepId: run.current_step_id, context };
+```
+
+This path is guarded by a warning log and should never be called in normal flow (resumeRun is not called for waiting_for_human runs — the approve/reject endpoints handle those). The fix prevents a runtime error if the path were accidentally reached.
+
+#### Step 4: Playwright smoke test
+
+Verified thread pages for the two failed runs:
+- Thread 69 (`/threads/69`): "Tracking failed" run renders correctly. Step execution history (4 steps: extract, find_sheet_row, evaluate, escalate) visible with no JS errors.
+- Thread 28 (`/threads/28`): All three runs (escalated, failed, complete) render correctly with status badges and step details. No JS errors.
+
+### Files changed
+- `api/services/playbook/executor.ts` — add missing `context` field to `resumeRun`'s `waiting_for_human` early return
+
+### Definition of done status
+- evaluate.ts correctly routes on_false/on_unsure to any step ID ✅ (fixed in prior session)
+- ask_customer.ts correctly pauses on first fire and advances on resume ✅ (fixed in prior session)
+- Loop detection does not fire on evaluate → ask → resume → reply cycle ✅ (verified)
+- Postgres confirms no spurious loop-detection escalations for "waiting-for-customer" runs ✅ (confirmed: both failed runs have legitimate root causes, now fixed)
+- Playwright confirms thread page renders without errors ✅
+
+---
+
 ## 2026-04-15 — UI Redesign: 8 tabs → 3 (Inbox, Playbooks, Settings)
 
 **Phase**: UI/UX overhaul

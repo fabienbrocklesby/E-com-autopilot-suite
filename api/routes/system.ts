@@ -81,7 +81,7 @@ systemRouter.get("/stats", async (c) => {
 
     // Rate limit bucket states
     query<{ api: string; tokens: number; calls_total: number; last_refilled_at: string }>(
-      `SELECT api, tokens::float as tokens, calls_total, last_refilled_at
+      `SELECT api, tokens::float as tokens, calls_total::int as calls_total, last_refilled_at
        FROM rate_limit_buckets
        WHERE workspace_id = $1`,
       [workspaceId],
@@ -110,7 +110,12 @@ systemRouter.get("/stats", async (c) => {
       unresolved_count: failedIngestions.length,
       recent: failedIngestions,
     },
-    rate_limit_buckets: rateLimitBuckets,
+    // NUMERIC columns come back as strings from the postgres driver — parse explicitly
+    rate_limit_buckets: rateLimitBuckets.map((b) => ({
+      ...b,
+      tokens: parseFloat(String(b.tokens)),
+      calls_total: parseInt(String(b.calls_total), 10),
+    })),
     circuit_breaker: getCircuitBreakerState(),
   });
 });
