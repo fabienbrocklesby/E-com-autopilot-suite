@@ -613,3 +613,156 @@ frontend/src/routes/playbooks/[id]/+page.svelte  (modified — silence timeout i
 - Run Phase 1 (`/phase-1-cleanup`): consolidate token refresh, delete dead code, fix OAuth CSRF, encrypt tokens, migrate `sheet_updates` table.
 
 ---
+
+## 2026-04-15 — Manual Action Banner
+
+### What was done
+
+**Backend — `api/routes/playbooks.ts`**
+
+- Extended the `GET /playbooks/runs` list query to include `step_reference_context` (JSONB array of strings from the `manual_approval` step's `reference_context` field). Now each run in `waiting_for_human` status carries all the data needed to render the action banner without a second request.
+
+**Backend — `api/routes/threads.ts`**
+
+- Extended the `GET /threads` list query to include `has_pending_action` (boolean, via `EXISTS` subquery against `playbook_runs` for `waiting_for_human` status). Cheap: single correlated subquery per row, no JOIN.
+
+**Frontend — `frontend/src/lib/api.ts`**
+
+- Added `has_pending_action: boolean` to `ThreadListItem`.
+- Added `step_reference_context?: string[] | null` to `PlaybookRun`.
+- Restored `ThreadDetail` interface (had been accidentally removed during a replacement operation).
+
+**Frontend — `frontend/src/lib/components/ManualActionBanner.svelte`** (new file)
+
+- Svelte 5 runes component. Props: `run: PlaybookRun`, `onComplete: () => void`.
+- `$derived` for `reason`, `captureInput`, `inputPrompt`, `canApprove`.
+- `$derived.by()` for `referenceItems` — used because it maps over an array and accesses a separate reactive value (`run.context`), making plain `$derived` awkward. Ref: Svelte 5 docs "Derived state / $derived.by".
+- `$bindable()` not used — `humanInput` is local to the component, not a prop the parent needs to read back. Ref: Svelte 5 docs "Bindable props / $bindable".
+- No form element: approval is an API call, not a form submission. Uses `onclick` handlers directly. Ref: Svelte 5 docs "Event handling".
+- `aria-live="polite"` on the banner root; `role="alert"` on the error paragraph.
+- Calls `playbooksApi.approveRun` (existing) and `playbooksApi.rejectRun` (existing) — no new API surface.
+- CSS uses `--color-*` variables from `+layout.svelte`.
+
+**Frontend — `frontend/src/routes/threads/[id]/+page.svelte`**
+
+- Imports `ManualActionBanner`.
+- Added `waitingRun = $derived(runs.find(r => r.status === "waiting_for_human") ?? null)`.
+- Banner rendered above the `{#if loading}` block — always visible when a run is paused, even before the thread details load below.
+- `onComplete` wired to the existing `load()` function.
+
+**Frontend — `frontend/src/routes/+page.svelte`**
+
+- Bell icon (`🔔`) rendered in the subject cell when `thread.has_pending_action` is true.
+- Added `.action-indicator` style with a subtle amber drop-shadow to match the warning colour.
+
+### MCP usage trace
+
+- `filesystem`: read all modified files before editing.
+- `context7`: not fetched (existing `$derived.by` usage in the codebase provided sufficient pattern reference).
+
+### Svelte 5 doc citations
+
+- `$derived.by()`: used for `referenceItems` because the derivation maps over an array and accesses a separate reactive binding in the same expression. Plain `$derived` can only hold a single expression.
+- `$bindable()`: not needed. `humanInput` is internal state, not exposed to the parent.
+- Form-without-form-action: `onclick` async handler + `try/catch` + local `submitting` state. No `<form>`, no `use:enhance`.
+
+### Validation
+
+- `cd frontend && npm run check` → 1 pre-existing error (`PUBLIC_API_BASE_URL` env not set in check context), 29 pre-existing warnings. Zero new errors from this work.
+- `cd api && deno check routes/playbooks.ts routes/threads.ts` → clean.
+- Playwright end-to-end and Postgres side-effect verification pending (requires live dev environment with a `waiting_for_human` run).
+
+### Next
+
+- Phase 1 cleanup.
+
+---
+
+## 2026-04-15 — Smart Parser & Run #5 Diagnosis
+
+### Part 1: Run #5 Diagnosis
+
+**Full execution trace (run_id=5, playbook_id from Refund v2):**
+
+| Step | Type | Status | Time | Notes |
+|------|------|--------|------|-------|
+| extract_1 | extract | success | 23:38:26-27 | Extracted customer_name="Fabien Brocklesby", customer_email, order_number=null |
+| branch_1 | branch | success | 23:38:27 | customer_name != null → find_1 |
+| find_1 | find_sheet_row | success | 23:38:27-29 | Matched on Name column, row_number=2 |
+| ask_1 | ask_customer | success | 23:38:29-31 | Auto-skipped — product_name already available from thread |
+| evaluate_1 | evaluate | success | 23:38:31-33 | row_number present → update_1 |
+| update_1 | update_sheet | success | 23:38:33 | Wrote Status="Refund Requested" to row 2 |
+| approval_1 | manual_approval | success | 23:38:33 | Paused (waiting_for_human) |
+| escalate_1 | escalate | failed | 23:39:49 | "Could not find order in sheet" |
+
+**Root cause:** The user explicitly rejected the manual approval via POST /playbooks/runs/5/reject. The `on_reject` target of `approval_1` is `escalate_1`. The 76-second gap (23:38:33 → 23:39:49) is consistent with human action time. No inbound messages, no background workers, and no concurrent runs triggered during this window.
+
+**The misleading escalation reason:** `escalate_1` has a static reason "Could not find order in sheet" which fires regardless of HOW the escalation was reached. The order WAS found (row_number=2, context bag confirms). The reason is wrong because a single escalate step serves both "sheet lookup failed" and "approval rejected" paths.
+
+**No concurrent run interference:** Run 4 on the same thread was already in `escalated` status. No other active runs existed.
+
+**Playbook design issues identified:**
+1. Extracting `order_number` when the sheet has no "Order Number" column
+2. `capture_input: false` on a refund approval (should capture Stripe transaction details)
+3. Single escalate step with generic reason for multiple failure paths
+4. Branch on `customer_name != null` instead of letting evaluate handle it
+
+**Dormant bug fixed in `resumeRun`:** The `waiting_for_human` branch in `resumeRun()` advanced to the next sequential step in the array, ignoring the `on_approve`/`on_reject` targets. While not the root cause of this run (the approve/reject endpoints correctly use the targets), calling `resumeRun` on a `waiting_for_human` run would route to the wrong step. Fixed to log a warning and return early instead.
+
+### Part 2: Parser Design Guide Extraction
+
+**Created `docs/PLAYBOOK_DESIGN_GUIDE.md`** — canonical reference for playbook structure, loaded into the parser AI's system prompt at runtime. Serves two audiences: the GPT-4o parser (structured reference) and humans (editable without code changes).
+
+**Updated `api/services/playbook/parser.ts`:**
+- Removed the hardcoded `STEP_TYPE_REFERENCE` constant and inline system prompt
+- Added `loadDesignGuide()` with simple in-memory cache (0ms in dev, 60s in prod)
+- Added `buildWorkspaceContext()` which queries `sheet_columns` and injects actual column names
+- System prompt is now: design guide markdown with workspace context section replaced at runtime
+- Import: `join` from `https://deno.land/std@0.224.0/path/mod.ts` (matches existing project import)
+- Path resolution: checks `/docs` (Docker mount) with fallback to `Deno.cwd()/docs` (local dev)
+
+**Updated `docker-compose.yml`:** Added `./docs:/docs` volume mount to the api service so the design guide is accessible inside the container.
+
+**Updated `api/services/playbook/types.ts`:** Added `reference_context?: string[]` field to `ManualApprovalStep` interface.
+
+### Part 3: Sheet-Aware Design Guide
+
+The design guide implements 6 principles:
+
+1. **Sheet is source of truth** — only reference columns that exist in the workspace sheet
+2. **Match with whatever the customer provides** — aggressive matching, no required fields
+3. **Don't invent useless variables** — extract only what maps to sheet columns or later step configs
+4. **Happy path first** — extract → find → evaluate → update → approve → send → complete, then fallbacks
+5. **Fail gracefully** — ask once, then escalate. Separate escalate steps with specific reasons
+6. **AI-drafted messages** — goal + reference_context, not literal templates
+
+Full step type reference with purpose, when to use, when NOT to use, config schema, and examples.
+
+4 worked examples: Refund, Tracking, Order Change, General Enquiry.
+
+Anti-patterns section with concrete WRONG vs RIGHT pairs.
+
+### Validation
+
+**Parser test with refund description:**
+- No `order_number` in extract variables ✓
+- `find_sheet_row` uses actual sheet columns (Name, Order/Item) ✓
+- `evaluate` checks only `row_number` ✓
+- Happy path first, `ask_customer` at bottom ✓
+- `manual_approval` has `capture_input: true` with `reference_context` ✓
+- Separate escalate steps (escalate_no_match, escalate_rejected) ✓
+- Zero warnings ✓
+
+**API startup:** Clean, no errors from design guide loading.
+
+### MCP usage trace
+
+- `postgres` (via Docker exec): 4 queries for run #5 diagnosis (step executions, concurrent runs, messages, context bag, playbook steps)
+- `filesystem`: read parser.ts, executor.ts, manual_approval handler, gmail.ts, types.ts, docker-compose.yml, TASK_LOG.md
+
+### Next
+
+- Save refund playbook as "Refund v3" and run end-to-end test on fresh email
+- Phase 1 cleanup
+
+---
