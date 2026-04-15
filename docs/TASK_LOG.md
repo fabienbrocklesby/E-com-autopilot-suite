@@ -8,6 +8,51 @@ Each entry:
 - Date
 - Phase + status
 - What was done (with file/migration references)
+
+---
+
+## 2026-04-16 — Playbook design guide: conversational gate pattern
+
+**Phase**: 5.5 (parser quality)
+**Status**: complete
+
+### What was done
+
+Fixed a parser failure mode where the parser generated `evaluate.required_context: ["row_number"]` for descriptions that said "ask why before going ahead", causing evaluate to always pass (row_number was already set by find_sheet_row) and the ask to be silently skipped.
+
+Changes to `docs/PLAYBOOK_DESIGN_GUIDE.md`:
+
+1. **Fixed evaluate step docs** — `required_context` field description now explains the difference between gating on a sheet-lookup variable vs. a conversational variable. Removed the misleading "usually just row_number" text.
+
+2. **Added canonical pattern** — "Ask for information BEFORE performing sheet actions or approvals". Explains the array ordering trick: place ask_1 + extract_2 immediately before the first action step so extract_2's sequential advance lands on the action step. evaluate's if_satisfied_goto jumps over them on the happy path.
+
+3. **Added Example 6** — Full worked example for "refund with reason required first". evaluate_1.required_context is `["refund_reason"]`. ask_1 + extract_2 are positioned before update_1 in the array. Traces both execution paths (reason present upfront, and reason missing/asked).
+
+4. **Added three new anti-patterns**:
+   - "evaluate required_context lists only sheet-lookup variables when a conversational gate is needed" (the root cause)
+   - "Action steps before the ask-and-extract cycle" (array ordering)
+   - "'Wait for response' means manual_approval instead of ask_customer" (wrong step type)
+
+No parser/executor/handler code was changed. The design guide is the system prompt — changes take effect immediately in dev (cache_ms = 0).
+
+Also fixed a pre-existing frontend bug: `+layout.svelte` imported `Settings` from `lucide-svelte` (not installed) and the navLinks array had `icon: '<Settings />'` as a literal string. Fixed to use `⚙️` emoji matching the other nav icons, and removed the unused import.
+
+### Validation
+
+- Playwright: `/review` and `/threads/77` both render without errors.
+- Thread page shows playbook approval banner, step history, all fields correct.
+- Design guide sections reviewed for consistency — existing examples 1-3 are correct (their ask_1 goals match "couldn't find you in the sheet", not a conversational gate).
+
+### Decisions
+
+- Example 6 uses `ask_1.on_reply_goto: "extract_2"` (not looping back to extract_1) so only refund_reason is re-extracted, avoiding re-running find_sheet_row on a simple reply.
+- Kept Examples 1-3 unchanged — they gate on row_number correctly for their descriptions.
+
+### Next
+
+- When new refund playbooks are generated with "ask why first" descriptions, test that evaluate_1.required_context is ["refund_reason"] and the array has ask_1/extract_2 before update_1.
+
+
 - Validation (how was it verified)
 - Decisions (what choices were made)
 - Open questions

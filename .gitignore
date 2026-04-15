@@ -34,3 +34,5 @@ npm-debug.log*
 *.swo
 IMPLEMENTATION_PLAN.md
 HOW_TO_USE.md
+
+.playwright-mcp/

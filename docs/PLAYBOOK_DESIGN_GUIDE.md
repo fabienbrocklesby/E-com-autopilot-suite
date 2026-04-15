@@ -231,7 +231,11 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **Fields:**
 - `goal` (string, required): What the AI is judging.
-- `required_context` (string[], required): The MINIMUM variables needed. For any sheet-aware playbook, usually just `["row_number"]`.
+- `required_context` (string[], required): The variables THIS evaluate step is gating on. List the exact variable you need at this decision point — not every variable in the context bag.
+  - Gate on `["row_number"]` only when the decision is "did we find the customer in the sheet?"
+  - Gate on `["refund_reason"]` (or `["issue_description"]`, `["order_number"]`, etc.) when the decision is "has the customer told us what we need to know?"
+  - **NEVER list only sheet-lookup variables (row_number, customer_name) when the real gate is a conversational variable the customer must type.** Sheet-lookup variables are set by earlier steps and will always be non-null by the time evaluate runs. Listing only those means evaluate ALWAYS returns satisfied and skips the ask entirely.
+  - The rule: list the variable that proves the customer communicated the required information — not the variable that proves we found a database row.
 - `if_satisfied_goto` (string, required): Happy path — proceed.
 - `if_missing_goto` (string, required): Missing info — routes to `ask_customer`. NEVER to `escalate`.
 - `if_escalate_goto` (string, required): Stuck/broken — routes to `escalate`.
@@ -440,6 +444,77 @@ Use when: the description says to ask for a piece of info if the customer didn't
 - `escalate` sits at the bottom of the array. It is ONLY reachable from `if_escalate_goto`.
   It represents "the situation is genuinely broken" — not "we don't have the variable yet."
 - No `find_sheet_row`, no `update_sheet`, no `manual_approval` unless the description asks for them.
+
+### Pattern: Ask for information BEFORE performing sheet actions or approvals
+
+**Use when** the description says things like:
+- "ask them why before proceeding"
+- "we need the reason before going ahead"
+- "reply asking X, wait for response, then update / process"
+- "get their explanation first, then mark status"
+
+This is different from the previous pattern (which is just conversational with no sheet). Here the flow involves sheet updates AND a customer question that must be answered first.
+
+**Correct step sequence and array order:**
+
+The ARRAY ORDER matters because `extract` steps advance sequentially. Place the ask+extract pair immediately before the action steps in the array. `evaluate` uses `if_satisfied_goto` to jump over the ask+extract on the happy path.
+
+```
+1. extract_1       — extract all variables including the conversational one (e.g.
+                     refund_reason). Mark it as potentially null — it is fine if
+                     the customer didn't include it in the first email.
+
+2. find_sheet_row  — find the customer in the sheet (if sheet work is needed).
+
+3. evaluate_1      — GATE on the CONVERSATIONAL variable, not the sheet variable.
+                     required_context: ["refund_reason"]   ← NOT ["row_number"]
+                     if_satisfied_goto → first action step (e.g. update_1)
+                     if_missing_goto   → ask_1
+                     if_escalate_goto  → escalate step
+
+                     *** ARRAY TRICK: evaluate's if_satisfied_goto jumps over
+                     ask_1 and extract_2 when the variable is already present.
+                     When it is missing, it routes to ask_1 which sits right
+                     before update_1. After extract_2 runs, sequential advance
+                     lands on update_1 automatically. ***
+
+4. ask_1           — Ask the customer for the missing info. Pauses the run.
+                     on_reply_goto: "extract_2"
+                     (NOTE: ask_1 sits before update_1 in the array — this is
+                     intentional so that after extract_2, advance → update_1)
+
+5. extract_2       — Extract the variable from the customer's reply.
+                     After this step, array-sequential advance lands on update_1.
+
+6. update_1        — First action step. Only runs after we have the required info.
+                     (reached via evaluate's if_satisfied_goto OR via extract_2's
+                     sequential advance)
+
+7. [approval, update_2, send_reply, complete]  — rest of happy path
+
+8. escalate steps  — failure terminals
+```
+
+**Critical rules for this pattern:**
+
+- `evaluate.required_context` MUST list the conversational variable (e.g. `refund_reason`),
+  NOT `row_number`. If you list only `row_number`, the evaluate step always passes because
+  find_sheet_row already set it. The customer never gets asked. This is the most common
+  mistake with this pattern.
+
+- Action steps (`update_sheet`, `manual_approval`) MUST appear AFTER the ask_1+extract_2 pair
+  in the array. "After asking" in the description means after in the array too.
+
+- `"Wait for a response"` in a description means `ask_customer` + pause for the CUSTOMER,
+  NOT `manual_approval`. `manual_approval` is for waiting for the human operator to act.
+
+- `ask_1.on_reply_goto` should point to `extract_2` (a dedicated extract for the reply),
+  NOT back to `extract_1`. This avoids re-running the full extract + find chain on a
+  reply that only needs to capture one variable.
+
+- `evaluate.if_satisfied_goto` MUST point directly to the first action step (e.g. `update_1`),
+  jumping over `ask_1` and `extract_2` in the array. This is what makes the happy path skip
+  the ask entirely when the customer already provided the info in the first email.
 
 ## Examples
 
@@ -781,7 +856,165 @@ Description: "When someone asks about tracking or where their order is, ask them
 - evaluate checks for order_number; if present, goes straight to send_reply.
 - ask_customer is at the bottom — only reached via evaluate's if_missing_goto.
 
+### Example 6: Refund with reason required BEFORE updating status
+
+Description: "When someone asks for a refund, find them in the sheet using their name or what they bought. Reply to them asking why / what's wrong with the product (very important, we need to ask what's wrong before actually going ahead). Update status to Refund Requested. Wait for a response, then regardless of the response just wait for me to process the refund in Stripe and enter the details. Then update to Refunded with my notes and send a casual reply confirming."
+
+This uses the "conversational gate before action" pattern. The customer must provide `refund_reason` before the run updates the sheet. Notice the array ordering: `ask_1` and `extract_2` are positioned immediately before `update_1` so that `extract_2`'s sequential advance lands directly on `update_1`. The `evaluate_1.if_satisfied_goto` jumps over `ask_1` and `extract_2` on the happy path.
+
+```json
+{
+  "steps": [
+    {
+      "id": "extract_1",
+      "type": "extract",
+      "variables": ["customer_name", "product_description", "refund_reason"]
+    },
+    {
+      "id": "find_1",
+      "type": "find_sheet_row",
+      "match_attempts": [
+        { "column": "Name", "context_var": "customer_name" },
+        { "column": "Order/Item", "context_var": "product_description" }
+      ]
+    },
+    {
+      "id": "evaluate_1",
+      "type": "evaluate",
+      "goal": "Do we know why the customer wants a refund so we can proceed?",
+      "required_context": ["refund_reason"],
+      "if_satisfied_goto": "update_1",
+      "if_missing_goto": "ask_1",
+      "if_escalate_goto": "escalate_no_info"
+    },
+    {
+      "id": "ask_1",
+      "type": "ask_customer",
+      "goal": "Ask the customer what is wrong with the product and why they want a refund. We must have this before proceeding.",
+      "required_context": ["refund_reason"],
+      "on_reply_goto": "extract_2"
+    },
+    {
+      "id": "extract_2",
+      "type": "extract",
+      "variables": ["refund_reason"]
+    },
+    {
+      "id": "update_1",
+      "type": "update_sheet",
+      "row_var": "row_number",
+      "updates": [
+        { "column": "Status", "value_or_var": "Refund Requested" },
+        { "column": "Things to add", "value_or_var": "{refund_reason}" }
+      ]
+    },
+    {
+      "id": "approval_1",
+      "type": "manual_approval",
+      "reason": "Process the refund in Stripe. Enter the transaction ID and amount when done.",
+      "capture_input": true,
+      "input_prompt": "Stripe transaction ID and amount (e.g. 'txn_abc123, $89.99')",
+      "input_context_key": "refund_notes",
+      "reference_context": ["customer_name", "product_description", "refund_reason"],
+      "on_approve": "update_2",
+      "on_reject": "escalate_rejected"
+    },
+    {
+      "id": "update_2",
+      "type": "update_sheet",
+      "row_var": "row_number",
+      "updates": [
+        { "column": "Status", "value_or_var": "Refunded" },
+        { "column": "Things to add", "value_or_var": "{refund_notes}" }
+      ]
+    },
+    {
+      "id": "send_1",
+      "type": "send_reply",
+      "goal": "Casual confirmation that the refund has been processed. Mention the product and what was processed.",
+      "reference_context": ["customer_name", "product_description", "refund_notes"]
+    },
+    {
+      "id": "complete_1",
+      "type": "complete"
+    },
+    {
+      "id": "escalate_no_info",
+      "type": "escalate",
+      "reason": "Customer was unable or unwilling to provide a reason for the refund"
+    },
+    {
+      "id": "escalate_rejected",
+      "type": "escalate",
+      "reason": "Human reviewer rejected the refund request"
+    }
+  ]
+}
+```
+
+**Why this shape:**
+- `evaluate_1.required_context` is `["refund_reason"]`, NOT `["row_number"]`. This is the critical difference from a plain refund flow. `row_number` is already set by `find_1` and would always pass. `refund_reason` is what we actually need before acting.
+- `ask_1` and `extract_2` are placed in the array BEFORE `update_1`. When `evaluate_1` routes to `ask_1` (via `if_missing_goto`), the customer replies, `extract_2` runs and extracts `refund_reason`, then sequential advance moves to `update_1` (next in the array).
+- When the customer already included the reason in their first email, `evaluate_1.if_satisfied_goto: "update_1"` jumps directly to `update_1`, skipping `ask_1` and `extract_2` entirely.
+- `approval_1.capture_input: true` because the operator processes the Stripe refund and we need the transaction details back in context for `update_2` and `send_1`.
+- Two separate escalate steps with specific reasons: one for no info after asking, one for operator rejection.
+
 ## Anti-patterns
+
+### evaluate required_context lists only sheet-lookup variables when a conversational gate is needed
+
+This is the most impactful mistake. When the description says "ask X before proceeding" or "we need the reason first", the evaluate step must gate on the conversational variable — not on `row_number`.
+
+```
+WRONG (description says "ask why before going ahead"):
+{
+  "type": "evaluate",
+  "required_context": ["row_number"],          ← row_number is set by find_sheet_row, always present
+  "if_satisfied_goto": "update_1",
+  "if_missing_goto": "ask_1"
+}
+→ evaluate ALWAYS returns satisfied because row_number is never null at this point.
+  ask_1 is never reached. The customer is never asked. The run jumps straight to update_1.
+
+RIGHT:
+{
+  "type": "evaluate",
+  "required_context": ["refund_reason"],        ← the variable the CUSTOMER must provide
+  "if_satisfied_goto": "update_1",
+  "if_missing_goto": "ask_1"
+}
+→ When the customer included the reason: evaluate passes, goes to update_1.
+  When the customer didn't include the reason: evaluate routes to ask_1, customer gets asked.
+```
+
+The rule: `required_context` must contain the variable that proves the **customer communicated what you need** — not the variable that proves a database lookup succeeded.
+
+### Action steps before the ask-and-extract cycle
+
+When the description says "ask before proceeding", the array order must reflect this.
+
+```
+WRONG (array order — update happens before the customer is asked):
+  [extract_1, find_1, evaluate_1, update_1, ..., complete_1, ask_1, ...]
+
+RIGHT (array order — ask+extract sit before update_1):
+  [extract_1, find_1, evaluate_1, ask_1, extract_2, update_1, ...]
+
+evaluate's if_satisfied_goto jumps directly to update_1 (skipping ask_1 + extract_2)
+when the reason is already present. When missing, routes to ask_1 which is right before
+update_1 in the array, so extract_2's sequential advance lands naturally on update_1.
+```
+
+### "Wait for response" means manual_approval instead of ask_customer
+
+```
+WRONG: { "type": "manual_approval", "reason": "Wait for the customer to reply with their reason" }
+  manual_approval pauses waiting for the human OPERATOR, not the customer.
+
+RIGHT: { "type": "ask_customer", "goal": "Ask the customer for their reason", "on_reply_goto": "extract_2" }
+  ask_customer pauses in state "waiting_for_customer" until the customer replies.
+  manual_approval pauses in state "waiting_for_approval" until the operator acts in the UI.
+```
 
 ### Extracting variables that don't map to anything
 

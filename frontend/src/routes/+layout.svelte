@@ -4,6 +4,7 @@
         import type { Snippet } from 'svelte';
         import { workspacesApi, type Workspace } from '$lib/api';
         import { workspaceStore } from '$lib/stores';
+		import { Inbox, BookOpen, Settings } from '@lucide/svelte';
 
         let { children }: { children: Snippet } = $props();
 
@@ -38,9 +39,9 @@
         }
 
         const navLinks = [
-                { href: '/', label: 'Inbox', icon: '📥' },
-                { href: '/playbooks', label: 'Playbooks', icon: '📋' },
-                { href: '/settings', label: 'Settings', icon: '⚙' },
+                { href: '/', label: 'Inbox', icon: Inbox },
+                { href: '/playbooks', label: 'Playbooks', icon: BookOpen },
+                { href: '/settings', label: 'Settings', icon: Settings },
         ];
 </script>
 
@@ -68,15 +69,15 @@
                 {/if}
 
 		<ul class="nav-links">
-			{#each navLinks as link}
+			{#each navLinks as { href, label, icon: Icon }}
 				<li>
 					<a
-						href={link.href}
+						href={href}
 						class="nav-link"
-						class:active={isActive(link.href, $page.url.pathname)}
+						class:active={isActive(href, $page.url.pathname)}
 					>
-						<span class="nav-icon">{link.icon}</span>
-						{link.label}
+						<span class="nav-icon"><Icon size={16} /></span>
+						{label}
 					</a>
 				</li>
 			{/each}
