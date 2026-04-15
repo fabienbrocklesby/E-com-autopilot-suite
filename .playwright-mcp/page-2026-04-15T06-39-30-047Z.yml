@@ -1,0 +1,36 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: ✉
+      - generic [ref=e7]: Email Dash
+    - list [ref=e8]:
+      - listitem [ref=e9]:
+        - link "Threads" [ref=e10] [cursor=pointer]:
+          - /url: /
+      - listitem [ref=e11]:
+        - link "Review Queue" [ref=e12] [cursor=pointer]:
+          - /url: /review
+      - listitem [ref=e13]:
+        - link "Categories" [ref=e14] [cursor=pointer]:
+          - /url: /categories
+      - listitem [ref=e15]:
+        - link "Playbooks" [ref=e16] [cursor=pointer]:
+          - /url: /playbooks
+      - listitem [ref=e17]:
+        - link "Sheet Rules" [ref=e18] [cursor=pointer]:
+          - /url: /sheet-rules
+      - listitem [ref=e19]:
+        - link "Sheet Updates" [ref=e20] [cursor=pointer]:
+          - /url: /sheet-updates
+      - listitem [ref=e21]:
+        - link "Settings" [ref=e22] [cursor=pointer]:
+          - /url: /settings
+      - listitem [ref=e23]:
+        - link "System" [ref=e24] [cursor=pointer]:
+          - /url: /system
+  - main [ref=e25]:
+    - generic [ref=e26]:
+      - heading "Playbooks" [level=1] [ref=e27]
+      - link "+ New Playbook" [ref=e28] [cursor=pointer]:
+        - /url: /playbooks/new
+    - generic [ref=e29]: Loading playbooks…

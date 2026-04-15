@@ -17,7 +17,6 @@
                 try {
                         const res = await workspacesApi.list();
                         workspaces = res.workspaces;
-                        // If stored workspace no longer exists, fall back to first.
                         if (!workspaces.find((w) => w.id === selectedId) && workspaces.length > 0) {
                                 workspaceStore.set(workspaces[0].id);
                         }
@@ -33,15 +32,15 @@
                 if (Number.isFinite(id)) workspaceStore.set(id);
         }
 
+        function isActive(href: string, pathname: string): boolean {
+                if (href === '/') return pathname === '/' || pathname === '/inbox';
+                return pathname.startsWith(href);
+        }
+
         const navLinks = [
-                { href: '/', label: 'Threads' },
-                { href: '/review', label: 'Review Queue' },
-                { href: '/categories', label: 'Categories' },
-                { href: '/playbooks', label: 'Playbooks' },
-                { href: '/sheet-rules', label: 'Sheet Rules' },
-                { href: '/sheet-updates', label: 'Sheet Updates' },
-                { href: '/settings', label: 'Settings' },
-                { href: '/system', label: 'System' },
+                { href: '/', label: 'Inbox', icon: '📥' },
+                { href: '/playbooks', label: 'Playbooks', icon: '📋' },
+                { href: '/settings', label: 'Settings', icon: '⚙' },
         ];
 </script>
 
@@ -49,7 +48,7 @@
         <nav class="sidebar">
                 <div class="brand">
                         <span class="brand-icon">✉</span>
-                        <span class="brand-name">Email Dash</span>
+                        <span class="brand-name">Autopilot</span>
                 </div>
 
                 {#if workspaces.length > 1}
@@ -74,13 +73,18 @@
 					<a
 						href={link.href}
 						class="nav-link"
-						class:active={$page.url.pathname === link.href}
+						class:active={isActive(link.href, $page.url.pathname)}
 					>
+						<span class="nav-icon">{link.icon}</span>
 						{link.label}
 					</a>
 				</li>
 			{/each}
 		</ul>
+
+		<div class="sidebar-footer">
+			<a href="/system" class="system-link" class:active={$page.url.pathname.startsWith('/system')}>System</a>
+		</div>
 	</nav>
 
 	<main class="content">
@@ -273,12 +277,20 @@
 	}
 
 	.nav-link {
-		display: block;
+		display: flex;
+		align-items: center;
+		gap: 8px;
 		padding: 8px 12px;
 		border-radius: var(--radius);
 		color: var(--color-text-muted);
 		font-weight: 500;
 		transition: color 0.15s, background 0.15s;
+	}
+
+	.nav-icon {
+		font-size: 15px;
+		width: 20px;
+		text-align: center;
 	}
 
 	.nav-link:hover {
@@ -287,9 +299,28 @@
 	}
 
 	.nav-link.active {
-		color: var(--color-text);
 		background: rgba(99 102 241 / 0.15);
 		color: var(--color-primary);
+	}
+
+	.sidebar-footer {
+		margin-top: auto;
+		padding: 12px 22px;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.system-link {
+		display: block;
+		font-size: 12px;
+		color: var(--color-text-muted);
+		padding: 4px 0;
+		font-weight: 500;
+		transition: color 0.15s;
+	}
+
+	.system-link:hover,
+	.system-link.active {
+		color: var(--color-text);
 	}
 
 	.content {

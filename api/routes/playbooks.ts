@@ -86,7 +86,17 @@ playbooksRouter.get("/runs", async (c) => {
           LIMIT 1
         )
         ELSE NULL
-      END AS step_input_prompt
+      END AS step_input_prompt,
+      CASE WHEN pr.status = 'waiting_for_human'
+        THEN (
+          SELECT step->'reference_context'
+          FROM jsonb_array_elements(p.steps) AS step
+          WHERE step->>'id' = pr.current_step_id
+            AND step->>'type' = 'manual_approval'
+          LIMIT 1
+        )
+        ELSE NULL
+      END AS step_reference_context
      FROM playbook_runs pr
      JOIN playbooks p ON p.id = pr.playbook_id
      WHERE ${where}
@@ -212,9 +222,16 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   const approvalStep = currentStep as ManualApprovalStep;
   const nextStepId = approvalStep.on_reject;
 
+  // Record rejection metadata in context so the downstream escalate step can log
+  // the real reason ("Rejected by human: approval_1 (Process refund in Stripe)")
+  // rather than its own static config string ("Could not find order in sheet").
+  const rejectionContext =
+    typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+  rejectionContext._rejection_source = `${currentStep.id} (${approvalStep.reason})`;
+
   await execute(
-    "UPDATE playbook_runs SET status = 'running', current_step_id = $1 WHERE id = $2",
-    [nextStepId, runId],
+    "UPDATE playbook_runs SET status = 'running', current_step_id = $1, context = $2 WHERE id = $3",
+    [nextStepId, JSON.stringify(rejectionContext), runId],
   );
 
   const result = await advanceRun(runId);

@@ -216,7 +216,7 @@
 </script>
 
 <svelte:head>
-  <title>Settings — Email Dash</title>
+  <title>Settings — Autopilot</title>
 </svelte:head>
 
 <h1>Settings</h1>

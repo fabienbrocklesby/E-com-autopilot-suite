@@ -8,6 +8,43 @@ A playbook is a multi-step flow attached to an email category. When an inbound e
 
 The output of a playbook is one of: a completed resolution (customer helped, sheet updated, reply sent), an escalation to a human (something the system can't handle), or a pause waiting for input (customer reply or human action).
 
+## Match complexity to the description
+
+Read the client's description carefully. Only generate steps for what they actually asked for.
+
+IF the description mentions checking the sheet, looking up orders, updating status:
+  → Include find_sheet_row, update_sheet, etc.
+
+IF the description is just a conversation (ask a question, give an answer):
+  → DON'T include find_sheet_row or update_sheet. Just extract, evaluate, ask_customer, send_reply.
+
+IF the description mentions needing human approval or manual action:
+  → Include manual_approval with capture_input: true
+
+IF the description doesn't mention approval:
+  → DON'T add manual_approval
+
+WRONG: Adding find_sheet_row to a tracking flow that just needs to ask for a number and reply.
+RIGHT: extract → evaluate (do we have the number?) → send_reply. Three happy-path steps.
+
+WRONG: Adding manual_approval to a flow that just sends an automated reply.
+RIGHT: Only add manual_approval when the description says a human needs to do something.
+
+## Step array layout
+
+Happy path top to bottom. Fallbacks at the bottom. Terminals last.
+
+CORRECT ORDER:
+1. extract (always first)
+2. find_sheet_row (if needed by the description)
+3. evaluate (the routing decision)
+4. update_sheet, manual_approval, send_reply (the happy path actions)
+5. complete (happy terminal)
+6. ask_customer (fallback, only reached via evaluate's if_missing_goto)
+7. escalate (failure terminal)
+
+ask_customer MUST be below the happy path. The engine advances sequentially by default. If ask_customer sits between find_sheet_row and evaluate, the happy path accidentally falls into it.
+
 ## Available step types
 
 ### extract
@@ -29,6 +66,14 @@ The output of a playbook is one of: a completed resolution (customer helped, she
 
 **Fields:**
 - `variables` (string[], required): Names of variables to extract. Choose ONLY variables that (a) match a column in the workspace sheet, or (b) are explicitly referenced by a later step's config. Do not extract variables speculatively.
+
+Only extract variables that serve a purpose later in the playbook:
+- Variables used in find_sheet_row match_attempts
+- Variables used in update_sheet values
+- Variables referenced in send_reply reference_context
+- Variables checked by evaluate required_context
+
+Do NOT extract variables speculatively. If no downstream step uses "order_number", don't extract it. The workspace's sheet columns are listed in the Workspace Context section below. Only generate find_sheet_row match_attempts for columns that ACTUALLY EXIST in the sheet.
 
 **Common variable names** (use these for consistency across playbooks):
 - `customer_name` — the sender's name
@@ -627,6 +672,60 @@ Description: "When someone has a general question, just pause for me to answer i
 - No `find_sheet_row` or `update_sheet` — general enquiries don't need sheet lookup.
 - Straight to `manual_approval` after extracting basic info.
 - Simple: extract → approve → send → complete.
+
+### Example 5: Simple conversational flow — no sheet interaction
+
+Description: "When someone asks about tracking or where their order is, ask them for their order number if they didn't give one. Once we have an order number, just reply saying their order has been dispatched and will be with them shortly. No need to check the sheet."
+
+```json
+{
+  "steps": [
+    {
+      "id": "extract_1",
+      "type": "extract",
+      "variables": ["order_number"]
+    },
+    {
+      "id": "evaluate_1",
+      "type": "evaluate",
+      "goal": "Do we have the order number to send a dispatch reply?",
+      "required_context": ["order_number"],
+      "if_satisfied_goto": "send_1",
+      "if_missing_goto": "ask_1",
+      "if_escalate_goto": "escalate_1"
+    },
+    {
+      "id": "send_1",
+      "type": "send_reply",
+      "goal": "Tell the customer their order has been dispatched and will be with them shortly"
+    },
+    {
+      "id": "complete_1",
+      "type": "complete"
+    },
+    {
+      "id": "ask_1",
+      "type": "ask_customer",
+      "goal": "Get the customer's order number so we can confirm dispatch",
+      "required_context": ["order_number"],
+      "on_reply_goto": "extract_1"
+    },
+    {
+      "id": "escalate_1",
+      "type": "escalate",
+      "reason": "Could not get order number from customer after asking"
+    }
+  ]
+}
+```
+
+**Why this shape:**
+- NO find_sheet_row — the description explicitly says "No need to check the sheet."
+- NO update_sheet — nothing to write back.
+- NO manual_approval — the reply is automated.
+- 4 happy-path steps (extract → evaluate → send → complete), 2 fallback steps (ask, escalate).
+- evaluate checks for order_number; if present, goes straight to send_reply.
+- ask_customer is at the bottom — only reached via evaluate's if_missing_goto.
 
 ## Anti-patterns
 

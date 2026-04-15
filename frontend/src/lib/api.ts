@@ -61,14 +61,23 @@ export interface ThreadListItem {
 	status: string;
 	auto_replied: boolean;
 	draft_count: number;
-	created_at: string;
-	updated_at: string;
+        has_pending_action: boolean;
+        created_at: string;
+        updated_at: string;
+        // Latest playbook run (joined from backend)
+        latest_run_id: number | null;
+        latest_run_status: string | null;
+        latest_run_step: string | null;
+        latest_run_playbook_name: string | null;
+        latest_run_updated_at: string | null;
+        latest_run_total_steps: number | null;
+        latest_run_completed_steps: number | null;
 }
 
 export interface ThreadDetail extends Omit<ThreadListItem, 'draft_count' | 'category_name'> {
-	messages: Message[];
-	drafts: Draft[];
-	category: Category | null;
+        messages: Message[];
+        drafts: Draft[];
+        category: Category | null;
 }
 
 export interface Message {
@@ -460,8 +469,9 @@ export interface PlaybookRun {
         updated_at: string;
         playbook_name?: string;
         step_reason?: string | null;
-	step_capture_input?: boolean | null;
-	step_input_prompt?: string | null;
+        step_capture_input?: boolean | null;
+        step_input_prompt?: string | null;
+        step_reference_context?: string[] | null;
 }
 
 export interface StepExecution {

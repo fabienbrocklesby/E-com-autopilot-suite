@@ -1,123 +1,82 @@
 /**
  * Evaluate handler — AI-driven three-way routing.
- * Deterministic when vars are clearly present/absent; calls AI for judgment calls.
+ *
+ * Fast path: if all required vars are present (non-null, non-empty), advance
+ * deterministically without any AI call. This avoids GPT-4o misinterpreting a
+ * natural-language goal string and escalating runs that are actually fine.
+ *
+ * Slow path: one or more required vars are missing. Call AI with the FULL
+ * context bag so it can judge whether the info is already present (just not
+ * extracted) or truly absent, and whether the conversation is stuck.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep, EvaluateStep } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
-import { queryOne } from "../../../db/client.ts";
 
 export const evaluateHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
     const evalStep = step as EvaluateStep;
-    const required = evalStep.required_context ?? [];
+    const requiredContext = evalStep.required_context ?? [];
 
-    // Load category voice for the AI prompt
-    const category = ctx.playbook.category_id
-      ? await queryOne<{ writing_style: string | null }>(
-          "SELECT writing_style FROM categories WHERE id = $1",
-          [ctx.playbook.category_id],
-        )
-      : null;
+    // ── Deterministic pre-check ─────────────────────────────────────────────
+    // If every required variable has a non-null, non-empty value, skip the AI
+    // call entirely. Zero tokens, zero risk of goal-string misinterpretation.
+    const missing = requiredContext.filter((key) => {
+      const val = ctx.variables[key];
+      return val === null || val === undefined || val === "";
+    });
 
-    const recentMessages = ctx.messages.slice(-5);
-    const transcript = recentMessages
-      .map((m) => `${m.direction === "inbound" ? "CUSTOMER" : "US"}: ${m.body_plain.trim()}`)
-      .join("\n\n");
-
-    const have: Record<string, unknown> = {};
-    const missing: string[] = [];
-    for (const v of required) {
-      if (ctx.variables[v] != null) {
-        have[v] = ctx.variables[v];
-      } else {
-        missing.push(v);
-      }
-    }
-
-    const model = await getModel(ctx.workspaceId);
-
-    // PATH A: all required vars are present — ask AI to confirm it's actually sufficient
     if (missing.length === 0) {
-      const systemPrompt = `You are evaluating whether we have everything needed to proceed with a customer support task.
-
-GOAL: ${evalStep.goal}
-
-CONTEXT WE HAVE:
-${JSON.stringify(have, null, 2)}
-
-RECENT CONVERSATION:
-${transcript}
-
-Is everything in order to proceed, or is something wrong?
-
-Return one of:
-- {"action": "satisfied", "reasoning": "..."} if all info is correct and meaningful
-- {"action": "escalate", "reason": "..."} if something looks wrong (e.g. a value is clearly invalid, nonsensical, or the conversation is problematic)
-
-Output JSON only.`;
-
-      const response = await chatCompletion(
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "Evaluate." },
-        ],
-        model,
-        { type: "json_object" },
+      console.log(
+        `[playbook] evaluate: all required vars present (deterministic), advancing for run ${ctx.run.id}`,
       );
-
-      const aiCalls = [{ model, prompt: systemPrompt, response, tokens: undefined }];
-
-      let parsed: { action?: string; reasoning?: string; reason?: string };
-      try {
-        parsed = JSON.parse(response);
-      } catch {
-        // If AI fails to parse, default to satisfied
-        console.warn(`[playbook] evaluate: AI response parse failed, defaulting to satisfied for run ${ctx.run.id}`);
-        return {
-          decision: { action: "advance_to", stepId: evalStep.if_satisfied_goto },
-          output: { action: "satisfied", reasoning: "AI parse failed, defaulted to satisfied" },
-          aiCalls,
-        };
-      }
-
-      if (parsed.action === "escalate") {
-        console.log(`[playbook] evaluate: AI escalated — ${parsed.reason} for run ${ctx.run.id}`);
-        return {
-          decision: { action: "advance_to", stepId: evalStep.if_escalate_goto },
-          output: { action: "escalated", reason: parsed.reason },
-          aiCalls,
-        };
-      }
-
-      console.log(`[playbook] evaluate: satisfied for run ${ctx.run.id}`);
       return {
         decision: { action: "advance_to", stepId: evalStep.if_satisfied_goto },
-        output: { action: "satisfied", reasoning: parsed.reasoning },
-        aiCalls,
+        output: {
+          action: "satisfied",
+          reasoning: "All required variables present (deterministic check)",
+          skipped_ai: true,
+        },
       };
     }
 
-    // PATH B: required vars are missing — ask AI whether the customer already gave us the info
-    const fullContext = { ...ctx.variables };
-    const systemPrompt = `You are deciding how to proceed with a customer support task when some information is missing.
+    // ── AI path: something is missing ──────────────────────────────────────
+    // Show the AI the FULL context bag so it can spot info that the extract
+    // step may have missed (e.g. the customer quoted their order number in a
+    // free-text reply that wasn't formally extracted).
+    // No GOAL string — the AI's job is variable presence/validity, not intent.
+    const recentMessages = ctx.messages.slice(-3);
+    const recentMessagesText = recentMessages
+      .map((m) => `${m.direction === "inbound" ? "CUSTOMER" : "US"}: ${m.body_plain.trim()}`)
+      .join("\n\n");
 
-GOAL: ${evalStep.goal}
+    const model = await getModel(ctx.workspaceId);
 
-WHAT WE HAVE:
-${JSON.stringify(have, null, 2)}
+    const systemPrompt = `You are checking whether a customer support workflow has everything it needs to proceed to the next step.
 
-WHAT WE STILL NEED:
-${missing.join(", ")}
+REQUIRED VARIABLES (all must be present and valid for the workflow to continue):
+${requiredContext.map((key) => `- ${key}: ${ctx.variables[key] ?? "(MISSING)"}`).join("\n")}
 
-RECENT CONVERSATION:
-${transcript}
+FULL CONTEXT (everything we know so far):
+${JSON.stringify(ctx.variables, null, 2)}
 
-Return one of:
-- {"action": "missing", "reasoning": "..."} if the customer hasn't given us what we need yet
-- {"action": "actually_have_it", "extracted": {"var1": "value", ...}, "reasoning": "..."} if the customer gave us the info in a different form we can extract
-- {"action": "escalate", "reason": "..."} if the conversation is stuck or something is seriously wrong
+RECENT CONVERSATION (last 3 messages):
+${recentMessagesText}
 
-Output JSON only.`;
+YOUR TASK:
+Check each REQUIRED VARIABLE:
+1. Is it present (not null, not empty string, not undefined)?
+2. Does its value look real and usable (not "idk", not gibberish, not a placeholder)?
+
+If ALL required variables are present and valid:
+  Return {"action": "satisfied", "reasoning": "..."}
+
+If any required variable is MISSING (null or empty):
+  Return {"action": "missing", "missing_vars": ["var1", ...], "reasoning": "..."}
+
+If a required variable EXISTS but its value looks wrong, fake, or the conversation has gone off the rails:
+  Return {"action": "escalate", "reason": "..."}
+
+Output JSON only. No markdown, no explanation outside the JSON.`;
 
     const response = await chatCompletion(
       [
@@ -130,11 +89,20 @@ Output JSON only.`;
 
     const aiCalls = [{ model, prompt: systemPrompt, response, tokens: undefined }];
 
-    let parsed: { action?: string; extracted?: Record<string, unknown>; reasoning?: string; reason?: string };
+    let parsed: {
+      action?: string;
+      reasoning?: string;
+      reason?: string;
+      missing_vars?: string[];
+    };
     try {
       parsed = JSON.parse(response);
     } catch {
-      console.warn(`[playbook] evaluate: AI response parse failed, routing to missing for run ${ctx.run.id}`);
+      // Unparseable AI response — default to missing so the run asks the customer
+      // rather than escalating or advancing with unknown state.
+      console.warn(
+        `[playbook] evaluate: AI response parse failed, defaulting to missing for run ${ctx.run.id}`,
+      );
       return {
         decision: { action: "advance_to", stepId: evalStep.if_missing_goto },
         output: { action: "missing", reasoning: "AI parse failed, defaulted to missing" },
@@ -142,18 +110,21 @@ Output JSON only.`;
       };
     }
 
-    if (parsed.action === "actually_have_it") {
-      console.log(`[playbook] evaluate: AI extracted missing vars for run ${ctx.run.id}`);
+    if (parsed.action === "satisfied") {
+      // AI confirmed all required variables are effectively present (possibly
+      // found in free-text conversation even though the formal extract missed them).
+      console.log(`[playbook] evaluate: AI confirmed satisfied for run ${ctx.run.id}`);
       return {
         decision: { action: "advance_to", stepId: evalStep.if_satisfied_goto },
-        contextUpdates: parsed.extracted ?? {},
-        output: { action: "actually_have_it", reasoning: parsed.reasoning, extracted: parsed.extracted },
+        output: { action: "satisfied", reasoning: parsed.reasoning },
         aiCalls,
       };
     }
 
     if (parsed.action === "escalate") {
-      console.log(`[playbook] evaluate: AI escalated — ${parsed.reason} for run ${ctx.run.id}`);
+      console.log(
+        `[playbook] evaluate: AI escalated — ${parsed.reason} for run ${ctx.run.id}`,
+      );
       return {
         decision: { action: "advance_to", stepId: evalStep.if_escalate_goto },
         output: { action: "escalated", reason: parsed.reason },
@@ -161,7 +132,10 @@ Output JSON only.`;
       };
     }
 
-    console.log(`[playbook] evaluate: missing required vars for run ${ctx.run.id}: ${missing.join(", ")}`);
+    // Default (missing or unrecognised action) → route to ask_customer fallback
+    console.log(
+      `[playbook] evaluate: missing required vars for run ${ctx.run.id}: ${missing.join(", ")}`,
+    );
     return {
       decision: { action: "advance_to", stepId: evalStep.if_missing_goto },
       output: { action: "missing", reasoning: parsed.reasoning, missing },

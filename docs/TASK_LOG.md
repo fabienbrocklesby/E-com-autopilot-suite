@@ -15,6 +15,145 @@ Each entry:
 
 ---
 
+## 2026-04-15 — UI Redesign: 8 tabs → 3 (Inbox, Playbooks, Settings)
+
+**Phase**: UI/UX overhaul
+**Status**: complete
+
+### What was done
+
+Full information architecture redesign. Collapsed 8 navigation tabs into 3 primary tabs + demoted System to sidebar footer.
+
+#### Layout + Branding (frontend/src/routes/+layout.svelte)
+- Renamed brand from "Email Dash" to "Autopilot"
+- Reduced nav from 8 items to 3: Inbox (📥), Playbooks (📋), Settings (⚙)
+- Added nav icons and improved active state matching (prefix-based for sub-routes)
+- Demoted System link to sidebar footer with subtle styling
+- Legacy routes (review, sheet-rules, sheet-updates, categories) still accessible by URL but hidden from nav
+
+#### Backend: Threads API (api/routes/threads.ts)
+Extended `GET /threads` to include latest playbook run data via `LEFT JOIN LATERAL`:
+- `latest_run_id`, `latest_run_status`, `latest_run_step`, `latest_run_playbook_name`
+- `latest_run_total_steps`, `latest_run_completed_steps` (for progress display)
+- Updated `ThreadListItem` type in `frontend/src/lib/api.ts` with 7 new fields
+
+#### Inbox (frontend/src/routes/+page.svelte)
+Replaced flat thread table with urgency-grouped Inbox:
+- **Needs attention**: threads with pending human action, in_review status, or new with drafts
+- **In progress**: threads with active playbook runs (running, waiting_for_customer, paused)
+- **Other**: everything else (collapsed by default, count shown)
+- Each thread row shows: subject, category tag, playbook name + step progress, relative time, status badge
+- Keyboard navigation: j/k to move, Enter to open, Escape to deselect
+- Action badges for "Action required" and "Draft" inline
+
+#### Thread Detail (frontend/src/routes/threads/[id]/+page.svelte)
+Two-column layout:
+- **Left**: subject bar with badges, message thread, drafts with approve/reject
+- **Right**: sticky sidebar with playbook runs, expandable for context bag and step execution details
+- Status pills moved to header bar alongside Categorise button
+- Responsive: collapses to single column below 900px
+
+#### Playbooks (frontend/src/routes/playbooks/+page.svelte)
+Category-centric merged view:
+- Each category is a row showing its name, description, auto-reply status, confidence threshold
+- Active playbook shown inline with version, step count, activate/deactivate/edit actions
+- Categories without playbooks show "+ Create" CTA
+- Orphan playbooks (no category) shown in a separate "Unlinked" section at bottom
+- "Manage Categories" link to existing /categories page
+
+#### Settings (frontend/src/routes/settings/+page.svelte)
+Minimal changes: title updated to "Autopilot" branding. Existing 3-section layout (Google Account, Workspaces, General) already matched the design spec.
+
+### Decisions made
+1. **Default Inbox view**: "Other" threads visible but collapsed (count shown, click to expand)
+2. **Brand name**: "Autopilot" everywhere
+3. **Dry-run**: stays as modal (existing implementation on playbook detail page)
+4. **Settings save**: section-level save (existing per-field save buttons retained)
+
+### Verification
+- `svelte-check`: 0 errors, 29 warnings (all a11y, pre-existing)
+- Playwright screenshots taken for all 4 pages: Inbox, Thread Detail, Playbooks, Settings
+- All urgency grouping logic verified against 24 real threads
+- Keyboard navigation (j/k/Enter/Escape) functional
+
+### Files changed
+- `api/routes/threads.ts` — extended SQL query
+- `frontend/src/lib/api.ts` — extended `ThreadListItem` interface
+- `frontend/src/routes/+layout.svelte` — new nav, branding, footer
+- `frontend/src/routes/+page.svelte` — full rewrite (Inbox)
+- `frontend/src/routes/threads/[id]/+page.svelte` — two-column layout
+- `frontend/src/routes/playbooks/+page.svelte` — category-centric merged view
+- `frontend/src/routes/settings/+page.svelte` — title update
+- `docs/UI_REDESIGN.md` — design proposal (created earlier this session)
+
+---
+
+## 2026-04-15 — Fix: evaluate handler, design guide, rejection reason, playbook regeneration
+
+**Phase**: 6 (bug fixes + playbook stabilisation)
+**Status**: complete
+
+### What was done
+
+#### BUG 1 — evaluate handler (api/services/playbook/handlers/evaluate.ts)
+**Problem:** The handler always called GPT-4o, even when all required_context vars were present. The AI prompt showed only required_context vars (not full context) and included the GOAL string. This caused GPT-4o to misinterpret goals and escalate runs that should have succeeded (e.g. row_number=2 present but AI escalated because it read "do we have the order number?" and order_number wasn't explicitly in the limited context it saw).
+
+**Fix:** Rewrote the handler with a two-phase approach:
+- **Deterministic pre-check**: if all required vars are non-null/non-empty → advance to if_satisfied_goto immediately. Zero AI calls, zero risk.
+- **AI path (when vars missing)**: shows FULL context bag + new prompt that asks the AI to check variable PRESENCE and VALIDITY — no GOAL string. Returns satisfied/missing/escalate.
+- Removed the unused category voice loading (was dead code — never used in the prompt).
+
+#### BUG 2 — design guide over-generation (docs/PLAYBOOK_DESIGN_GUIDE.md)
+**Problem:** Parser AI was adding find_sheet_row, update_sheet, manual_approval to simple conversational flows that didn't need them.
+
+**Fix:** Added three new sections at the top of the design guide:
+- **"Match complexity to the description"** — explicit IF/THEN rules: only add sheet steps if description mentions sheet, only add manual_approval if description mentions human action.
+- **"Step array layout"** — numbered rule making ask_customer placement explicit: happy path top-to-bottom, fallbacks at bottom.
+- **Variable extraction constraint** — added to extract step reference: only extract vars that serve a downstream purpose.
+
+Added **Example 5** (simple conversational flow, no sheet) showing the 6-step pattern: extract → evaluate → send → complete → ask (fallback) → escalate.
+
+**Verification:** Tested parse endpoint:
+- "No need to check the sheet" description → 6 steps, NO find_sheet_row, NO update_sheet, NO manual_approval ✅
+- Full refund description → 11 steps with proper sheet integration, match_attempts only on Name/Order+Item (actual columns) ✅
+
+#### BUG 3 — rejection reason (api/routes/playbooks.ts + api/services/playbook/handlers/escalate.ts)
+**Problem:** When manual_approval was rejected, the run advanced to escalate step which logged its hardcoded config reason (e.g. "Could not find order in sheet") instead of the actual rejection cause.
+
+**Fix:**
+- In the reject endpoint (`POST /playbooks/runs/:runId/reject`): inject `_rejection_source = "${step.id} (${reason})"` into run context before advancing.
+- In escalate handler: if `ctx.variables._rejection_source` is set, use `"Rejected by human: ${_rejection_source}"` as the logged reason instead of the static config string.
+
+#### Playbook regeneration
+Created and activated:
+- **Tracking v3** (playbook id=10, category 5): 6-step no-sheet tracking flow. Dry-run verified:
+  - "Hey where is my order" → extract(null) → evaluate(missing) → ask_customer → waiting_for_customer ✅
+  - "Hey where is my order 12345" → extract(12345) → evaluate(satisfied, deterministic) → send_reply → complete ✅
+- **Refund v4** (playbook id=11, category 3): 11-step full sheet flow. Dry-run verified:
+  - Full info email → extract → find_sheet_row → evaluate(satisfied, no AI) → update_sheet → manual_approval → waiting_for_human ✅
+  - match_attempts only use Name and Order/Item (actual sheet columns) ✅
+  - manual_approval capture_input: true, input_context_key: refund_notes ✅
+
+Deactivated legacy playbooks: Tracking Request v1 (id=1), Tracking v2 (id=9), Refund v3 (id=8).
+
+#### ManualActionBanner (frontend/src/lib/components/ManualActionBanner.svelte)
+Already built and complete. Verified: renders reason, reference_context values, optional text input when capture_input=true, Done/Reject buttons with confirmation. Backend approve/reject endpoints already working.
+
+### Before/after comparison
+
+| Scenario | Before | After |
+|---|---|---|
+| "Hey where is my order" | evaluate called AI with goal string → sometimes escalated | evaluate: order_number null → deterministic missing → ask_customer |
+| "My order number is 12345" | AI called with only {row_number: 2}, misread goal | Deterministic check: row_number present → advance, 0 AI calls |
+| Simple tracking parse | 7 steps with find_sheet_row, evaluate, escalate | 6 steps, no sheet interaction |
+| Human rejects approval | Log: "Could not find order in sheet" | Log: "Rejected by human: approval_1 (Approve the refund request)" |
+
+### Known remaining issues
+- Live email end-to-end test (actual Gmail send/receive) not run — requires connected Gmail account during test. All logic verified via dry-run.
+- Old playbooks (id=1, 3, 6, 9) use legacy step shapes (branch, literal messages) — left as-is, deactivated.
+
+---
+
 ## 2026-04-15 — Fix: ask_customer skip routing bug
 
 **Phase**: 5.5 (urgent fix)
