@@ -407,13 +407,15 @@ export async function resumeRun(runId: number): Promise<RunResult> {
       );
     }
   } else if (run.status === "waiting_for_human") {
-    // For human approval, advance to next step (approval handler will have set the target)
-    const currentIndex = steps.findIndex((s) => s.id === run.current_step_id);
-    const nextStep = currentIndex < steps.length - 1 ? steps[currentIndex + 1] : null;
-    await execute(
-      "UPDATE playbook_runs SET status = 'running', current_step_id = $1 WHERE id = $2",
-      [nextStep?.id ?? null, runId],
-    );
+    // For manual_approval, the approve/reject endpoints set current_step_id directly.
+    // resumeRun should NOT be called for waiting_for_human runs — approval routing
+    // is handled by POST /runs/:id/approve and /reject. If called anyway (e.g. by
+    // mistake), log a warning and do nothing rather than advancing to the wrong step.
+    logger.warn("resumeRun called on waiting_for_human run — approval endpoints should handle this", {
+      run_id: runId,
+      current_step_id: run.current_step_id,
+    });
+    return { runId, status: run.status, currentStepId: run.current_step_id };
   }
 
   return advanceRun(runId);
