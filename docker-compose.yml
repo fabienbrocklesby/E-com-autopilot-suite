@@ -40,6 +40,7 @@ services:
       - "${API_PORT:-8000}:8000"
     volumes:
       - ./api:/app
+      - ./docs:/docs
     depends_on:
       postgres:
         condition: service_healthy

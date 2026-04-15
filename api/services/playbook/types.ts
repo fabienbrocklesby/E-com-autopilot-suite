@@ -67,6 +67,8 @@ export interface ManualApprovalStep {
   capture_input?: boolean;
   input_prompt?: string;
   input_context_key?: string;
+  /** Context variable names whose values the human needs to see to act */
+  reference_context?: string[];
   draft_preview?: { goal: string; reference_context?: string[] };
   /** @deprecated use capture_input flow instead */
   draft_template?: string;

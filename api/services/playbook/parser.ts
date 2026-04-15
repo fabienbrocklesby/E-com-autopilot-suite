@@ -1,9 +1,15 @@
 /**
  * Plain-language → structured steps parser.
- * Builds a context-aware system prompt, calls the AI, validates, and returns steps.
+ * Loads the design guide from docs/PLAYBOOK_DESIGN_GUIDE.md at runtime,
+ * injects workspace-specific sheet columns, and calls the AI.
+ *
+ * Why load from disk: the design guide is editable without code changes.
+ * In production, a deploy restarts the process which re-reads the file.
+ * In development, the cache is bypassed so edits take effect immediately.
  */
 import { query, queryOne } from "../../db/client.ts";
 import { chatCompletion } from "../ai.ts";
+import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import type { PlaybookStep } from "./types.ts";
 
 const VALID_STEP_TYPES = [
@@ -19,40 +25,57 @@ const VALID_STEP_TYPES = [
   "escalate",
 ] as const;
 
-const STEP_TYPE_REFERENCE = `Available step types and their required fields (return JSON exactly as shown):
+// ─── Design guide loader ──────────────────────────────────────────────────────
 
-1. extract — AI reads the email thread and pulls named variables into context
-   { "id": "extract_1", "type": "extract", "variables": ["order_number", "customer_email"] }
+// In the Docker container, docs/ is mounted at /docs. Locally, resolve relative to cwd.
+const DESIGN_GUIDE_PATH = (() => {
+  try {
+    Deno.statSync("/docs");
+    return "/docs/PLAYBOOK_DESIGN_GUIDE.md";
+  } catch {
+    return join(Deno.cwd(), "docs", "PLAYBOOK_DESIGN_GUIDE.md");
+  }
+})();
 
-2. find_sheet_row — Search a Google Sheet for a row matching a context variable
-   { "id": "find_1", "type": "find_sheet_row", "match_attempts": [{"column": "Order Number", "context_var": "order_number"}, {"column": "Email", "context_var": "customer_email"}] }
+let cachedGuide: string | null = null;
+let lastLoadedAt = 0;
+const CACHE_MS = Deno.env.get("DENO_ENV") === "development" ? 0 : 60_000;
 
-3. update_sheet — Write values to columns on a found row
-   { "id": "update_1", "type": "update_sheet", "row_var": "row_number", "updates": [{"column": "Status", "value_or_var": "Refund Requested"}, {"column": "Reason", "value_or_var": "{refund_reason}"}] }
+async function loadDesignGuide(): Promise<string> {
+  const now = Date.now();
+  if (cachedGuide && now - lastLoadedAt < CACHE_MS) {
+    return cachedGuide;
+  }
+  const content = await Deno.readTextFile(DESIGN_GUIDE_PATH);
+  cachedGuide = content;
+  lastLoadedAt = now;
+  return content;
+}
 
-4. ask_customer — AI-driven: sends a contextual message to gather missing info. The AI writes the actual message at runtime based on goal + context. Do NOT write the literal message here.
-   { "id": "ask_1", "type": "ask_customer", "goal": "Get the order number and reason for refund so we can process it", "required_context": ["order_number", "refund_reason"], "on_reply_goto": "extract_1" }
+// ─── Workspace context builder ────────────────────────────────────────────────
 
-5. branch — Deterministic routing on a simple condition. Use ONLY for literal null-checks or simple comparisons. Do NOT use for judgment calls about conversation state.
-   { "id": "branch_1", "type": "branch", "condition": "context.order_number != null", "if_true": "find_1", "if_false": "ask_1" }
-   Condition patterns: "context.VAR != null" | "context.VAR == null" | "context.VAR" (truthy)
+interface SheetColumn {
+  column_letter: string;
+  header_name: string;
+}
 
-6. evaluate — AI-driven three-way routing. Use when the decision involves judgment: "do we have enough info?", "is the conversation stuck?", "is something wrong?". Use this instead of branch for anything requiring judgment.
-   { "id": "evaluate_1", "type": "evaluate", "goal": "Do we have a sheet row and a refund reason to proceed?", "required_context": ["row_number", "refund_reason"], "if_satisfied_goto": "update_1", "if_missing_goto": "ask_1", "if_escalate_goto": "escalate_1" }
+async function buildWorkspaceContext(workspaceId: number): Promise<string> {
+  const columns = await query<SheetColumn>(
+    `SELECT column_letter, header_name FROM sheet_columns
+     WHERE workspace_id = $1 ORDER BY column_letter`,
+    [workspaceId],
+  );
 
-7. manual_approval — Pause and wait for a human. Set capture_input: true when the human is performing an external action (processing a refund, fixing an order, etc.) and you need their notes or transaction ID.
-   { "id": "approval_1", "type": "manual_approval", "reason": "Process this refund in Stripe. Enter transaction ID and amount when done.", "capture_input": true, "input_prompt": "Stripe transaction ID and amount (e.g. 'txn_abc123, $89.99')", "input_context_key": "refund_notes", "on_approve": "update_2", "on_reject": "escalate_1" }
-   For simple sign-off (no action required): { "id": "approval_1", "type": "manual_approval", "reason": "Review this before sending", "on_approve": "send_1", "on_reject": "escalate_1" }
+  if (columns.length === 0) {
+    return `No sheet columns configured for this workspace yet. Use realistic column names based on typical e-commerce sheets.`;
+  }
 
-8. send_reply — Send a reply to the customer. Prefer goal + reference_context for AI-drafted contextual replies. Only use literal message for very simple fixed text.
-   AI-drafted (preferred): { "id": "send_1", "type": "send_reply", "goal": "Confirm the refund is on its way and mention the amount", "reference_context": ["refund_notes", "customer_name"] }
-   Literal (only for simple fixed text): { "id": "send_1", "type": "send_reply", "message": "Your order has been received." }
+  const columnList = columns
+    .map((c) => `- "${c.header_name}" (column ${c.column_letter})`)
+    .join("\n");
 
-9. complete — End the run cleanly
-   { "id": "complete_1", "type": "complete" }
-
-10. escalate — Flag for human review and end the run
-    { "id": "escalate_1", "type": "escalate", "reason": "Could not find order in sheet" }`;
+  return `This workspace's Google Sheet has these columns:\n\n${columnList}\n\nThe playbook you generate MUST only reference columns that exist in this list.\nMatch logic should only use context variables that can be extracted from typical customer emails AND have a corresponding column in this sheet.`;
+}
 
 
 export interface ParseResult {
@@ -64,58 +87,24 @@ export async function parsePlaybook(
   description: string,
   workspaceId: number,
 ): Promise<ParseResult> {
-  const workspace = await queryOne<{ sheet_id: string | null; sheet_name: string }>(
-    "SELECT sheet_id, sheet_name FROM workspaces WHERE id = $1",
-    [workspaceId],
-  );
+  // Load the design guide from disk and inject workspace-specific context
+  const guide = await loadDesignGuide();
+  const workspaceContext = await buildWorkspaceContext(workspaceId);
 
   const categories = await query<{ id: number; name: string }>(
     "SELECT id, name FROM categories WHERE workspace_id = $1 ORDER BY name",
     [workspaceId],
   );
 
-  const sheetContext = workspace?.sheet_id
-    ? `The workspace has a Google Sheet named "${workspace.sheet_name}". Use realistic e-commerce column names (e.g. "Order Number", "Email", "Name", "Status", "Refund Reason", "Amount").`
-    : "No Google Sheet configured yet. You can still include find_sheet_row and update_sheet steps with sensible column names.";
-
   const categoryContext = categories.length > 0
-    ? `\nKnown categories: ${categories.map((c) => c.name).join(", ")}.`
+    ? `\nKnown categories in this workspace: ${categories.map((c) => c.name).join(", ")}.`
     : "";
 
-  const systemPrompt = `You are a playbook step generator for an e-commerce email automation tool.
-Convert a plain-language description of an email handling process into a JSON array of structured steps.
-
-${STEP_TYPE_REFERENCE}
-
-Rules:
-- Each step id must be unique, short, and descriptive in snake_case (e.g. "extract_1", "ask_order_1").
-- Steps run sequentially unless a branch/evaluate redirects flow.
-- ask_customer "on_reply_goto" must be an id that exists in the steps array.
-- branch "if_true" and "if_false" must be ids that exist in the steps array.
-- evaluate "if_satisfied_goto", "if_missing_goto", and "if_escalate_goto" must be ids that exist in the steps array.
-- manual_approval "on_approve" and "on_reject" must be ids in the steps array.
-- Always end with "complete" or "escalate".
-- Return ONLY a JSON object: { "steps": [...] }. No explanation. No markdown fences.
-
-Guidance on when to use each routing step:
-- Use "evaluate" for decisions that require judgment: "do we have enough info?", "is this stuck?", "is something off?"
-- Use "branch" ONLY for simple literal checks: "is variable X null?", "is variable X equal to some value?"
-- Never use "branch" for conversation-state decisions — use "evaluate"
-
-Guidance on ask_customer:
-- Always use the new format with "goal" and "required_context". Never write a literal message in the playbook.
-- "goal" should describe WHAT we need and WHY, in one sentence.
-
-Guidance on send_reply:
-- Almost always use "goal" + "reference_context" for AI-drafted contextual replies.
-- Only use "message" for very simple fixed text (e.g. "Your request has been received.").
-- "reference_context" lists variable names whose values should naturally appear in the reply.
-
-Guidance on manual_approval:
-- Set "capture_input": true whenever the human is taking an external action (processing payment, fixing order, contacting supplier).
-- "input_prompt" should tell the human exactly what to enter (e.g. "Stripe transaction ID and amount").
-- "input_context_key" names where the captured text lands in context (default "human_notes").
-${sheetContext}${categoryContext}`;
+  // Replace the placeholder section with actual workspace data
+  const systemPrompt = guide.replace(
+    "## Workspace context (injected at runtime)\n\nThis section is replaced at runtime with the actual workspace sheet columns and configuration. The parser injects this before sending to the AI. You will see the specific columns available for this workspace here when the prompt is assembled.",
+    `## Workspace context\n\n${workspaceContext}${categoryContext}`,
+  );
 
   const content = await chatCompletion(
     [
