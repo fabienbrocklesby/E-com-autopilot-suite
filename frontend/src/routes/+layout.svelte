@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
         import { onMount, onDestroy } from 'svelte';
         import type { Snippet } from 'svelte';
+        import { onNavigate } from '$app/navigation';
         import { workspacesApi, type Workspace } from '$lib/api';
         import { workspaceStore } from '$lib/stores';
 		import { Inbox, BookOpen, Settings, Plane } from '@lucide/svelte';
@@ -43,6 +44,19 @@
                 { href: '/playbooks', label: 'Playbooks', icon: BookOpen },
                 { href: '/settings', label: 'Settings', icon: Settings },
         ];
+
+		// Use the View Transitions API for snappy route changes.
+		// onNavigate must be called at component initialisation (not inside onMount).
+		// Ref: https://svelte.dev/docs/kit/faq#how-do-i-use-the-view-transitions-api
+		onNavigate((navigation) => {
+			if (!document.startViewTransition) return;
+			return new Promise((resolve) => {
+				document.startViewTransition(async () => {
+					resolve();
+					await navigation.complete;
+				});
+			});
+		});
 </script>
 
 <div class="app">
@@ -116,6 +130,9 @@
 		--radius: 6px;
 		--radius-lg: 10px;
 		--shadow: 0 1px 3px rgba(0 0 0 / 0.4);
+		--shadow-sm: 0 1px 3px rgba(0 0 0 / 0.3), 0 1px 2px rgba(0 0 0 / 0.2);
+		--shadow-md: 0 4px 8px rgba(0 0 0 / 0.35), 0 2px 4px rgba(0 0 0 / 0.2);
+		--shadow-lg: 0 12px 28px rgba(0 0 0 / 0.45), 0 4px 8px rgba(0 0 0 / 0.3);
 		--font: 'Inter', system-ui, -apple-system, sans-serif;
 		--font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 	}
@@ -127,6 +144,16 @@
 		font-size: 14px;
 		line-height: 1.5;
 		min-height: 100vh;
+	}
+
+	/* Tighter heading tracking for a more polished feel */
+	:global(h1, h2, h3) {
+		letter-spacing: -0.015em;
+		line-height: 1.25;
+	}
+	:global(h4, h5, h6) {
+		letter-spacing: -0.01em;
+		line-height: 1.3;
 	}
 
 	:global(a) {
@@ -149,7 +176,11 @@
 		border-radius: var(--radius);
 		font-size: 13px;
 		font-weight: 500;
-		transition: background 0.15s, border-color 0.15s;
+		transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+	}
+
+	:global(.btn:not(:disabled):active) {
+		transform: scale(0.97);
 	}
 
 	:global(.btn-primary) {
@@ -174,6 +205,13 @@
 		color: #fff;
 	}
 
+	/* Global input/textarea/select transition for focus polish */
+	:global(input:not([type="checkbox"]):not([type="radio"])),
+	:global(textarea),
+	:global(select) {
+		transition: border-color 0.15s ease, box-shadow 0.15s ease, outline-color 0.15s ease;
+	}
+
 	:global(.badge) {
 		display: inline-flex;
 		align-items: center;
@@ -196,6 +234,7 @@
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		padding: 20px;
+		box-shadow: var(--shadow-sm);
 	}
 
 	:global(.error-banner) {
@@ -328,5 +367,89 @@
 	.content {
 		padding: 28px 32px;
 		overflow-y: auto;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Loading skeleton                                                       */
+	/* ------------------------------------------------------------------ */
+	:global(.skeleton) {
+		background: linear-gradient(
+			90deg,
+			var(--color-surface) 25%,
+			var(--color-surface-2) 50%,
+			var(--color-surface) 75%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.5s ease infinite;
+		border-radius: var(--radius);
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Status-flash utilities (apply via class, driven by Svelte $state)   */
+	/* ------------------------------------------------------------------ */
+	:global(.flash-success) {
+		animation: flash-success 600ms ease forwards;
+	}
+	:global(.pulse-error) {
+		animation: pulse-error 700ms ease forwards;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Keyframes                                                             */
+	/* ------------------------------------------------------------------ */
+	@keyframes shimmer {
+		from { background-position: -200% 0; }
+		to   { background-position:  200% 0; }
+	}
+
+	@keyframes flash-success {
+		0%   { box-shadow: 0 0 0 0   rgba(16 185 129 / 0.6); }
+		40%  { box-shadow: 0 0 0 4px rgba(16 185 129 / 0.35); }
+		100% { box-shadow: 0 0 0 0   rgba(16 185 129 / 0); }
+	}
+
+	@keyframes pulse-error {
+		0%   { border-color: var(--color-danger); box-shadow: 0 0 0 0   rgba(239 68 68 / 0.5); }
+		40%  { box-shadow: 0 0 0 4px rgba(239 68 68 / 0.3); }
+		100% { border-color: var(--color-border); box-shadow: none; }
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* View Transitions (Chrome/Edge/Safari 18+, graceful fallback)        */
+	/* Default cross-fade kept intentionally short — this should feel      */
+	/* like a refresh, not a cinematic transition.                          */
+	/* ------------------------------------------------------------------ */
+	:global(::view-transition-old(root)) {
+		animation: vt-out 90ms ease;
+	}
+	:global(::view-transition-new(root)) {
+		animation: vt-in 90ms ease;
+	}
+
+	@keyframes vt-out {
+		to { opacity: 0; }
+	}
+	@keyframes vt-in {
+		from { opacity: 0; }
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Reduced motion — override ALL animations and transitions             */
+	/* Svelte JS-transition y values are nullified by setting duration      */
+	/* very low; opacity-only is still allowed (mild fade only).           */
+	/* ------------------------------------------------------------------ */
+	@media (prefers-reduced-motion: reduce) {
+		:global(*, *::before, *::after) {
+			animation-duration: 50ms !important;
+			transition-duration: 50ms !important;
+		}
+		:global(::view-transition-old(root)),
+		:global(::view-transition-new(root)) {
+			animation: none !important;
+		}
+		:global(.skeleton) {
+			animation: none;
+			background: var(--color-surface-2);
+		}
 	}
 </style>

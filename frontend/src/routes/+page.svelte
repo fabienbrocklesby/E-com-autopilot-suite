@@ -4,10 +4,19 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { goto } from "$app/navigation";
   import { threadsApi } from "$lib/api";
   import { threadsStore, workspaceStore } from "$lib/stores";
   import type { ThreadListItem } from "$lib/api";
+
+  // Detect reduced-motion preference once at init so stagger can respect it.
+  // Svelte transitions are JS-driven, so CSS media queries alone can't suppress them.
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
 
   type UrgencyGroup = "attention" | "progress" | "other";
   interface GroupedSection {
@@ -23,6 +32,9 @@
   let currentWorkspaceId = $state(1);
   let selectedIdx = $state(-1);
   let collapsedGroups = $state<Record<UrgencyGroup, boolean>>({ attention: false, progress: false, other: true });
+
+  // After the first mount, stagger delay drops to 0 so re-fetches feel instant.
+  let mounted = $state(false);
 
   const unsubWs = workspaceStore.subscribe((id) => {
     currentWorkspaceId = id;
@@ -140,6 +152,7 @@
 
   onMount(() => {
     loadThreads();
+    mounted = true;
   });
 </script>
 
@@ -162,7 +175,17 @@
 {/if}
 
 {#if loading}
-  <div class="loading">Loading threads…</div>
+  <div class="skeleton-list" aria-busy="true" aria-label="Loading threads">
+    {#each Array.from({ length: 6 }) as _, i}
+      <div class="skeleton-row" style="animation-delay: {i * 0.06}s">
+        <div class="skeleton-col">
+          <div class="skeleton skeleton-subject"></div>
+          <div class="skeleton skeleton-meta"></div>
+        </div>
+        <div class="skeleton skeleton-time"></div>
+      </div>
+    {/each}
+  </div>
 {:else if threads.length === 0}
   <div class="empty-state">
     <div class="empty-icon">📭</div>
@@ -190,7 +213,14 @@
                 }
                 return -1;
               })()}
-              <li>
+              <li
+                in:fly={{
+                  y: prefersReducedMotion ? 0 : 6,
+                  duration: prefersReducedMotion ? 50 : 140,
+                  delay: mounted ? 0 : i * 28,
+                  easing: cubicOut,
+                }}
+              >
                 <a
                   href="/threads/{thread.id}"
                   class="thread-row"

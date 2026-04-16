@@ -546,7 +546,7 @@ export async function retryIngest(
   gmailThreadId: string,
 ): Promise<void> {
   const tokenRow = await queryOne<{ email: string }>(
-    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
     [workspaceId],
   );
   if (!tokenRow) throw new Error(`No OAuth token for workspace ${workspaceId}`);

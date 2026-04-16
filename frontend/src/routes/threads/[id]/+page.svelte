@@ -8,6 +8,7 @@
   import { threadsApi, playbooksApi } from "$lib/api";
   import type { ThreadDetail, Draft, PlaybookRun, StepExecution } from "$lib/api";
   import ManualActionBanner from "$lib/components/ManualActionBanner.svelte";
+  import ManualReplyPanel from "$lib/components/ManualReplyPanel.svelte";
 
   const threadId = parseInt($page.params.id ?? "0");
   let thread = $state<ThreadDetail | null>(null);
@@ -217,6 +218,8 @@
           {/each}
         </div>
       {/if}
+
+      <ManualReplyPanel {threadId} onSent={load} />
     </div>
 
     <!-- RIGHT: Playbook & Context -->

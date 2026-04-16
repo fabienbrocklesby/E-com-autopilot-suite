@@ -112,7 +112,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
   // Get connected email
   const tokenRow = await queryOne<{ email: string }>(
-    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
     [run.workspace_id],
   );
   if (!tokenRow) throw new Error(`No OAuth token for workspace ${run.workspace_id}`);

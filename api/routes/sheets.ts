@@ -38,7 +38,7 @@ sheetsRouter.post("/sync-columns", async (c) => {
 
   // Get the Gmail email for OAuth token lookup.
   const tokenRow = await queryOne<{ email: string }>(
-    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
     [workspaceId],
   );
   if (!tokenRow) throw new AppError(422, "No connected Gmail account for this workspace");

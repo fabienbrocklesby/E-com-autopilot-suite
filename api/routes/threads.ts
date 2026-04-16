@@ -10,6 +10,7 @@ import { authMiddleware } from "../middleware/auth.ts";
 import { categoriseAndDraft } from "../services/categorisation.ts";
 import { sendReply } from "../services/gmail.ts";
 import { recordInteraction } from "../services/learning.ts";
+import { sendHumanReply } from "../services/human-reply.ts";
 
 export const threadsRouter = new Hono();
 
@@ -221,4 +222,22 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
 
   const draft = await queryOne("SELECT * FROM drafts WHERE id = $1", [draftId]);
   return c.json({ draft });
+});
+
+// POST /threads/:id/manual-reply — operator sends a manual reply to the customer
+threadsRouter.post("/:id/manual-reply", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  if (isNaN(id)) throw new AppError(400, "Invalid thread ID");
+
+  const body = await c.req.json<{ body?: string; workspace_id?: number }>();
+  if (!body.body || typeof body.body !== "string" || body.body.trim().length === 0) {
+    throw new AppError(422, "body is required and must be non-empty");
+  }
+  if (body.body.trim().length > 10_000) {
+    throw new AppError(422, "body must not exceed 10,000 characters");
+  }
+
+  const workspaceId = body.workspace_id ?? 1;
+  const result = await sendHumanReply(workspaceId, id, body.body.trim());
+  return c.json(result);
 });

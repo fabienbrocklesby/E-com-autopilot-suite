@@ -11,6 +11,44 @@ Each entry:
 
 ---
 
+## 2026-07-14 — Manual thread intervention
+
+**Phase**: 3 (operator tools)
+**Status**: complete
+
+### What was done
+
+Implemented operator-initiated manual replies for any thread, bypassing the playbook engine while optionally injecting context and resuming stalled runs.
+
+**Migration**: `api/db/migrations/018_human_interventions.sql`
+- Added `threads.last_manual_reply_at TIMESTAMPTZ` (already applied — confirmed via `information_schema.columns`)
+
+**New service**: `api/services/human-reply.ts`
+- `sendHumanReply(workspaceId, threadId, body)` orchestrates the full flow
+- Loads thread (workspace-scoped), OAuth token, and last inbound message
+- Calls `sendReply()` (Gmail send, also writes outbound `messages` row)
+- In `transaction()`: sets `threads.last_manual_reply_at = NOW()`, `status = 'replied'`
+- If active run found: injects `_human_intervention` key into `playbook_runs.context` via JSONB `||` merge
+- If run was `waiting_for_customer`: calls `resumeRun()` post-transaction
+- `waiting_for_human` (manual_approval) is deliberately NOT auto-resumed
+- Returns `HumanReplyResult { messageSent, runId, runStatus, contextUpdated }`
+
+**New route**: `POST /threads/:id/manual-reply` in `api/routes/threads.ts`
+- Validates non-empty body, max 10,000 chars
+- Protected by existing `authMiddleware` on `threadsRouter`
+
+**Frontend**:
+- `frontend/src/lib/api.ts` — `threadsApi.sendManualReply(threadId, body, workspaceId?)`
+- `frontend/src/lib/components/ManualReplyPanel.svelte` — textarea with char counter, Cmd/Ctrl+Enter shortcut, loading/error/success states, Svelte 5 runes
+- `frontend/src/routes/threads/[id]/+page.svelte` — panel rendered at bottom of conversation column, `onSent={load}` reloads thread
+
+### Verified
+- `make db-migrate` confirmed column exists
+- `curl POST /threads/2/manual-reply` returned `{"messageSent":true,"runId":null,"runStatus":null,"contextUpdated":false}`
+- Vite HMR hot-reloaded thread page without errors
+
+---
+
 ## 2026-04-16 — Playbook design guide: conversational gate pattern
 
 **Phase**: 5.5 (parser quality)

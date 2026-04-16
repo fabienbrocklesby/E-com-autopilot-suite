@@ -142,6 +142,18 @@ export const threadsApi = {
 			method: 'PATCH',
 			body: JSON.stringify({ status, ...(body !== undefined ? { body } : {}) })
 		});
+	},
+
+	sendManualReply(threadId: number, body: string, workspaceId = 1) {
+		return request<{
+			messageSent: boolean;
+			runId: number | null;
+			runStatus: string | null;
+			contextUpdated: boolean;
+		}>(`/threads/${threadId}/manual-reply`, {
+			method: 'POST',
+			body: JSON.stringify({ body, workspace_id: workspaceId })
+		});
 	}
 };
 

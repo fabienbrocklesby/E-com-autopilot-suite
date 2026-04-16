@@ -92,7 +92,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
   // Apply Gmail label — fire-and-forget, don't fail categorisation on label errors.
   if (category?.gmail_label_id) {
     const tokenRow = await queryOne<OAuthToken>(
-      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
       [workspaceId],
     );
     if (tokenRow) {
@@ -163,7 +163,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     // Resolve the connected email. Use the last *inbound* message as reply target
     // so we never accidentally reply to our own sent messages.
     const tokenRow = await queryOne<OAuthToken>(
-      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 LIMIT 1",
+      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
       [workspaceId],
     );
     const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound") ?? null;
