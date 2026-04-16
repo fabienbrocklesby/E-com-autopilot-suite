@@ -4,7 +4,7 @@
         import type { Snippet } from 'svelte';
         import { workspacesApi, type Workspace } from '$lib/api';
         import { workspaceStore } from '$lib/stores';
-		import { Inbox, BookOpen, Settings } from '@lucide/svelte';
+		import { Inbox, BookOpen, Settings, Plane } from '@lucide/svelte';
 
         let { children }: { children: Snippet } = $props();
 
@@ -48,7 +48,7 @@
 <div class="app">
         <nav class="sidebar">
                 <div class="brand">
-                        <span class="brand-icon">✉</span>
+                        <span class="brand-icon"><Plane size={20} /></span>
                         <span class="brand-name">Autopilot</span>
                 </div>
 
@@ -106,7 +106,7 @@
 		--color-surface-2: #22263a;
 		--color-border: #2e3348;
 		--color-text: #e2e8f0;
-		--color-text-muted: #64748b;
+		--color-text-muted: #94a3b8;
 		--color-primary: #6366f1;
 		--color-primary-hover: #4f52d4;
 		--color-success: #10b981;
@@ -260,7 +260,7 @@
         }
 
 	.brand-icon {
-		font-size: 20px;
+		margin-top: 5px;
 	}
 
 	.brand-name {
@@ -292,6 +292,7 @@
 		font-size: 15px;
 		width: 20px;
 		text-align: center;
+		margin-top: 5px;
 	}
 
 	.nav-link:hover {

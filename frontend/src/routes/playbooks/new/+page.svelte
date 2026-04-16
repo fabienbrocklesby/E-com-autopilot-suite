@@ -336,15 +336,15 @@
     margin-bottom: 1.5rem;
   }
   .header-left { display: flex; flex-direction: column; gap: 0.25rem; }
-  .back-link { color: var(--text-muted, #6b7280); text-decoration: none; font-size: 0.875rem; }
-  .back-link:hover { color: var(--text, #111); }
+  .back-link { color: var(--color-text-muted); text-decoration: none; font-size: 0.875rem; }
+  .back-link:hover { color: var(--color-text); }
   h1 { font-size: 1.5rem; margin: 0; }
 
   .alert-error {
-    background: #fef2f2; color: #b91c1c; padding: 0.75rem 1rem;
-    border-radius: 8px; margin-bottom: 1rem; border: 1px solid #fecaca;
+    background: rgba(239, 68, 68, 0.1); color: #fca5a5; padding: 0.75rem 1rem;
+    border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(239, 68, 68, 0.3);
   }
-  .loading { text-align: center; padding: 3rem; color: var(--text-muted, #6b7280); }
+  .loading { text-align: center; padding: 3rem; color: var(--color-text-muted); }
 
   .layout { display: grid; grid-template-columns: 1fr 420px; gap: 1.5rem; align-items: start; }
   @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
@@ -352,55 +352,57 @@
   .filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
   .search-input {
     flex: 1; min-width: 200px; padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; font-size: 0.875rem;
+    border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.875rem;
+    background: var(--color-surface-2); color: var(--color-text);
   }
   .filters select {
     padding: 0.5rem 0.75rem;
-    border: 1px solid var(--border, #e5e7eb); border-radius: 6px; font-size: 0.875rem;
+    border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.875rem;
+    background: var(--color-surface-2); color: var(--color-text);
   }
 
   .template-group { margin-bottom: 1.5rem; }
   .group-title {
     font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--text-muted, #6b7280); margin: 0 0 0.5rem; padding-left: 0.25rem;
+    color: var(--color-text-muted); margin: 0 0 0.5rem; padding-left: 0.25rem;
   }
   .template-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; }
 
   .template-card {
     text-align: left; cursor: pointer; padding: 1rem; border-radius: 8px;
-    border: 1px solid var(--border, #e5e7eb); background: var(--card, #fff);
+    border: 1px solid var(--color-border); background: var(--color-surface);
     transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .template-card:hover { border-color: var(--primary, #2563eb); }
+  .template-card:hover { border-color: var(--color-primary); }
   .template-card.selected {
-    border-color: var(--primary, #2563eb);
+    border-color: var(--color-primary);
     box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
   }
   .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.375rem; }
   .card-name { font-weight: 600; font-size: 0.9375rem; }
   .badge.official {
     font-size: 0.6875rem; padding: 0.125rem 0.5rem; border-radius: 999px;
-    background: #dbeafe; color: #1d4ed8;
+    background: rgba(99, 102, 241, 0.2); color: var(--color-primary);
   }
-  .card-desc { font-size: 0.8125rem; color: var(--text-muted, #6b7280); margin: 0 0 0.5rem; line-height: 1.4; }
-  .card-meta { display: flex; gap: 0.75rem; font-size: 0.75rem; color: var(--text-muted, #9ca3af); }
+  .card-desc { font-size: 0.8125rem; color: var(--color-text-muted); margin: 0 0 0.5rem; line-height: 1.4; }
+  .card-meta { display: flex; gap: 0.75rem; font-size: 0.75rem; color: var(--color-text-muted); }
 
-  .no-results { text-align: center; padding: 2rem; color: var(--text-muted, #6b7280); }
+  .no-results { text-align: center; padding: 2rem; color: var(--color-text-muted); }
 
   /* Detail panel */
   .detail-panel { position: sticky; top: 1rem; }
   .detail-card, .detail-empty { padding: 1.5rem; }
   .card {
-    border: 1px solid var(--border, #e5e7eb); border-radius: 8px;
-    background: var(--card, #fff);
+    border: 1px solid var(--color-border); border-radius: 8px;
+    background: var(--color-surface);
   }
-  .detail-empty { text-align: center; color: var(--text-muted, #6b7280); }
+  .detail-empty { text-align: center; color: var(--color-text-muted); }
   .detail-card h2 { margin: 0 0 0.5rem; font-size: 1.25rem; }
-  .detail-desc { color: var(--text-muted, #6b7280); margin: 0 0 1rem; font-size: 0.9375rem; line-height: 1.5; }
+  .detail-desc { color: var(--color-text-muted); margin: 0 0 1rem; font-size: 0.9375rem; line-height: 1.5; }
 
   .detail-section { margin-bottom: 1rem; }
-  .detail-section h4 { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted, #6b7280); margin: 0 0 0.375rem; }
-  .plain-language { font-size: 0.875rem; line-height: 1.5; margin: 0; background: #f9fafb; padding: 0.75rem; border-radius: 6px; }
+  .detail-section h4 { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-muted); margin: 0 0 0.375rem; }
+  .plain-language { font-size: 0.875rem; line-height: 1.5; margin: 0; background: var(--color-surface-2); color: var(--color-text); padding: 0.75rem; border-radius: 6px; }
 
   .steps-list { display: flex; flex-direction: column; gap: 0.25rem; }
   .step-item {
@@ -410,25 +412,25 @@
   .step-num {
     width: 1.5rem; height: 1.5rem; border-radius: 50%; display: flex;
     align-items: center; justify-content: center; font-size: 0.6875rem;
-    background: #f3f4f6; color: var(--text-muted, #6b7280); flex-shrink: 0;
+    background: var(--color-surface-2); color: var(--color-text-muted); flex-shrink: 0;
   }
   .step-type { font-weight: 500; }
-  .step-id { color: var(--text-muted, #9ca3af); font-size: 0.75rem; }
+  .step-id { color: var(--color-text-muted); font-size: 0.75rem; }
 
   .columns-list { display: flex; flex-wrap: wrap; gap: 0.375rem; }
   .column-tag {
     font-size: 0.75rem; padding: 0.25rem 0.625rem; border-radius: 999px;
-    background: #fef3c7; color: #92400e;
+    background: rgba(245, 158, 11, 0.15); color: var(--color-warning);
   }
 
-  .voice-example { font-style: italic; font-size: 0.875rem; color: var(--text-muted, #6b7280); margin: 0; }
+  .voice-example { font-style: italic; font-size: 0.875rem; color: var(--color-text-muted); margin: 0; }
 
   .use-btn { width: 100%; margin-top: 1rem; }
 
-  .create-form { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border, #e5e7eb); }
+  .create-form { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
   .create-form h4 { margin: 0 0 0.75rem; }
   .form-label { display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.75rem; }
-  .form-input { display: block; width: 100%; margin-top: 0.25rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border, #e5e7eb); border-radius: 6px; font-size: 0.875rem; }
+  .form-input { display: block; width: 100%; margin-top: 0.25rem; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.875rem; background: var(--color-surface-2); color: var(--color-text); }
   .form-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
 
   /* Shared button styles */
@@ -438,9 +440,9 @@
     font-weight: 500; cursor: pointer; border: none; transition: background 0.15s;
   }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .btn-primary { background: var(--primary, #2563eb); color: #fff; }
-  .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
-  .btn-secondary { background: var(--card, #fff); color: var(--text, #111); border: 1px solid var(--border, #e5e7eb); }
-  .btn-secondary:hover:not(:disabled) { background: #f9fafb; }
-  .text-muted { color: var(--text-muted, #6b7280); font-size: 0.8125rem; }
+  .btn-primary { background: var(--color-primary); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); }
+  .btn-secondary { background: var(--color-surface-2); color: var(--color-text); border: 1px solid var(--color-border); }
+  .btn-secondary:hover:not(:disabled) { background: var(--color-surface); }
+  .text-muted { color: var(--color-text-muted); font-size: 0.8125rem; }
 </style>
