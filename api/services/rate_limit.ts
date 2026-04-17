@@ -88,7 +88,7 @@ export async function rateLimitedCall<T>(
       return fn();
     }
 
-    // Bucket empty — wait
+    // Bucket empty - wait
     const elapsed = Date.now() - startedAt;
     if (elapsed >= maxWaitMs) {
       logger.warn("rate_limit.exceeded", { workspace_id: workspaceId, api, waited_ms: elapsed });

@@ -1,5 +1,5 @@
 /**
- * Complete handler — marks the run as complete.
+ * Complete handler - marks the run as complete.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep } from "../types.ts";
 

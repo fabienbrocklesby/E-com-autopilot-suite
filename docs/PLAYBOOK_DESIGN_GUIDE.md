@@ -1,6 +1,6 @@
 # Playbook Design Guide
 
-This document is the canonical reference for how playbooks should be structured. It is loaded into the parser AI's system prompt at runtime. Edit this file to change how the AI designs playbooks — no code changes required.
+This document is the canonical reference for how playbooks should be structured. It is loaded into the parser AI's system prompt at runtime. Edit this file to change how the AI designs playbooks - no code changes required.
 
 ## What a playbook is
 
@@ -82,18 +82,18 @@ Only extract variables that serve a purpose later in the playbook:
 Do NOT extract variables speculatively. If no downstream step uses "order_number", don't extract it. The workspace's sheet columns are listed in the Workspace Context section below. Only generate find_sheet_row match_attempts for columns that ACTUALLY EXIST in the sheet.
 
 **Common variable names** (use these for consistency across playbooks):
-- `customer_name` — the sender's name
-- `customer_email` — the sender's email address (useful only if the sheet has an Email column)
-- `product_description` — what the customer is writing about
-- `refund_reason` — why they want a refund
-- `issue_description` — the problem they're reporting
+- `customer_name` - the sender's name
+- `customer_email` - the sender's email address (useful only if the sheet has an Email column)
+- `product_description` - what the customer is writing about
+- `refund_reason` - why they want a refund
+- `issue_description` - the problem they're reporting
 
 **Example (correct):**
 ```json
 { "id": "extract_1", "type": "extract", "variables": ["customer_name", "product_description"] }
 ```
 
-**Example (wrong — extracting variables with no sheet column or later use):**
+**Example (wrong - extracting variables with no sheet column or later use):**
 ```json
 { "id": "extract_1", "type": "extract", "variables": ["order_number", "tracking_number", "customer_email", "phone_number"] }
 ```
@@ -119,7 +119,7 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 ```
 
 **Fields:**
-- `match_attempts` (array, required): Each entry is `{ column, context_var }`. The engine tries each in order. `column` MUST be a column that exists in the workspace sheet. `context_var` must be a variable set by a prior extract step. Use ALL available signals for matching — don't rely on a single column.
+- `match_attempts` (array, required): Each entry is `{ column, context_var }`. The engine tries each in order. `column` MUST be a column that exists in the workspace sheet. `context_var` must be a variable set by a prior extract step. Use ALL available signals for matching - don't rely on a single column.
 
 **Design rules:**
 - List match attempts from strongest signal to weakest (Email > Name > product description)
@@ -133,7 +133,7 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **When to use:** After a successful `find_sheet_row` (row_number is in context) when you need to record status changes, notes, or other data.
 
-**When NOT to use:** Don't call before `find_sheet_row`. Don't call if `row_number` might be null — gate it behind an `evaluate` step.
+**When NOT to use:** Don't call before `find_sheet_row`. Don't call if `row_number` might be null - gate it behind an `evaluate` step.
 
 **Config schema:**
 ```json
@@ -159,7 +159,7 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **When to use:** When `find_sheet_row` couldn't match or essential context is missing. ALMOST ALWAYS placed below the happy path as a fallback.
 
-**When NOT to use:** Don't use before attempting `find_sheet_row` — always try to match first with whatever we have. Don't use to send confirmation messages (use `send_reply` for that).
+**When NOT to use:** Don't use before attempting `find_sheet_row` - always try to match first with whatever we have. Don't use to send confirmation messages (use `send_reply` for that).
 
 **Config schema:**
 ```json
@@ -177,11 +177,11 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 - `required_context` (string[], required): Variables that must be present for this step to be satisfied. If already present, the step auto-skips.
 - `on_reply_goto` (string, required): Step ID to jump to when the customer replies. Usually `"extract_1"` to re-extract with the new info.
 - `voice_hint` (string, optional): Tone guidance for the AI draft.
-- `message` (string, optional): Legacy — literal message text. Do NOT use in new playbooks.
+- `message` (string, optional): Legacy - literal message text. Do NOT use in new playbooks.
 
 **Design rules:**
 - `on_reply_goto` loops back to extract or find, NEVER to itself.
-- For sheet-aware playbooks, the truly required context is usually just `row_number` — if we can't find the customer, we ask for more info.
+- For sheet-aware playbooks, the truly required context is usually just `row_number` - if we can't find the customer, we ask for more info.
 - Place ask_customer steps BELOW the happy path in the step array.
 
 ### branch
@@ -190,7 +190,7 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **When to use:** ONLY for literal null-checks or simple value comparisons. Example: "is customer_name null?"
 
-**When NOT to use:** NEVER for judgment calls. Don't use for "do we have enough info?" — use `evaluate` instead. Don't use for conversation-state decisions.
+**When NOT to use:** NEVER for judgment calls. Don't use for "do we have enough info?" - use `evaluate` instead. Don't use for conversation-state decisions.
 
 **Config schema:**
 ```json
@@ -231,23 +231,23 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **Fields:**
 - `goal` (string, required): What the AI is judging.
-- `required_context` (string[], required): The variables THIS evaluate step is gating on. List the exact variable you need at this decision point — not every variable in the context bag.
+- `required_context` (string[], required): The variables THIS evaluate step is gating on. List the exact variable you need at this decision point - not every variable in the context bag.
   - Gate on `["row_number"]` only when the decision is "did we find the customer in the sheet?"
   - Gate on `["refund_reason"]` (or `["issue_description"]`, `["order_number"]`, etc.) when the decision is "has the customer told us what we need to know?"
   - **NEVER list only sheet-lookup variables (row_number, customer_name) when the real gate is a conversational variable the customer must type.** Sheet-lookup variables are set by earlier steps and will always be non-null by the time evaluate runs. Listing only those means evaluate ALWAYS returns satisfied and skips the ask entirely.
-  - The rule: list the variable that proves the customer communicated the required information — not the variable that proves we found a database row.
-- `if_satisfied_goto` (string, required): Happy path — proceed.
-- `if_missing_goto` (string, required): Missing info — routes to `ask_customer`. NEVER to `escalate`.
-- `if_escalate_goto` (string, required): Stuck/broken — routes to `escalate`.
+  - The rule: list the variable that proves the customer communicated the required information - not the variable that proves we found a database row.
+- `if_satisfied_goto` (string, required): Happy path - proceed.
+- `if_missing_goto` (string, required): Missing info - routes to `ask_customer`. NEVER to `escalate`.
+- `if_escalate_goto` (string, required): Stuck/broken - routes to `escalate`.
 
 **Design rules:**
 - `if_missing_goto` MUST point to an `ask_customer` step. NEVER point it to an `escalate` step.
-  Missing a variable is not an escalation — it means we need to ask the customer.
+  Missing a variable is not an escalation - it means we need to ask the customer.
 - `if_escalate_goto` is reserved for situations where MORE INFORMATION WON'T HELP:
   fraud signals, policy violations, the order is cancelled, the situation is genuinely broken.
   A variable being null because the customer didn't mention it is NOT an escalatable situation.
 - The AI inside evaluate can return "escalate" only when it detects the conversation is truly stuck
-  or the request is against policy — NOT simply because a required_context variable is absent.
+  or the request is against policy - NOT simply because a required_context variable is absent.
 
 ### manual_approval
 
@@ -336,7 +336,7 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **Purpose:** End the run, flag the thread for human review.
 
-**When to use:** When the system can't resolve the issue — missing info after asking, human rejection, unexpected state.
+**When to use:** When the system can't resolve the issue - missing info after asking, human rejection, unexpected state.
 
 **When NOT to use:** Don't use as the only terminal. Every playbook should have a `complete` step for the happy path.
 
@@ -363,7 +363,7 @@ This section is replaced at runtime with the actual workspace sheet columns and 
 
 Playbooks only reference columns that exist in the workspace's sheet. The runtime Workspace Context section lists them. Never generate steps that reference columns not in that list.
 
-Extraction variables should map to sheet columns. If the sheet has a "Name" column but no "Email" column, extract `customer_name` but don't extract `customer_email` — we can't match on it. Exception: extract `customer_email` if a later step (like `send_reply`) explicitly needs it AND it's available in the email headers.
+Extraction variables should map to sheet columns. If the sheet has a "Name" column but no "Email" column, extract `customer_name` but don't extract `customer_email` - we can't match on it. Exception: extract `customer_email` if a later step (like `send_reply`) explicitly needs it AND it's available in the email headers.
 
 ### Principle 2: Match with whatever the customer provides
 
@@ -415,24 +415,24 @@ Use when: the description says to ask for a piece of info if the customer didn't
 **Correct step sequence (array order matters):**
 
 ```
-1. extract        — attempt to pull the variable (e.g. order_number). It will be null
+1. extract        - attempt to pull the variable (e.g. order_number). It will be null
                     if the customer didn't include it. That is expected and fine.
 
-2. evaluate       — check: do we have the variable?
+2. evaluate       - check: do we have the variable?
                     if_satisfied_goto → send_reply  (we have it, send the reply)
                     if_missing_goto   → ask_customer (MISSING = ASK, not escalate)
                     if_escalate_goto  → escalate     (only for broken situations)
 
-3. send_reply     — happy path: send the reply to the customer.
+3. send_reply     - happy path: send the reply to the customer.
 
-4. complete       — terminal success.
+4. complete       - terminal success.
 
-5. ask_customer   — ask the customer for the missing variable.
+5. ask_customer   - ask the customer for the missing variable.
                     This PAUSES the run (status: waiting_for_customer).
                     on_reply_goto must point back to extract_1 so the variable
                     is extracted from the customer's reply when they respond.
 
-6. escalate       — last resort, only reached from if_escalate_goto.
+6. escalate       - last resort, only reached from if_escalate_goto.
                     NOT from if_missing_goto.
 ```
 
@@ -442,7 +442,7 @@ Use when: the description says to ask for a piece of info if the customer didn't
 - `ask_customer.on_reply_goto` → `extract_1`. Always loop back to extract so the customer's
   reply is parsed and the variable is extracted before evaluate runs again.
 - `escalate` sits at the bottom of the array. It is ONLY reachable from `if_escalate_goto`.
-  It represents "the situation is genuinely broken" — not "we don't have the variable yet."
+  It represents "the situation is genuinely broken" - not "we don't have the variable yet."
 - No `find_sheet_row`, no `update_sheet`, no `manual_approval` unless the description asks for them.
 
 ### Pattern: Ask for information BEFORE performing sheet actions or approvals
@@ -460,13 +460,13 @@ This is different from the previous pattern (which is just conversational with n
 The ARRAY ORDER matters because `extract` steps advance sequentially. Place the ask+extract pair immediately before the action steps in the array. `evaluate` uses `if_satisfied_goto` to jump over the ask+extract on the happy path.
 
 ```
-1. extract_1       — extract all variables including the conversational one (e.g.
-                     refund_reason). Mark it as potentially null — it is fine if
+1. extract_1       - extract all variables including the conversational one (e.g.
+                     refund_reason). Mark it as potentially null - it is fine if
                      the customer didn't include it in the first email.
 
-2. find_sheet_row  — find the customer in the sheet (if sheet work is needed).
+2. find_sheet_row  - find the customer in the sheet (if sheet work is needed).
 
-3. evaluate_1      — GATE on the CONVERSATIONAL variable, not the sheet variable.
+3. evaluate_1      - GATE on the CONVERSATIONAL variable, not the sheet variable.
                      required_context: ["refund_reason"]   ← NOT ["row_number"]
                      if_satisfied_goto → first action step (e.g. update_1)
                      if_missing_goto   → ask_1
@@ -478,21 +478,21 @@ The ARRAY ORDER matters because `extract` steps advance sequentially. Place the 
                      before update_1. After extract_2 runs, sequential advance
                      lands on update_1 automatically. ***
 
-4. ask_1           — Ask the customer for the missing info. Pauses the run.
+4. ask_1           - Ask the customer for the missing info. Pauses the run.
                      on_reply_goto: "extract_2"
-                     (NOTE: ask_1 sits before update_1 in the array — this is
+                     (NOTE: ask_1 sits before update_1 in the array - this is
                      intentional so that after extract_2, advance → update_1)
 
-5. extract_2       — Extract the variable from the customer's reply.
+5. extract_2       - Extract the variable from the customer's reply.
                      After this step, array-sequential advance lands on update_1.
 
-6. update_1        — First action step. Only runs after we have the required info.
+6. update_1        - First action step. Only runs after we have the required info.
                      (reached via evaluate's if_satisfied_goto OR via extract_2's
                      sequential advance)
 
-7. [approval, update_2, send_reply, complete]  — rest of happy path
+7. [approval, update_2, send_reply, complete]  - rest of happy path
 
-8. escalate steps  — failure terminals
+8. escalate steps  - failure terminals
 ```
 
 **Critical rules for this pattern:**
@@ -609,8 +609,8 @@ Description: "When someone asks for a refund, find them in the sheet, mark it as
 
 **Why this shape:**
 - `extract_1` pulls only variables that map to sheet columns (Name → customer_name, Order/Item → product_description) plus refund_reason for the update step.
-- `find_1` matches on Name and Order/Item — the two columns most likely to identify the customer. No order_number because the sheet has no such column.
-- `evaluate_1` checks only `row_number` — the minimum needed to proceed.
+- `find_1` matches on Name and Order/Item - the two columns most likely to identify the customer. No order_number because the sheet has no such column.
+- `evaluate_1` checks only `row_number` - the minimum needed to proceed.
 - `ask_1` is at the bottom, only reached if evaluate routes there.
 - Two separate escalate steps with specific reasons for each failure path.
 - `approval_1` has `capture_input: true` because the human processes a Stripe refund and we need the transaction details back.
@@ -671,8 +671,8 @@ Description: "When someone asks where their order is, find them in the sheet and
 ```
 
 **Why this shape:**
-- No `update_sheet` — tracking enquiries are read-only.
-- No `manual_approval` — the reply can be sent automatically.
+- No `update_sheet` - tracking enquiries are read-only.
+- No `manual_approval` - the reply can be sent automatically.
 - Simpler flow: extract → find → evaluate → send → complete.
 
 ### Example 3: Order change (sheet with Name, Order/Item, Status, Amount, Address, Quantity columns)
@@ -749,7 +749,7 @@ Description: "When someone wants to change their order, find it in the sheet, pa
     {
       "id": "escalate_rejected",
       "type": "escalate",
-      "reason": "Order change was not possible — human reviewer rejected"
+      "reason": "Order change was not possible - human reviewer rejected"
     }
   ]
 }
@@ -798,11 +798,11 @@ Description: "When someone has a general question, just pause for me to answer i
 ```
 
 **Why this shape:**
-- No `find_sheet_row` or `update_sheet` — general enquiries don't need sheet lookup.
+- No `find_sheet_row` or `update_sheet` - general enquiries don't need sheet lookup.
 - Straight to `manual_approval` after extracting basic info.
 - Simple: extract → approve → send → complete.
 
-### Example 5: Simple conversational flow — no sheet interaction
+### Example 5: Simple conversational flow - no sheet interaction
 
 Description: "When someone asks about tracking or where their order is, ask them for their order number if they didn't give one. Once we have an order number, just reply saying their order has been dispatched and will be with them shortly. No need to check the sheet."
 
@@ -849,12 +849,12 @@ Description: "When someone asks about tracking or where their order is, ask them
 ```
 
 **Why this shape:**
-- NO find_sheet_row — the description explicitly says "No need to check the sheet."
-- NO update_sheet — nothing to write back.
-- NO manual_approval — the reply is automated.
+- NO find_sheet_row - the description explicitly says "No need to check the sheet."
+- NO update_sheet - nothing to write back.
+- NO manual_approval - the reply is automated.
 - 4 happy-path steps (extract → evaluate → send → complete), 2 fallback steps (ask, escalate).
 - evaluate checks for order_number; if present, goes straight to send_reply.
-- ask_customer is at the bottom — only reached via evaluate's if_missing_goto.
+- ask_customer is at the bottom - only reached via evaluate's if_missing_goto.
 
 ### Example 6: Refund with reason required BEFORE updating status
 
@@ -963,7 +963,7 @@ This uses the "conversational gate before action" pattern. The customer must pro
 
 ### evaluate required_context lists only sheet-lookup variables when a conversational gate is needed
 
-This is the most impactful mistake. When the description says "ask X before proceeding" or "we need the reason first", the evaluate step must gate on the conversational variable — not on `row_number`.
+This is the most impactful mistake. When the description says "ask X before proceeding" or "we need the reason first", the evaluate step must gate on the conversational variable - not on `row_number`.
 
 ```
 WRONG (description says "ask why before going ahead"):
@@ -987,17 +987,17 @@ RIGHT:
   When the customer didn't include the reason: evaluate routes to ask_1, customer gets asked.
 ```
 
-The rule: `required_context` must contain the variable that proves the **customer communicated what you need** — not the variable that proves a database lookup succeeded.
+The rule: `required_context` must contain the variable that proves the **customer communicated what you need** - not the variable that proves a database lookup succeeded.
 
 ### Action steps before the ask-and-extract cycle
 
 When the description says "ask before proceeding", the array order must reflect this.
 
 ```
-WRONG (array order — update happens before the customer is asked):
+WRONG (array order - update happens before the customer is asked):
   [extract_1, find_1, evaluate_1, update_1, ..., complete_1, ask_1, ...]
 
-RIGHT (array order — ask+extract sit before update_1):
+RIGHT (array order - ask+extract sit before update_1):
   [extract_1, find_1, evaluate_1, ask_1, extract_2, update_1, ...]
 
 evaluate's if_satisfied_goto jumps directly to update_1 (skipping ask_1 + extract_2)

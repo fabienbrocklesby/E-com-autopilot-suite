@@ -1,5 +1,5 @@
 /**
- * Sheet Rules route — /sheet-rules
+ * Sheet Rules route - /sheet-rules
  * CRUD for sheet rules and management of their executions.
  * All routes require auth.
  */
@@ -157,7 +157,7 @@ sheetRulesRouter.get("/:id", async (c) => {
   return c.json({ rule });
 });
 
-// PUT /sheet-rules/:id — full replacement
+// PUT /sheet-rules/:id - full replacement
 sheetRulesRouter.put("/:id", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid rule ID");
@@ -187,7 +187,7 @@ sheetRulesRouter.put("/:id", async (c) => {
   return c.json({ rule });
 });
 
-// PATCH /sheet-rules/:id — partial update (e.g. is_active toggle)
+// PATCH /sheet-rules/:id - partial update (e.g. is_active toggle)
 sheetRulesRouter.patch("/:id", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid rule ID");

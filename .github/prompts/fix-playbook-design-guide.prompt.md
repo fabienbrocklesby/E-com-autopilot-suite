@@ -1,4 +1,4 @@
-# Fix: Playbook Design Guide — "Ask If Missing" Pattern
+# Fix: Playbook Design Guide - "Ask If Missing" Pattern
 
 ## Context
 
@@ -8,7 +8,7 @@ The playbook engine drives multi-step AI workflows over customer emails.
 Use the **filesystem MCP** to read all files referenced below before making changes.
 Use the **postgres MCP** to inspect current playbook step shapes stored in the DB if needed.
 Use **context7** to look up any Deno/Hono/TypeScript APIs if you need them.
-Do NOT use playwright or svelte for this task — it is backend/docs only.
+Do NOT use playwright or svelte for this task - it is backend/docs only.
 
 ---
 
@@ -25,12 +25,12 @@ A user wrote this plain-language playbook description:
 > No need to check the sheet."
 
 The parser generated these steps (WRONG):
-1. extract — extracts `customer_name`, `product_description` (speculative, not needed)
-2. find_sheet_row — sheet lookup (description explicitly said not to)
-3. evaluate — checks for info, but routes `missing order_number → escalate` (WRONG)
+1. extract - extracts `customer_name`, `product_description` (speculative, not needed)
+2. find_sheet_row - sheet lookup (description explicitly said not to)
+3. evaluate - checks for info, but routes `missing order_number → escalate` (WRONG)
 4. send_reply
 5. complete
-6. ask_customer (dead — never reached because evaluate escalated)
+6. ask_customer (dead - never reached because evaluate escalated)
 7. escalate
 
 What actually happened at runtime: the run escalated immediately because
@@ -47,14 +47,14 @@ Without a clear example, GPT-4o defaults to escalate when a required variable
 is absent, which is almost never correct.
 
 Additionally the guide's "match complexity to description" principle is not
-enforced strongly enough — the parser added `find_sheet_row` despite the
+enforced strongly enough - the parser added `find_sheet_row` despite the
 description explicitly saying "no need to check the sheet."
 
 ---
 
 ## What you must do
 
-### Step 1 — Read the files
+### Step 1 - Read the files
 
 Use the filesystem MCP to read:
 - `docs/PLAYBOOK_DESIGN_GUIDE.md` (the file you will edit)
@@ -73,7 +73,7 @@ LIMIT 5;
 ```
 Study real step shapes so your examples exactly match the schema in production.
 
-### Step 2 — Add the canonical "ask if missing" pattern to the design guide
+### Step 2 - Add the canonical "ask if missing" pattern to the design guide
 
 In `docs/PLAYBOOK_DESIGN_GUIDE.md`, add a clearly labelled section (or update
 an existing patterns/examples section) that teaches GPT-4o this pattern:
@@ -83,28 +83,28 @@ an existing patterns/examples section) that teaches GPT-4o this pattern:
 The correct step sequence is:
 
 ```
-1. extract        — attempt to extract the variable (e.g. order_number).
+1. extract        - attempt to extract the variable (e.g. order_number).
                     Mark it optional. It may be null if the customer didn't include it.
 
-2. evaluate       — check: do we have order_number in context?
+2. evaluate       - check: do we have order_number in context?
                     on_true  → send_reply step (happy path)
                     on_false → ask_customer step (NOT escalate)
                     on_unsure → ask_customer step
 
-3. send_reply     — happy path: send the reply (template or AI-drafted)
+3. send_reply     - happy path: send the reply (template or AI-drafted)
 
-4. complete       — terminal success
+4. complete       - terminal success
 
-5. ask_customer   — ask the customer for the missing variable.
+5. ask_customer   - ask the customer for the missing variable.
                     This PAUSES the run (status: waiting_for_customer).
                     When the customer replies, the run resumes from THIS step.
                     The ask_customer handler on resume advances to the NEXT step.
 
 6. extract (second instance, or re-evaluate)
-                    — after customer replies, extract the variable from their reply.
+                    - after customer replies, extract the variable from their reply.
                     Then advance to send_reply.
 
-7. escalate       — only if the customer never replied (handled by silence timeout,
+7. escalate       - only if the customer never replied (handled by silence timeout,
                     not by evaluate routing). Should NOT appear as a routing target
                     from evaluate when the variable is simply missing.
 ```
@@ -122,7 +122,7 @@ Key rules to state explicitly in the guide:
   reachable only by explicit `advance_to` from evaluate or branch when
   the situation is genuinely unresolvable.
 
-### Step 3 — Strengthen the "match complexity to description" rule
+### Step 3 - Strengthen the "match complexity to description" rule
 
 Find where the design guide talks about matching complexity to description.
 Make the rule more explicit with these additions:
@@ -133,7 +133,7 @@ Make the rule more explicit with these additions:
   sheet steps. Sheet steps require explicit mention of sheet lookups in the description.
 - If in doubt: fewer steps is better. The client can always add steps later.
 
-### Step 4 — Add a worked example
+### Step 4 - Add a worked example
 
 Add a complete worked example to the design guide for this exact scenario:
 
@@ -147,7 +147,7 @@ using the exact field names and shapes from the real schema you read in Step 1.
 Make sure `evaluate` routes `on_false → ask_customer`, not escalate.
 Make sure there is no `find_sheet_row` step.
 
-### Step 5 — Verify no other patterns in the guide teach wrong escalation routing
+### Step 5 - Verify no other patterns in the guide teach wrong escalation routing
 
 Scan the rest of `docs/PLAYBOOK_DESIGN_GUIDE.md` for any examples where
 `evaluate` routes `on_false → escalate` for a simple missing-variable case.
@@ -160,10 +160,10 @@ Fix them to route to `ask_customer` or document why escalate is correct there.
 - Do NOT change `api/services/playbook/parser.ts` or any handler code.
   The fix is entirely in the design guide document.
 - Do NOT add new step types or change the schema.
-- Do NOT break the workspace-aware column injection — the guide already has
+- Do NOT break the workspace-aware column injection - the guide already has
   a section about this. Leave it intact.
 - Write the guide additions in clear, direct language. GPT-4o reads this as
-  a system prompt — it needs to be unambiguous, not prose-heavy.
+  a system prompt - it needs to be unambiguous, not prose-heavy.
 - Use concrete JSON examples with real field names from the schema.
 
 ---

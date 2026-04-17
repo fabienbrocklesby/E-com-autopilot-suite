@@ -12,11 +12,11 @@ This phase makes the engine **AI-driven where it needs to be, deterministic wher
 
 ## Required reading before starting
 
-- `docs/PLAYBOOK_ENGINE.md` — the architecture as it stands
-- `docs/TASK_LOG.md` — confirm Phase 4 done
-- `skills/ai-driven-step/SKILL.md` — the new pattern for AI-driven steps (read this carefully, it's the template for all the changes below)
+- `docs/PLAYBOOK_ENGINE.md` - the architecture as it stands
+- `docs/TASK_LOG.md` - confirm Phase 4 done
+- `skills/ai-driven-step/SKILL.md` - the new pattern for AI-driven steps (read this carefully, it's the template for all the changes below)
 - The current handler files: `api/services/playbook/handlers/ask_customer.ts`, `branch.ts`, `send_reply.ts`, `manual_approval.ts`
-- `api/services/playbook/executor.ts` — the dispatch loop
+- `api/services/playbook/executor.ts` - the dispatch loop
 
 ## The problem we're solving
 
@@ -40,7 +40,7 @@ Implement in this order. Each is committable on its own.
 
 ### Change 1: Loop detection in the executor
 
-**Ship this first** — it stops the bleeding even before the smarter changes land. Any playbook currently in production gets protected.
+**Ship this first** - it stops the bleeding even before the smarter changes land. Any playbook currently in production gets protected.
 
 **File**: `api/services/playbook/executor.ts`
 
@@ -115,7 +115,7 @@ Handler logic:
    - List of all previous `ask_customer` messages sent on this run (scan execution log)
 
 2. Check: do we already have all `required_context` variables populated in the context bag?
-   - If yes: return `{ decision: advance(on_reply_goto), contextUpdates: {} }` — skip asking entirely
+   - If yes: return `{ decision: advance(on_reply_goto), contextUpdates: {} }` - skip asking entirely
    - Log this as output: `{ action: "skipped", reason: "all required context present" }`
 
 3. If we do need to ask, call AI:
@@ -234,7 +234,7 @@ Context bag for this run:
 Rules:
 - Brief. One short paragraph unless the customer asked multiple things.
 - Match the voice. Don't sound corporate unless the voice says so.
-- Reference facts from context naturally (e.g. the amount refunded, the order number) — don't list them like a form.
+- Reference facts from context naturally (e.g. the amount refunded, the order number) - don't list them like a form.
 - Don't start with "Thank you for" unless the voice specifically calls for it.
 - Sign off the way the category voice suggests.
 
@@ -277,8 +277,8 @@ New config:
 - When the UI hits "reject" endpoint: advance to `on_reject`
 
 **API routes needed** (extend existing if they exist):
-- `POST /playbook-runs/:id/approve` — body: `{ input?: string }`
-- `POST /playbook-runs/:id/reject` — body: `{ reason?: string }`
+- `POST /playbook-runs/:id/approve` - body: `{ input?: string }`
+- `POST /playbook-runs/:id/reject` - body: `{ reason?: string }`
 
 **Frontend changes**:
 - Review queue shows the reason prominently
@@ -287,7 +287,7 @@ New config:
 - "Reject" button with optional reason field
 - If `draft_preview` is set, call a new backend endpoint that returns a preview of what the next `send_reply` would write (without actually sending). Show it above the approve button so the human sees what the customer will receive.
 
-**Validation**: 
+**Validation**:
 1. Build a playbook with `manual_approval` + `capture_input: true`
 2. Trigger a run that reaches it
 3. In the review UI: verify text area appears with the right prompt
@@ -332,12 +332,12 @@ When generating playbooks:
 
 Also add examples at the end of the prompt showing correct usage.
 
-**Validation**: 
+**Validation**:
 1. Take the plain-language description of the refund playbook (see below)
 2. Run it through the parser
 3. Verify the output uses `evaluate`, AI-driven `ask_customer`, `manual_approval` with `capture_input`, and AI-drafted `send_reply`
 
-## The refund playbook — rebuild it after the changes
+## The refund playbook - rebuild it after the changes
 
 Once all 6 changes are in, regenerate the refund playbook from this description (in the UI):
 
@@ -418,11 +418,11 @@ After all 6 changes are deployed and the playbook is regenerated:
 ## Workflow
 
 1. Read everything in "Required reading"
-2. Ship Change 1 (loop detection) first as its own commit — lands in prod immediately to protect against current stuck runs
-3. Ship Change 2 (AI-driven ask_customer) — biggest impact
-4. Ship Change 3 (evaluate step) — enables smart routing
-5. Ship Change 4 (AI-drafted send_reply) — polish
-6. Ship Change 5 (manual_approval input) — backend + frontend together
+2. Ship Change 1 (loop detection) first as its own commit - lands in prod immediately to protect against current stuck runs
+3. Ship Change 2 (AI-driven ask_customer) - biggest impact
+4. Ship Change 3 (evaluate step) - enables smart routing
+5. Ship Change 4 (AI-drafted send_reply) - polish
+6. Ship Change 5 (manual_approval input) - backend + frontend together
 7. Ship Change 6 (parser updates)
 8. Regenerate refund playbook from plain language, test end to end
 9. Regenerate tracking + order change + damaged playbooks, test each

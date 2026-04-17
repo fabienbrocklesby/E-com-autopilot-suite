@@ -1,11 +1,21 @@
 <!--
-  /sheet-rules — Manage sheet rules
+  /sheet-rules - Manage sheet rules
   Configure rules that match email threads to spreadsheet rows and apply updates.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { sheetRulesApi, sheetsApi, categoriesApi } from "$lib/api";
   import type { SheetRule, SheetRulePayload, SheetColumn, Category } from "$lib/api";
+  import { AlertTriangle, X, Check } from '@lucide/svelte';
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+
+  let mounted = $state(false);
 
   let rules = $state<SheetRule[]>([]);
   let columns = $state<SheetColumn[]>([]);
@@ -122,7 +132,7 @@
     if (!form.match_instruction.trim()) {
       errs.match_instruction = "Extraction instruction is required.";
     } else if (matchInstructionWarning) {
-      errs.match_instruction = "Fix the extraction instruction before saving — see the warning above.";
+      errs.match_instruction = "Fix the extraction instruction before saving - see the warning above.";
     }
 
     if (!form.match_column) errs.match_column = "You must select a match column.";
@@ -215,18 +225,21 @@
 
   function colLabel(letter: string) {
     const col = columns.find((c) => c.column_letter === letter);
-    return col ? `${letter} — ${col.header_name}` : letter;
+    return col ? `${letter} - ${col.header_name}` : letter;
   }
 
   function categoryName(id: number) {
     return categories.find((c) => c.id === id)?.name ?? String(id);
   }
 
-  onMount(() => { load(); });
+  onMount(async () => {
+    await load();
+    mounted = true;
+  });
 </script>
 
 <svelte:head>
-  <title>Sheet Rules — Email Dash</title>
+  <title>Sheet Rules - Email Dash</title>
 </svelte:head>
 
 <div class="page-header">
@@ -235,16 +248,16 @@
 </div>
 
 {#if error}
-  <div class="error-banner">{error}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>{error}</div>
 {/if}
 
 {#if success}
-  <div class="success-banner">{success}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
 {/if}
 
 {#if columns.length === 0 && !loading}
   <div class="info-banner">
-    ⚠ No sheet columns synced yet. Go to <a href="/settings">Settings → Workspaces</a> and click "Sync Columns" so rules can reference your spreadsheet columns.
+    <AlertTriangle size={14} style="display:inline;vertical-align:middle" /> No sheet columns synced yet. Go to <a href="/settings">Settings &rarr; Workspaces</a> and click "Sync Columns" so rules can reference your spreadsheet columns.
   </div>
 {/if}
 
@@ -259,8 +272,12 @@
   </div>
 {:else}
   <div class="rules-grid">
-    {#each rules as rule (rule.id)}
-      <div class="card rule-card" class:inactive={!rule.is_active}>
+    {#each rules as rule, i (rule.id)}
+      <div
+        class="card rule-card"
+        class:inactive={!rule.is_active}
+        in:fly={{ y: prefersReducedMotion ? 0 : 6, duration: prefersReducedMotion ? 50 : 140, delay: mounted ? 0 : i * 30, easing: cubicOut }}
+      >
         <div class="rule-header">
           <div class="rule-title-row">
             <h2>{rule.name}</h2>
@@ -289,7 +306,7 @@
           <div class="meta-item">
             <span class="meta-label">Auto-apply</span>
             <span class="meta-value" class:enabled={rule.auto_apply}>
-              {rule.auto_apply ? "Yes" : "No — review required"}
+              {rule.auto_apply ? "Yes" : "No - review required"}
             </span>
           </div>
           <div class="meta-item">
@@ -326,7 +343,7 @@
     <div class="modal card">
       <div class="modal-header">
         <h2>{editingRule ? "Edit Rule" : "New Rule"}</h2>
-        <button class="close-btn" onclick={closeForm}>✕</button>
+        <button class="close-btn" onclick={closeForm}><X size={16} /></button>
       </div>
 
       {#if error}
@@ -363,20 +380,20 @@
             class="input"
             type="text"
             bind:value={form.description}
-            placeholder="Optional — briefly describe what this rule does"
+            placeholder="Optional - briefly describe what this rule does"
           />
         </div>
 
         <!-- Match instruction -->
         <div class="field">
           <label class="label" for="rule-match-inst">
-            Step 1 — What identifier should the AI extract from the email? *
+            Step 1 - What identifier should the AI extract from the email? *
           </label>
           <p class="field-hint">
             This tells the AI what unique value to pull from the email so it can find the correct row in your spreadsheet.<br />
-            <strong class="example-good">✓ Good:</strong> "Extract the order number from the email — it usually appears as #12345 or 'order 12345'"<br />
-            <strong class="example-good">✓ Good:</strong> "Extract the sender's email address"<br />
-            <strong class="example-bad">✗ Wrong:</strong> "Update the status column to say refund requested" — that's an action, not an extraction
+            <strong class="example-good"><Check size={12} style="display:inline;vertical-align:middle" /> Good:</strong> "Extract the order number from the email - it usually appears as #12345 or 'order 12345'"<br />
+            <strong class="example-good"><Check size={12} style="display:inline;vertical-align:middle" /> Good:</strong> "Extract the sender's email address"<br />
+            <strong class="example-bad"><X size={12} style="display:inline;vertical-align:middle" /> Wrong:</strong> "Update the status column to say refund requested" - that's an action, not an extraction
           </p>
           <textarea
             id="rule-match-inst"
@@ -388,7 +405,7 @@
           ></textarea>
           {#if matchInstructionWarning}
             <div class="field-warning">
-              ⚠ {matchInstructionWarning}
+              <AlertTriangle size={14} style="display:inline;vertical-align:middle" /> {matchInstructionWarning}
             </div>
           {/if}
           {#if validationErrors.match_instruction}
@@ -399,12 +416,12 @@
         <!-- Match column -->
         <div class="field">
           <label class="label" for="rule-match-col">
-            Step 2 — Which spreadsheet column contains that identifier? *
+            Step 2 - Which spreadsheet column contains that identifier? *
           </label>
           <p class="field-hint">
             The extracted value will be searched in this column to find the matching row (e.g. if you extract an order number, pick the column that lists order numbers).
             {#if columns.length === 0}
-              <strong class="example-bad"> No columns synced yet — go to Settings → Workspaces → Sync Columns first.</strong>
+              <strong class="example-bad"> No columns synced yet - go to Settings → Workspaces → Sync Columns first.</strong>
             {/if}
           </p>
           <select
@@ -413,9 +430,9 @@
             class:input-error={validationErrors.match_column}
             bind:value={form.match_column}
           >
-            <option value="">— Select column —</option>
+            <option value="">- Select column -</option>
             {#each columns as col}
-              <option value={col.column_letter}>{col.column_letter} — {col.header_name}</option>
+              <option value={col.column_letter}>{col.column_letter} - {col.header_name}</option>
             {/each}
           </select>
           {#if validationErrors.match_column}
@@ -427,7 +444,7 @@
         <div class="field">
           <div class="updates-header">
             <div>
-              <span class="label">Step 3 — What should be written to the matched row? *</span>
+              <span class="label">Step 3 - What should be written to the matched row? *</span>
               <p class="field-hint" style="margin-top: 3px">
                 Add one entry per column to update. <strong>Fixed</strong> = write an exact value every time. <strong>AI</strong> = the model reads the email and generates the value.
               </p>
@@ -440,7 +457,7 @@
           {/if}
 
           {#if form.updates.length === 0}
-            <div class="empty-updates">No column updates yet — add at least one above.</div>
+            <div class="empty-updates">No column updates yet - add at least one above.</div>
           {/if}
 
           {#each form.updates as update, i (i)}
@@ -452,9 +469,9 @@
                   value={update.column}
                   onchange={(e) => setUpdateColumn(i, (e.target as HTMLSelectElement).value)}
                 >
-                  <option value="">— Column to update —</option>
+                  <option value="">- Column to update -</option>
                   {#each columns as col}
-                    <option value={col.column_letter}>{col.column_letter} — {col.header_name}</option>
+                    <option value={col.column_letter}>{col.column_letter} - {col.header_name}</option>
                   {/each}
                 </select>
 
@@ -478,7 +495,7 @@
                   class="btn btn-ghost btn-sm danger remove-btn"
                   onclick={() => removeUpdate(i)}
                   title="Remove this update"
-                >✕</button>
+                ><X size={14} /></button>
               </div>
 
               {#if update.mode === "fixed"}
@@ -486,7 +503,7 @@
                   class="input"
                   class:input-error={!update.value?.trim()}
                   type="text"
-                  placeholder="Exact text to write — e.g. Refund Requested"
+                  placeholder="Exact text to write - e.g. Refund Requested"
                   value={update.value ?? ""}
                   oninput={(e) => setUpdateValue(i, (e.target as HTMLInputElement).value)}
                 />
@@ -511,7 +528,7 @@
           <span class="label">Category filter</span>
           <p class="field-hint">Restrict this rule to specific categories. Leave all unchecked to run on every categorised email.</p>
           {#if categories.length === 0}
-            <p class="field-hint"><strong>No categories yet</strong> — create some on the Categories page first.</p>
+            <p class="field-hint"><strong>No categories yet</strong> - create some on the Categories page first.</p>
           {:else}
             <div class="checkbox-grid">
               {#each categories as cat}
@@ -544,7 +561,7 @@
           <label class="field field-half toggle-field">
             <div>
               <span class="label">Auto-apply</span>
-              <p class="field-hint" style="margin-top: 2px">Write directly — no review step. Keep off while testing.</p>
+              <p class="field-hint" style="margin-top: 2px">Write directly - no review step. Keep off while testing.</p>
             </div>
             <label class="toggle">
               <input type="checkbox" bind:checked={form.auto_apply} />

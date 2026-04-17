@@ -1,6 +1,6 @@
 # UI Redesign Proposal
 
-## Current state — what's broken
+## Current state - what's broken
 
 8 nav items. Screenshots taken 2026-04-15 of every page in its current form.
 
@@ -56,10 +56,10 @@ Considered adding Activity/History as a 4th tab. Rejected because:
 
 ### Why this beats the current design
 
-1. **3 items vs 8** — the user can hold the entire nav in working memory
-2. **Inbox = "what do I need to do?"** — single entry point for all actionable work
-3. **Playbooks absorb categories** — one concept ("how do I handle refund emails?") instead of two
-4. **Legacy pages hidden, not deleted** — sheet rules data preserved, code preserved, no breaking changes
+1. **3 items vs 8** - the user can hold the entire nav in working memory
+2. **Inbox = "what do I need to do?"** - single entry point for all actionable work
+3. **Playbooks absorb categories** - one concept ("how do I handle refund emails?") instead of two
+4. **Legacy pages hidden, not deleted** - sheet rules data preserved, code preserved, no breaking changes
 
 ---
 
@@ -77,27 +77,27 @@ The user's home screen. This is where they spend 90% of their time. Design goal:
 │                                                      │
 │  ┌─ NEEDS YOUR ATTENTION ────────────────────────┐  │
 │  │                                                │  │
-│  │  🟠 Tracking — Tracking Request                │  │
+│  │  🟠 Tracking - Tracking Request                │  │
 │  │     "Hey I was just curious what my tracking…" │  │
 │  │     Playbook failed → needs manual review      │  │
 │  │                                                │  │
-│  │  🟡 Test - refund — Refund request             │  │
-│  │     In review — no active playbook             │  │
+│  │  🟡 Test - refund - Refund request             │  │
+│  │     In review - no active playbook             │  │
 │  │                                                │  │
-│  │  🔵 Refund — Refund request                    │  │
+│  │  🔵 Refund - Refund request                    │  │
 │  │     Waiting for customer reply (3 days ago)    │  │
 │  │                                                │  │
 │  └────────────────────────────────────────────────┘  │
 │                                                      │
 │  ┌─ RECENTLY RESOLVED ───────────────────────────┐  │
-│  │  ✓ Refund — Refund request — completed         │  │
-│  │  ✓ Refund — Refund request — completed         │  │
+│  │  ✓ Refund - Refund request - completed         │  │
+│  │  ✓ Refund - Refund request - completed         │  │
 │  └────────────────────────────────────────────────┘  │
 │                                                      │
 │  ┌─ OTHER ───────────────────────────────────────┐  │
-│  │  Kia ora! Just some good news… — Other         │  │
-│  │  Please Confirm your offer — Other             │  │
-│  │  [Task Update] Top Reddit… — Other             │  │
+│  │  Kia ora! Just some good news… - Other         │  │
+│  │  Please Confirm your offer - Other             │  │
+│  │  [Task Update] Top Reddit… - Other             │  │
 │  │  (10 more)                                     │  │
 │  └────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────┘
@@ -207,12 +207,12 @@ The user clicks into a thread from Inbox. They need to:
 
 ### Key changes from current
 
-1. **ManualActionBanner stays at top** — already built, works well. Keep it.
+1. **ManualActionBanner stays at top** - already built, works well. Keep it.
 2. **Two-column layout**: conversation left, playbook status right. Currently both are stacked vertically which makes the page very long.
 3. **Playbook sidebar** shows step pipeline with status dots (checkmark, spinner, X, pause). Collapsible context bag and AI call log. Power user feature.
-4. **Quick actions bar** at bottom: status dropdown, category dropdown, re-run and escalate buttons. Currently status is a row of buttons in the header card — dropdown is cleaner.
+4. **Quick actions bar** at bottom: status dropdown, category dropdown, re-run and escalate buttons. Currently status is a row of buttons in the header card - dropdown is cleaner.
 5. **Relative times** throughout instead of absolute timestamps.
-6. **"Back to Inbox" instead of "Back"** — explicit destination.
+6. **"Back to Inbox" instead of "Back"** - explicit destination.
 
 ### Conversation display improvements
 
@@ -245,7 +245,7 @@ One page that answers: "What categories do I have, and how does the AI handle ea
 │  │                                            [→] │  │
 │  ├────────────────────────────────────────────────┤  │
 │  │  Other                                         │  │
-│  │  No playbook — emails in this category are     │  │
+│  │  No playbook - emails in this category are     │  │
 │  │  held for manual review                        │  │
 │  │                                  [Create one]  │  │
 │  ├────────────────────────────────────────────────┤  │
@@ -320,10 +320,10 @@ Tighten the scope. Three clear sections instead of a dumping ground.
 
 ### Changes from current
 
-1. **Removed "Workspaces" as a separate section** — merged into "Workspace" (singular). Hardcoded to workspace 1.
-2. **Grouped Google Account + Sheet** under "Integrations" — they're one integration.
-3. **"AI Configuration" section** — model, threshold, signature. Clean and focused.
-4. **Individual Save buttons removed** — each section saves on blur or via a single Save at the bottom. Reduces button clutter.
+1. **Removed "Workspaces" as a separate section** - merged into "Workspace" (singular). Hardcoded to workspace 1.
+2. **Grouped Google Account + Sheet** under "Integrations" - they're one integration.
+3. **"AI Configuration" section** - model, threshold, signature. Clean and focused.
+4. **Individual Save buttons removed** - each section saves on blur or via a single Save at the bottom. Reduces button clutter.
 
 ---
 
@@ -334,7 +334,7 @@ Tighten the scope. Three clear sections instead of a dumping ground.
 The current palette is solid. Extending with semantic status colours and refining surfaces:
 
 ```css
-/* Existing — keep */
+/* Existing - keep */
 --color-bg: #0f1117;
 --color-surface: #1a1d27;
 --color-surface-2: #22263a;
@@ -348,19 +348,19 @@ The current palette is solid. Extending with semantic status colours and refinin
 --color-danger: #ef4444;
 --color-info: #3b82f6;
 
-/* New — semantic status */
---color-attention: #f59e0b;       /* needs human action — warm amber */
---color-in-progress: #6366f1;    /* AI working — indigo/purple */
---color-waiting: #3b82f6;        /* waiting for customer — blue */
---color-resolved: #10b981;       /* done — green */
---color-muted: #475569;          /* noise/other — gray */
+/* New - semantic status */
+--color-attention: #f59e0b;       /* needs human action - warm amber */
+--color-in-progress: #6366f1;    /* AI working - indigo/purple */
+--color-waiting: #3b82f6;        /* waiting for customer - blue */
+--color-resolved: #10b981;       /* done - green */
+--color-muted: #475569;          /* noise/other - gray */
 
-/* New — surface refinements */
+/* New - surface refinements */
 --color-surface-elevated: #1e2235;  /* cards that float above surface */
 --color-surface-selected: rgba(99, 102, 241, 0.08);  /* selected row */
 --color-surface-hover: rgba(99, 102, 241, 0.04);     /* hover row */
 
-/* New — focus/a11y */
+/* New - focus/a11y */
 --color-focus-ring: rgba(99, 102, 241, 0.5);
 ```
 
@@ -369,11 +369,11 @@ The current palette is solid. Extending with semantic status colours and refinin
 Constrained to 4 sizes. Currently several ad-hoc sizes.
 
 ```css
---text-xs: 0.75rem;    /* 12px — badges, meta */
---text-sm: 0.8125rem;  /* 13px — secondary text, table cells */
---text-base: 0.875rem; /* 14px — body text, primary content */
---text-lg: 1.125rem;   /* 18px — section headers */
---text-xl: 1.5rem;     /* 24px — page titles */
+--text-xs: 0.75rem;    /* 12px - badges, meta */
+--text-sm: 0.8125rem;  /* 13px - secondary text, table cells */
+--text-base: 0.875rem; /* 14px - body text, primary content */
+--text-lg: 1.125rem;   /* 18px - section headers */
+--text-xl: 1.5rem;     /* 24px - page titles */
 ```
 
 ### Spacing scale
@@ -414,10 +414,10 @@ Replace the current `badge-new`, `badge-in_review`, etc. with semantic badges:
 
 ### Sidebar refinement
 
-- Width: 200px (down from 220px — tighter)
+- Width: 200px (down from 220px - tighter)
 - Nav items: 40px height, 12px padding, rounded corners
 - Active item: primary background at 10% opacity + left accent bar
-- Brand: "✉ Autopilot" (rename from "Email Dash" — more product-feeling)
+- Brand: "✉ Autopilot" (rename from "Email Dash" - more product-feeling)
 - Bottom: small "System" text link + version number
 
 ---
@@ -497,7 +497,7 @@ After each phase, Playwright walkthrough to verify:
 
 ## Decisions (signed off 2026-04-15)
 
-1. **"Other" threads visible in default view** — collapsed at bottom with count. ✓
+1. **"Other" threads visible in default view** - collapsed at bottom with count. ✓
 2. **Rename to "Autopilot"** ✓
-3. **Dry-run stays as modal** — simpler, good enough. ✓
-4. **Section save on Settings** — one Save per section. ✓
+3. **Dry-run stays as modal** - simpler, good enough. ✓
+4. **Section save on Settings** - one Save per section. ✓

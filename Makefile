@@ -2,7 +2,7 @@
 
 # First-time setup: copy env example if .env doesn't exist
 setup:
-	@if [ ! -f .env ]; then cp .env.example .env && echo "✓ .env created from .env.example — fill in your values before running make dev"; else echo ".env already exists"; fi
+	@if [ ! -f .env ]; then cp .env.example .env && echo "✓ .env created from .env.example - fill in your values before running make dev"; else echo ".env already exists"; fi
 
 # Start the full stack and follow logs
 dev:
@@ -63,7 +63,7 @@ setup-pubsub:
 	echo "→ Subscription: $$SUBSCRIPTION_NAME"; \
 	echo "→ Push endpoint:$$PUSH_ENDPOINT"; \
 	if gcloud pubsub subscriptions describe $$SUBSCRIPTION_NAME --format='value(name)' 2>/dev/null | grep -q $$SUBSCRIPTION_NAME; then \
-		echo "→ Subscription exists — updating push endpoint…"; \
+		echo "→ Subscription exists - updating push endpoint…"; \
 		gcloud pubsub subscriptions modify-push-config $$SUBSCRIPTION_NAME \
 			--push-endpoint="$$PUSH_ENDPOINT"; \
 	else \

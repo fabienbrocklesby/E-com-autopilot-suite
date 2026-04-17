@@ -10,9 +10,9 @@ Goal: Build the playbook execution engine as a **new path alongside** the existi
 
 ## Required reading
 
-- `docs/PLAYBOOK_ENGINE.md` — the architecture spec. Read it ALL.
-- `docs/TASK_LOG.md` — confirm Phase 1 done
-- `api/services/categorisation.ts` — the legacy flow we're paralleling
+- `docs/PLAYBOOK_ENGINE.md` - the architecture spec. Read it ALL.
+- `docs/TASK_LOG.md` - confirm Phase 1 done
+- `api/services/categorisation.ts` - the legacy flow we're paralleling
 
 ## Scope of this phase
 

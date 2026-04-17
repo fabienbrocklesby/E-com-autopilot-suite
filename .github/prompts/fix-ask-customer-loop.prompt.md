@@ -12,10 +12,10 @@ This is a precision fix. The bug is diagnosed, the cause is known, the fix is sm
 
 Read these in order:
 
-1. `.github/MCP_DOCTRINE.md` — the rules for how you use MCP servers in this task. Non-negotiable.
-2. `.github/copilot-instructions.md` — project context
-3. `docs/TASK_LOG.md` — what's been done, especially the recent diagnosis entry
-4. `skills/ai-driven-step/SKILL.md` — the pattern ask_customer should follow
+1. `.github/MCP_DOCTRINE.md` - the rules for how you use MCP servers in this task. Non-negotiable.
+2. `.github/copilot-instructions.md` - project context
+3. `docs/TASK_LOG.md` - what's been done, especially the recent diagnosis entry
+4. `skills/ai-driven-step/SKILL.md` - the pattern ask_customer should follow
 
 ## The bug
 
@@ -117,10 +117,10 @@ Change to:
 ```ts
 return {
   decision: { action: "advance" },
-  output: { 
-    action: "skipped", 
-    reason: "all required context present", 
-    skipped_message_send: true 
+  output: {
+    action: "skipped",
+    reason: "all required context present",
+    skipped_message_send: true
   },
 };
 ```
@@ -144,8 +144,8 @@ Change to:
 return {
   decision: { action: "advance" },
   contextUpdates: parsed.extracted ?? {},
-  output: { 
-    action: "skipped", 
+  output: {
+    action: "skipped",
     reasoning: parsed.reasoning,
     extracted_keys: Object.keys(parsed.extracted ?? {}),
   },
@@ -173,10 +173,10 @@ This comment is critical. It prevents the next person (or AI) from "fixing" this
 
 ### Do NOT change
 
-- The AI ask path (`{action: "ask", message: "..."}`) — that correctly returns `pause('waiting_for_customer', resumeStepId: step.id)`
-- The AI escalate path (`{action: "escalate", reason: "..."}`) — that correctly returns `fail`
-- The `on_reply_goto` field itself or how it's stored in config — semantics are correct, only the wrong path was using it
-- The legacy `{message}` backward-compat path — leave it alone unless it has the same bug (check it)
+- The AI ask path (`{action: "ask", message: "..."}`) - that correctly returns `pause('waiting_for_customer', resumeStepId: step.id)`
+- The AI escalate path (`{action: "escalate", reason: "..."}`) - that correctly returns `fail`
+- The `on_reply_goto` field itself or how it's stored in config - semantics are correct, only the wrong path was using it
+- The legacy `{message}` backward-compat path - leave it alone unless it has the same bug (check it)
 
 ### Check the legacy path
 
@@ -194,7 +194,7 @@ Zero errors expected. If there are type errors, you got the StepDecision shape w
 
 ### Verification 2: Reset and replay the failing scenario
 
-The escalated run on the demo thread is dead — leave it for the historical record. But the playbook is still good.
+The escalated run on the demo thread is dead - leave it for the historical record. But the playbook is still good.
 
 Send a fresh test email to the workspace's connected Gmail. Subject: "Refund please". Body: "Hey, I need a refund for the radiator I bought, it's broken. Cheers, Fabien"
 
@@ -211,8 +211,8 @@ ORDER BY created_at DESC
 LIMIT 1;
 
 -- Inspect its execution log
-SELECT step_id, step_type, status, 
-       jsonb_pretty(input) as input, 
+SELECT step_id, step_type, status,
+       jsonb_pretty(input) as input,
        jsonb_pretty(output) as output
 FROM playbook_step_executions
 WHERE run_id = <new_run_id>
@@ -221,13 +221,13 @@ ORDER BY created_at;
 
 **Expected sequence (write this down before running, compare against actual):**
 
-1. `extract_1` — success, advances to next
-2. `branch_1` — success, advance_to find_1
-3. `find_1` — success, sets `row_number=2`, advances sequentially
-4. `ask_1` — success, action: "skipped" because customer_name and product_name (or whatever required_context is) are already in context, advances sequentially **to evaluate_1, NOT back to extract_1**
-5. `evaluate_1` — success, advance_to update_1 (because row_number is set)
-6. `update_1` — success, sheet row updated to "Refund Requested"
-7. `approval_1` — pause, status becomes `waiting_for_human`
+1. `extract_1` - success, advances to next
+2. `branch_1` - success, advance_to find_1
+3. `find_1` - success, sets `row_number=2`, advances sequentially
+4. `ask_1` - success, action: "skipped" because customer_name and product_name (or whatever required_context is) are already in context, advances sequentially **to evaluate_1, NOT back to extract_1**
+5. `evaluate_1` - success, advance_to update_1 (because row_number is set)
+6. `update_1` - success, sheet row updated to "Refund Requested"
+7. `approval_1` - pause, status becomes `waiting_for_human`
 
 The run should be in `waiting_for_human` status when this completes. Total step executions: 7 or 8, NOT 50.
 
@@ -239,7 +239,7 @@ The dev DB stores Google Sheets API responses indirectly. Check the `sheet_colum
 
 ```sql
 -- Look for evidence of the sheet write happening
-SELECT * FROM playbook_step_executions 
+SELECT * FROM playbook_step_executions
 WHERE run_id = <new_run_id> AND step_type = 'update_sheet';
 
 -- Inspect the output to confirm what was written
@@ -313,29 +313,29 @@ You probably won't need to fetch much for this fix specifically, but follow the 
 Add to `docs/TASK_LOG.md`:
 
 ```markdown
-## YYYY-MM-DD — Fix: ask_customer skip routing bug
+## YYYY-MM-DD - Fix: ask_customer skip routing bug
 
 **Phase**: 5.5 (urgent fix)
 **Status**: complete
 
 ### What was done
-- Fixed `api/services/playbook/handlers/ask_customer.ts` deterministic pre-check 
+- Fixed `api/services/playbook/handlers/ask_customer.ts` deterministic pre-check
   to return `{action: "advance"}` instead of `{action: "advance_to", stepId: on_reply_goto}`
 - Same fix applied to AI "skip" action path
 - Same fix applied to legacy `{message}` path (if it had the same bug)
 - Added inline documentation explaining routing semantics
 
 ### Bug origin
-`on_reply_goto` config field was being used as the skip destination. Semantically 
-`on_reply_goto` is "resume here AFTER a customer reply" — only relevant when the 
-step paused. When skipping the ask entirely (no pause, no reply pending), the 
+`on_reply_goto` config field was being used as the skip destination. Semantically
+`on_reply_goto` is "resume here AFTER a customer reply" - only relevant when the
+step paused. When skipping the ask entirely (no pause, no reply pending), the
 correct behaviour is sequential advance.
 
 ### Verification
 - New test thread: <thread_id>
 - New run: <run_id>
-- Execution sequence observed: extract_1 → branch_1 → find_1 → ask_1 (skipped) → 
-  evaluate_1 → update_1 → approval_1 (paused) → [manual approve] → update_2 → 
+- Execution sequence observed: extract_1 → branch_1 → find_1 → ask_1 (skipped) →
+  evaluate_1 → update_1 → approval_1 (paused) → [manual approve] → update_2 →
   send_1 → complete_1
 - Total executions: 9 (was 50+ before fix, escalated by safety net)
 - Sheet row 2 Status updated to "Refund Requested" then "Refunded"
@@ -344,24 +344,24 @@ correct behaviour is sequential advance.
 - Playwright screenshot: <path>
 
 ### MCP usage trace
-- filesystem: read ask_customer.ts, evaluate.ts, executor.ts, types.ts to 
+- filesystem: read ask_customer.ts, evaluate.ts, executor.ts, types.ts to
   understand the StepDecision contract
-- postgres: 6 queries — initial bad state, post-fix run inspection, 
+- postgres: 6 queries - initial bad state, post-fix run inspection,
   context bag verification, completion confirmation
 - context7: Deno check command syntax
 - playwright: drove dashboard, verified thread detail page, screenshot saved
 
 ### Decisions made
 - Fixed both deterministic and AI skip paths in one commit (related, atomic)
-- Did NOT touch on_reply_goto field semantics — they're correct, only the 
+- Did NOT touch on_reply_goto field semantics - they're correct, only the
   wrong code path was using them
-- Did NOT regenerate the playbook — existing Refund v2 playbook works correctly 
+- Did NOT regenerate the playbook - existing Refund v2 playbook works correctly
   with the fixed handler
 
 ### Open questions
-- send_reply message quality is acceptable but could be sharper. Track for 
+- send_reply message quality is acceptable but could be sharper. Track for
   later prompt tuning.
-- Manual action banner UI not yet built — approval still requires curl. 
+- Manual action banner UI not yet built - approval still requires curl.
   See phase-5-5-task-5 prompt.
 
 ### Next

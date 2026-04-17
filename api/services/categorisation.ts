@@ -47,7 +47,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
       [threadId],
     );
     if (existingPendingDraft) {
-      console.log(`[categorisation] Thread ${threadId} already categorised with pending draft — skipping`);
+      console.log(`[categorisation] Thread ${threadId} already categorised with pending draft - skipping`);
       const currentThread = await queryOne<Thread>(
         "SELECT * FROM threads WHERE id = $1",
         [threadId],
@@ -79,7 +79,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
 
   const globalSettings = Object.fromEntries(settingRows.map((s) => [s.key, s.value]));
 
-  // AI calls — outside transaction (slow; must not hold a DB connection open).
+  // AI calls - outside transaction (slow; must not hold a DB connection open).
   const { categoryId, confidence, reasoning } = await categoriseEmail(
     thread,
     messages,
@@ -89,7 +89,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
 
   const category = categories.find((c) => c.id === categoryId) ?? null;
 
-  // Apply Gmail label — fire-and-forget, don't fail categorisation on label errors.
+  // Apply Gmail label - fire-and-forget, don't fail categorisation on label errors.
   if (category?.gmail_label_id) {
     const tokenRow = await queryOne<OAuthToken>(
       "SELECT * FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
@@ -118,7 +118,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
         });
       });
 
-      console.log(`[categorisation] Category ${categoryId} has playbook "${playbook.name}" — routing to engine`);
+      console.log(`[categorisation] Category ${categoryId} has playbook "${playbook.name}" - routing to engine`);
       try {
         await startRun(workspaceId, threadId, playbook.id);
       } catch (err) {
@@ -141,7 +141,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
   }
 
   // Determine whether to auto-draft or auto-send.
-  // Auto-reply is gated solely on the per-category toggle and threshold — no global switch.
+  // Auto-reply is gated solely on the per-category toggle and threshold - no global switch.
   const globalThreshold = parseFloat(globalSettings["default_confidence_threshold"] ?? "0.8");
   const categoryThreshold = category?.confidence_threshold ?? globalThreshold;
 
@@ -192,11 +192,11 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     await tx.queryObject({ text: "UPDATE threads SET category_id = $1 WHERE id = $2", args: [categoryId, threadId] });
 
     if (draftBody !== null) {
-      // Remove any stale pending draft — one draft per thread at a time.
+      // Remove any stale pending draft - one draft per thread at a time.
       await tx.queryObject({ text: "DELETE FROM drafts WHERE thread_id = $1 AND status = 'pending'", args: [threadId] });
 
       if (autoSendSuccess) {
-        // Auto-send succeeded — record as sent and mark thread replied.
+        // Auto-send succeeded - record as sent and mark thread replied.
         await tx.queryObject({
           text: "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used, sent_at) VALUES ($1, $2, 'sent', true, $3, now())",
           args: [threadId, draftBody, modelUsed],
@@ -206,7 +206,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
           args: [threadId],
         });
       } else {
-        // Fix 1: Pending draft — move thread to in_review so it appears in the review queue.
+        // Fix 1: Pending draft - move thread to in_review so it appears in the review queue.
         await tx.queryObject({
           text: "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
           args: [threadId, draftBody, modelUsed],
@@ -222,7 +222,7 @@ export async function categoriseAndDraft(threadId: number): Promise<{
   const draftCreated = draftBody !== null;
 
   // Evaluate sheet rules after the reply decision. Must not block or affect the
-  // email flow — failures are logged and stored but never propagated up.
+  // email flow - failures are logged and stored but never propagated up.
   evaluateRules(threadId, workspaceId).catch(
     (err: unknown) => console.error("[categorisation] Sheet rule evaluation error:", err),
   );

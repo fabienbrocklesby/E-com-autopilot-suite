@@ -1,5 +1,5 @@
 /**
- * Categories route — /categories
+ * Categories route - /categories
  */
 import { Hono } from "hono";
 import { query, queryOne, execute } from "../db/client.ts";

@@ -1,5 +1,5 @@
 /**
- * Settings route — /settings
+ * Settings route - /settings
  */
 import { Hono } from "hono";
 import { query, queryOne, execute } from "../db/client.ts";
@@ -10,7 +10,7 @@ export const settingsRouter = new Hono();
 
 settingsRouter.use("*", authMiddleware);
 
-// GET /settings — returns all key/value pairs as a flat object for convenience
+// GET /settings - returns all key/value pairs as a flat object for convenience
 settingsRouter.get("/", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   const rows = await query<Setting>(
@@ -33,7 +33,7 @@ settingsRouter.get("/:key", async (c) => {
   return c.json({ setting });
 });
 
-// PUT /settings/:key — upsert a setting value
+// PUT /settings/:key - upsert a setting value
 settingsRouter.put("/:key", async (c) => {
   const key = c.req.param("key");
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");

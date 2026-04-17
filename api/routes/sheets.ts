@@ -1,5 +1,5 @@
 /**
- * Sheets route — /sheets
+ * Sheets route - /sheets
  * Endpoints for managing and inspecting the Google Sheets integration.
  */
 import { Hono } from "hono";
@@ -12,7 +12,7 @@ export const sheetsRouter = new Hono();
 
 sheetsRouter.use("*", authMiddleware);
 
-// GET /sheets/columns?workspace_id=1 — list synced column headers
+// GET /sheets/columns?workspace_id=1 - list synced column headers
 sheetsRouter.get("/columns", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   if (isNaN(workspaceId)) throw new AppError(400, "Invalid workspace_id");
@@ -24,7 +24,7 @@ sheetsRouter.get("/columns", async (c) => {
   return c.json({ columns });
 });
 
-// POST /sheets/sync-columns?workspace_id=1 — read sheet headers and persist
+// POST /sheets/sync-columns?workspace_id=1 - read sheet headers and persist
 sheetsRouter.post("/sync-columns", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   if (isNaN(workspaceId)) throw new AppError(400, "Invalid workspace_id");
@@ -57,7 +57,7 @@ sheetsRouter.post("/sync-columns", async (c) => {
   return c.json({ columns });
 });
 
-// GET /sheets/updates?workspace_id=1&limit=50&offset=0 — audit log
+// GET /sheets/updates?workspace_id=1&limit=50&offset=0 - audit log
 sheetsRouter.get("/updates", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   const limit = Math.min(parseInt(c.req.query("limit") ?? "50"), 200);

@@ -25,7 +25,7 @@ You do NOT touch:
    - `.github/instructions/frontend.instructions.md`
    - `docs/TASK_LOG.md`
 
-2. **Use the svelte MCP** for any SvelteKit 5 specifics. Don't rely on training data — the runes API has changed.
+2. **Use the svelte MCP** for any SvelteKit 5 specifics. Don't rely on training data - the runes API has changed.
 
 3. **Use context7 MCP** for Vite, TypeScript, or any other library docs.
 

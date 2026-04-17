@@ -1,10 +1,11 @@
 <!--
-  /system — Observability dashboard.
+  /system - Observability dashboard.
   Shows live stats: active runs, escalations, AI calls, ingestion failures, circuit breaker.
   Auto-refreshes every 30 seconds.
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { fade } from 'svelte/transition';
   import { systemApi } from '$lib/api';
   import type { SystemStats } from '$lib/api';
   import { workspaceStore } from '$lib/stores';
@@ -47,12 +48,12 @@
   onDestroy(() => clearInterval(interval));
 
   function fmt(n: number | undefined | null): string {
-    if (n == null) return '—';
+    if (n == null) return '-';
     return n.toLocaleString();
   }
 
   function fmtMs(ms: number | undefined | null): string {
-    if (ms == null) return '—';
+    if (ms == null) return '-';
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
   }
@@ -65,7 +66,7 @@
   };
 </script>
 
-<svelte:head><title>System — Autopilot</title></svelte:head>
+<svelte:head><title>System - Autopilot</title></svelte:head>
 
 <div class="page">
   <div class="header">
@@ -79,7 +80,7 @@
   </div>
 
   {#if error}
-    <div class="error">{error}</div>
+    <div class="error" transition:fade={{ duration: 150 }}>{error}</div>
   {:else if loading && !stats}
     <div class="loading">Loading…</div>
   {:else if stats}

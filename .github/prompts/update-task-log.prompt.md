@@ -17,7 +17,7 @@ tools: ['search/codebase', 'edit', 'runCommands']
 4. **Append a new entry** at the top (most recent first):
 
    ```markdown
-   ## YYYY-MM-DD — <session topic>
+   ## YYYY-MM-DD - <session topic>
 
    **Phase**: <which phase, e.g. "Phase 0" or "Cross-cutting">
    **Status**: <"in progress" | "complete" | "blocked">

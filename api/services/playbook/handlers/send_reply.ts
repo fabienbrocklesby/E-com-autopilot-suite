@@ -1,5 +1,5 @@
 /**
- * Send reply handler — sends a reply to the customer and advances.
+ * Send reply handler - sends a reply to the customer and advances.
  * Preferred path: AI-drafted from goal + reference_context.
  * Fallback: literal message string (backward compat).
  */
@@ -58,8 +58,9 @@ export const sendReplyHandler: StepHandler = {
 GOAL: ${goal}
 
 VOICE: ${voice}
+${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
 
-MUST REFERENCE NATURALLY (do not list robotically — weave into the message):
+MUST REFERENCE NATURALLY (do not list robotically - weave into the message):
 ${Object.keys(refs).length > 0 ? JSON.stringify(refs, null, 2) : "no specific values required"}
 
 FULL CONTEXT FOR THIS RUN:
@@ -71,8 +72,9 @@ ${transcript}
 RULES:
 - Brief. One short paragraph unless the customer asked multiple things.
 - Match the VOICE. Don't sound corporate unless the voice says so.
-- Reference facts from context naturally (e.g. the amount, order number) — don't list them like a form.
-- Don't start with "Thank you for" unless the voice specifically calls for it.
+- Reference facts from context naturally (e.g. the amount, order number) - don't list them like a form.
+- Don't start with "Thank you for" unless the voice specifically calls for it.${ctx.senderName ? `\n- Sign off using the exact name: ${ctx.senderName}` : "\n- Do not include a sign-off or name placeholder."}
+- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
 - Return ONLY the message body. No JSON, no subject line, no surrounding quotes.`;
 
       const response = await chatCompletion(

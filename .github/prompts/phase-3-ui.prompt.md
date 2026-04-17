@@ -11,14 +11,14 @@ Goal: Make the playbook engine usable by the client. They write playbooks in pla
 ## Required reading
 
 - `docs/PLAYBOOK_ENGINE.md` sections "Plain-language to structured magic" and "UX principles"
-- `docs/TASK_LOG.md` — confirm Phase 2 is done with passing end-to-end test
-- `frontend/src/routes/categories/+page.svelte` — current category editor
+- `docs/TASK_LOG.md` - confirm Phase 2 is done with passing end-to-end test
+- `frontend/src/routes/categories/+page.svelte` - current category editor
 
 ## Tasks
 
 ### 1. Backend: playbook parser
 
-`POST /playbooks/parse` — takes plain-language description, returns structured steps.
+`POST /playbooks/parse` - takes plain-language description, returns structured steps.
 
 In `api/services/playbook/parser.ts`:
 - Build a system prompt that lists available step types, available context variables (extract from the workspace's known fields), available sheet columns
@@ -26,10 +26,10 @@ In `api/services/playbook/parser.ts`:
 - Validate returned JSON against the step schema
 - Return parsed steps + any warnings
 
-`POST /playbooks` — create
-`PUT /playbooks/:id` — update (creates new version if steps changed)
-`GET /playbooks` — list
-`GET /playbooks/:id` — detail with version history
+`POST /playbooks` - create
+`PUT /playbooks/:id` - update (creates new version if steps changed)
+`GET /playbooks` - list
+`GET /playbooks/:id` - detail with version history
 
 ### 2. Frontend: playbook editor page
 
@@ -58,7 +58,7 @@ Per-step edit modals:
 
 ### 3. Frontend: playbook list page
 
-`/playbooks/+page.svelte` — table of all playbooks for the workspace:
+`/playbooks/+page.svelte` - table of all playbooks for the workspace:
 - Name, category, version, active, last edited
 - Actions: edit, duplicate, deactivate, delete
 

@@ -3,7 +3,7 @@
  * Validates the API_SECRET token passed in the Authorization header for
  * protected routes. Bearer token format: "Authorization: Bearer <secret>".
  *
- * The OAuth callback endpoints are intentionally excluded from this check —
+ * The OAuth callback endpoints are intentionally excluded from this check -
  * they rely on the Google OAuth state parameter for CSRF protection.
  */
 import type { Context, Next } from "npm:hono";

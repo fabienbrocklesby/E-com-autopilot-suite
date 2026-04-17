@@ -1,4 +1,4 @@
-# e-com-autopilot-suite — Copilot project context
+# e-com-autopilot-suite - Copilot project context
 
 You are working on an email automation dashboard for an e-commerce client. This file is loaded into every chat. Read it before doing anything.
 
@@ -48,7 +48,7 @@ We are NOT there yet. We are building toward this in 5 phases. Current phase is 
 
 - **Migrations are append-only.** Never edit a previously-applied migration. New file: `00N_description.sql` where N is the next number.
 - **Every migration must be safe to apply on production data.** No destructive changes without an explicit migration plan in the PR.
-- **CHECK constraints over enums.** We use `TEXT CHECK (col IN (...))` not Postgres ENUM types — easier to evolve.
+- **CHECK constraints over enums.** We use `TEXT CHECK (col IN (...))` not Postgres ENUM types - easier to evolve.
 
 ## Known issues we're actively fixing
 
@@ -68,7 +68,7 @@ These are bugs in the current code. If you encounter them, fix or flag, don't pr
 - **Read `docs/TASK_LOG.md` before starting work** to know what's done, in flight, and blocked.
 - **Update `docs/TASK_LOG.md` when you finish a meaningful chunk.** This is how state survives between Copilot sessions.
 - **Use the Postgres MCP to inspect real schema and data** rather than guessing.
-- **Use context7 MCP for framework docs** (Hono, SvelteKit 5, Deno, Postgres). Don't rely on training data for these — they move fast.
+- **Use context7 MCP for framework docs** (Hono, SvelteKit 5, Deno, Postgres). Don't rely on training data for these - they move fast.
 - **Use the svelte MCP for SvelteKit-specific questions.** It knows the runes API better than your training data.
 - **Use playwright MCP to verify UI changes** end to end before declaring done.
 

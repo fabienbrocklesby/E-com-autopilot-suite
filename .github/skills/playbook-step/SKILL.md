@@ -206,8 +206,8 @@ Thread is escalated to manual review.
 
 ## Common pitfalls
 
-- **Don't make AI calls inside `validate()`** — validation must be sync and pure
+- **Don't make AI calls inside `validate()`** - validation must be sync and pure
 - **Don't write to the database directly from a handler** unless it's the actual side effect of the step (e.g. `update_sheet` writes to Sheets, but execution-log writes are handled by the executor)
 - **Always return `aiCalls`** when you call the AI, for observability
 - **Variable names in `contextUpdates`** should match what other steps will reference. Keep a consistent vocabulary per workspace (the parser prompt should enforce this)
-- **Don't catch errors silently** — throw or return `fail`, let the executor handle persistence
+- **Don't catch errors silently** - throw or return `fail`, let the executor handle persistence

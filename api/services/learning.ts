@@ -1,5 +1,5 @@
 /**
- * Learning service — records human-feedback interactions for few-shot learning.
+ * Learning service - records human-feedback interactions for few-shot learning.
  * Called whenever a draft is approved, edited, or rejected.
  */
 import { execute } from "../db/client.ts";

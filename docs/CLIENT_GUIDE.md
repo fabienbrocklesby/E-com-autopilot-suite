@@ -6,7 +6,7 @@ How to use the Email Automation Dashboard.
 
 ## How to write a playbook
 
-A playbook is a sequence of instructions that tells the system how to handle a specific type of email — step by step — before it needs your attention.
+A playbook is a sequence of instructions that tells the system how to handle a specific type of email - step by step - before it needs your attention.
 
 ### Starting point
 
@@ -40,7 +40,7 @@ Each step card shows the step type and its key config:
 
 ### Editing individual steps
 
-Click the pencil icon on any step card to edit it. You don't need to re-write the whole description — edits to specific steps survive a re-parse (matched by step ID).
+Click the pencil icon on any step card to edit it. You don't need to re-write the whole description - edits to specific steps survive a re-parse (matched by step ID).
 
 ### Using variables in messages
 
@@ -61,7 +61,7 @@ Before activating a playbook, test it with an example email:
 3. Click **Simulate**.
 4. The trace shows every step: what it did, what was extracted, what message it would have sent.
 
-Sheet writes and email sends are **not** executed in dry-run mode — it's purely a simulation.
+Sheet writes and email sends are **not** executed in dry-run mode - it's purely a simulation.
 
 ### Activating
 
@@ -81,8 +81,8 @@ The **Playbook Runs** panel shows:
 - Which playbook ran (name + version)
 - Current status (running, waiting for customer, waiting for you, complete, failed)
 - The current step the run is positioned at
-- The context bag — all variables collected so far (e.g. `order_number: "12345"`)
-- The full step execution log — each step with its status, timing, output, and any AI calls
+- The context bag - all variables collected so far (e.g. `order_number: "12345"`)
+- The full step execution log - each step with its status, timing, output, and any AI calls
 
 **Status colours:**
 - Blue dot = running
@@ -103,7 +103,7 @@ A thread is "stuck" when its playbook run has a status of `failed` or `escalated
 3. Common causes:
    - `find_sheet_row: No match found` → the customer's order number isn't in the sheet, or they gave the wrong one. Reply manually, update the sheet if needed, then re-categorise the thread to start a new playbook run.
    - `update_sheet: No sheet configured` → the workspace sheet ID hasn't been set. Go to **Settings** and configure the spreadsheet.
-   - `extract: Failed to parse AI response` → temporary AI error. The thread is still in review — you can manually categorise or reply.
+   - `extract: Failed to parse AI response` → temporary AI error. The thread is still in review - you can manually categorise or reply.
 
 For `waiting_for_human` runs (manual approval queue), see the **Review Queue**.
 
@@ -112,7 +112,7 @@ For `waiting_for_human` runs (manual approval queue), see the **Review Queue**.
 ## How to add a new category and playbook
 
 1. Go to **Categories** → **Add Category**.
-2. Fill in: name, description (what kinds of emails fit this category), instructions (optional — used by the AI when drafting legacy replies).
+2. Fill in: name, description (what kinds of emails fit this category), instructions (optional - used by the AI when drafting legacy replies).
 3. Save the category.
 4. Go to **Playbooks** → **New Playbook**.
 5. Select the new category.
@@ -125,7 +125,7 @@ For `waiting_for_human` runs (manual approval queue), see the **Review Queue**.
 For a new playbook on a live category, use this process:
 
 1. Create the playbook and test with dry-run.
-2. Activate the playbook — it will now handle new threads in that category.
+2. Activate the playbook - it will now handle new threads in that category.
 3. Monitor the **Review Queue** and thread list for 24 hours.
 4. Check for failed runs in the thread detail playbook panel.
 5. If something's wrong, deactivate the playbook (the category falls back to the manual draft flow).

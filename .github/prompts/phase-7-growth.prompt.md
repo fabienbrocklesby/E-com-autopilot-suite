@@ -11,8 +11,8 @@ Goal: The engine is smart (Phase 5) and hardened (Phase 6). Now make it easier f
 ## Required reading
 
 - `docs/PLAYBOOK_ENGINE.md`
-- `docs/TASK_LOG.md` — Phase 6 done, system stable in production
-- `docs/CLIENT_GUIDE.md` — the handoff doc from Phase 4
+- `docs/TASK_LOG.md` - Phase 6 done, system stable in production
+- `docs/CLIENT_GUIDE.md` - the handoff doc from Phase 4
 
 ## The 5 growth tasks
 
@@ -48,10 +48,10 @@ CREATE TABLE playbook_templates (
 
 Each template is a fully-formed playbook that works out of the box.
 
-**Backend**: 
-- `GET /playbook-templates` — list
-- `GET /playbook-templates/:slug` — detail
-- `POST /playbooks/from-template` — body `{template_slug, category_id, customizations?}` — creates a new playbook for the workspace based on the template
+**Backend**:
+- `GET /playbook-templates` - list
+- `GET /playbook-templates/:slug` - detail
+- `POST /playbooks/from-template` - body `{template_slug, category_id, customizations?}` - creates a new playbook for the workspace based on the template
 
 **Frontend**: new page `/playbooks/new/+page.svelte`:
 - "Start from scratch" vs "Start from template" choice
@@ -97,13 +97,13 @@ CREATE TABLE playbook_test_runs (
 5. Compares against expected outcomes
 6. Records pass/fail
 
-Endpoint: `POST /playbooks/:id/tests/run-all` — runs all tests for this playbook, returns results.
+Endpoint: `POST /playbooks/:id/tests/run-all` - runs all tests for this playbook, returns results.
 
 Auto-run: every time a playbook is saved, all its tests run. Block save if a regression appears (with override option).
 
-**Frontend**: 
+**Frontend**:
 - Tests tab on playbook detail page
-- "Create test from current thread" button on any thread — captures the email content and asks the user to define expected outcomes
+- "Create test from current thread" button on any thread - captures the email content and asks the user to define expected outcomes
 - Test results visible per playbook version
 
 This is what unlocks confident iteration on playbooks.
@@ -121,7 +121,7 @@ ALTER TABLE interactions ADD COLUMN step_type TEXT;
 ALTER TABLE interactions ADD COLUMN diff_summary TEXT;  -- AI-generated summary of what changed
 ```
 
-**Backend**: 
+**Backend**:
 - When a human edits and approves a draft, call AI to generate a `diff_summary`: "Human changed the greeting from 'Dear Sir' to 'Hey mate' and removed the formal sign-off."
 - Store this with the interaction
 - When generating future drafts, include relevant recent diff_summaries as additional context: "Note: recent human edits on this category have preferred casual greetings over formal ones."
@@ -136,15 +136,15 @@ Problem: the 9 step types cover the core but clients ask for more. Add integrati
 
 **New step types** (implement each using the ai-driven-step skill pattern):
 
-- `lookup_tracking` — takes a tracking number, queries a shipping API (NZ Post, Shippit, AfterShip as configurable providers), stores status in context. Handler config: `{tracking_var, provider, store_to}`.
+- `lookup_tracking` - takes a tracking number, queries a shipping API (NZ Post, Shippit, AfterShip as configurable providers), stores status in context. Handler config: `{tracking_var, provider, store_to}`.
 
-- `notify_slack` — posts a message to a Slack webhook. Config: `{webhook_url_ref (from settings), message_template, include_context_keys}`. Useful for "notify ops when a refund > $500 needs approval".
+- `notify_slack` - posts a message to a Slack webhook. Config: `{webhook_url_ref (from settings), message_template, include_context_keys}`. Useful for "notify ops when a refund > $500 needs approval".
 
-- `wait_until` — schedules the run to advance at a specific time. Config: `{duration_hours}` or `{condition_context_key_set: true}`. Enables "follow up with customer in 48 hours if no reply" patterns.
+- `wait_until` - schedules the run to advance at a specific time. Config: `{duration_hours}` or `{condition_context_key_set: true}`. Enables "follow up with customer in 48 hours if no reply" patterns.
 
-- `ai_classify` — pure AI classification step, doesn't ask or reply, just categorises something and stores to context. Config: `{goal, classes: [{name, description}], store_to}`. Useful for nested decisions like "is this complaint about shipping, product, or service?"
+- `ai_classify` - pure AI classification step, doesn't ask or reply, just categorises something and stores to context. Config: `{goal, classes: [{name, description}], store_to}`. Useful for nested decisions like "is this complaint about shipping, product, or service?"
 
-- `sheet_append_row` — adds a new row to a sheet. Config: `{sheet_id?, values: [{column, value_or_var}]}`. Useful for lead capture flows.
+- `sheet_append_row` - adds a new row to a sheet. Config: `{sheet_id?, values: [{column, value_or_var}]}`. Useful for lead capture flows.
 
 Each one follows the ai-driven-step pattern from Phase 5. Parser updates to teach the AI when to suggest them.
 
@@ -179,11 +179,11 @@ This keeps things simple for clients who only need one playbook per category whi
 
 Pick the task that matches what clients are asking for. Rough business priority:
 
-1. **Template library (#1)** — if you're onboarding new clients. Biggest go-to-market impact.
-2. **Testing harness (#2)** — if existing clients are hesitant to edit playbooks. Biggest confidence-unlock.
-3. **Richer step types (#4)** — if clients are asking "can it do X?". Biggest capability-unlock.
-4. **Learning loop (#3)** — if AI reply quality is the top complaint.
-5. **Playbook routing (#5)** — only when a client specifically needs it. Adds complexity, do last.
+1. **Template library (#1)** - if you're onboarding new clients. Biggest go-to-market impact.
+2. **Testing harness (#2)** - if existing clients are hesitant to edit playbooks. Biggest confidence-unlock.
+3. **Richer step types (#4)** - if clients are asking "can it do X?". Biggest capability-unlock.
+4. **Learning loop (#3)** - if AI reply quality is the top complaint.
+5. **Playbook routing (#5)** - only when a client specifically needs it. Adds complexity, do last.
 
 Each task is a 3-5 day effort. Don't try to do all 5 in one phase.
 

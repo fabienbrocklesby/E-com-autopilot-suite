@@ -1,5 +1,5 @@
 /**
- * Playbook engine — public API.
+ * Playbook engine - public API.
  */
 export { advanceRun, resumeRun, startRun } from "./executor.ts";
 export { parsePlaybook } from "./parser.ts";

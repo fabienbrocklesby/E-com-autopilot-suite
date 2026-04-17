@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS idx_failed_ingestions_unresolved
   ON failed_ingestions(workspace_id)
   WHERE NOT resolved;
 
--- Seed alert settings (these are optional — empty value means disabled)
+-- Seed alert settings (these are optional - empty value means disabled)
 INSERT INTO settings (workspace_id, key, value)
 VALUES
   (1, 'alert_webhook_url', ''),

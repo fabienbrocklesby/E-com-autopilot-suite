@@ -8,7 +8,7 @@ tools: ['search/codebase', 'edit', 'runCommands', 'mcp_postgres_query', 'mcp_con
 
 The current `find_sheet_row` tries each match attempt in order and returns the first hit. That works when customers quote order numbers. Real customers say "the radiator for my Ranger" and expect us to figure it out.
 
-This prompt upgrades `find_sheet_row` to a 3-tier matcher: exact → fuzzy → AI fallback. The AI fallback is the unlock — it sees the full context and ALL candidate rows, and picks the right one.
+This prompt upgrades `find_sheet_row` to a 3-tier matcher: exact → fuzzy → AI fallback. The AI fallback is the unlock - it sees the full context and ALL candidate rows, and picks the right one.
 
 ## Required reading
 
@@ -21,7 +21,7 @@ This prompt upgrades `find_sheet_row` to a 3-tier matcher: exact → fuzzy → A
 
 ## Pre-build MCP work
 
-### 1. filesystem — current implementation
+### 1. filesystem - current implementation
 
 ```
 filesystem: read api/services/playbook/handlers/find_sheet_row.ts (full)
@@ -32,19 +32,19 @@ filesystem: list api/services/playbook/handlers/ (all handlers, to match pattern
 
 Note exactly what the current handler does. What's the StepDecision return? What's the config shape?
 
-### 2. postgres — workspace sheet structure
+### 2. postgres - workspace sheet structure
 
 ```sql
 -- What columns does the workspace's sheet have?
 SELECT * FROM sheet_columns WHERE workspace_id = 1;
 
 -- Sample of actual row data the matcher will work against
--- (You may need to look at the Google Sheet directly via the API or 
+-- (You may need to look at the Google Sheet directly via the API or
 -- check if there's a cache table in the dev DB)
 
 -- Existing find_sheet_row config in active playbooks
 SELECT id, name, jsonb_pretty(steps)
-FROM playbooks 
+FROM playbooks
 WHERE steps::text LIKE '%find_sheet_row%' AND is_active = true;
 
 -- Past find_sheet_row executions to see what worked and what didn't
@@ -57,12 +57,12 @@ LIMIT 20;
 
 You're looking for: which columns customers reference, what kinds of mismatches happened, were any matches WRONG (matched the wrong row)?
 
-### 3. context7 — fetch docs
+### 3. context7 - fetch docs
 
 Critical. Fetch:
 - **Google Sheets API** v4 `spreadsheets.values.get` and `spreadsheets.values.batchGet` for reading whole columns or ranges efficiently
 - **OpenAI Chat Completions** for the AI fallback call, especially `response_format: json_object` and how to keep token usage low when sending many candidate rows
-- **Levenshtein** or string similarity library options for Deno/TypeScript — if there's a standard library option, use it; if not, find a small well-maintained npm package
+- **Levenshtein** or string similarity library options for Deno/TypeScript - if there's a standard library option, use it; if not, find a small well-maintained npm package
 
 Specifically for fuzzy matching, options to check:
 - `fuzzysort` (npm)
@@ -76,12 +76,12 @@ Don't just pick the first one. Read the docs, look at maintainership, check it w
 ```ts
 interface FindSheetRowConfig {
   // Match strategy:
-  //   "exact_only" — only exact string matches
-  //   "exact_then_fuzzy" — exact, then Levenshtein < threshold
-  //   "aggressive" (default) — exact, fuzzy, then AI fallback
+  //   "exact_only" - only exact string matches
+  //   "exact_then_fuzzy" - exact, then Levenshtein < threshold
+  //   "aggressive" (default) - exact, fuzzy, then AI fallback
   match_strategy?: "exact_only" | "exact_then_fuzzy" | "aggressive";
 
-  // Match attempts in priority order. Each attempt tries one column 
+  // Match attempts in priority order. Each attempt tries one column
   // against one context variable.
   match_attempts: Array<{
     column: string;          // sheet column header (e.g. "Email", "Name")
@@ -165,8 +165,8 @@ export const findSheetRowHandler: StepHandler = {
     return {
       decision: { action: "advance" },
       contextUpdates: { [storeTo]: null },
-      output: { 
-        action: "no_match", 
+      output: {
+        action: "no_match",
         attempted_strategies: getAttemptedStrategies(strategy),
         attempted_columns: config.match_attempts.map(a => a.column),
       },
@@ -176,18 +176,18 @@ export const findSheetRowHandler: StepHandler = {
 };
 
 function advanceWithMatch(
-  result: MatchResult, 
-  storeTo: string, 
+  result: MatchResult,
+  storeTo: string,
   strategy: string
 ) {
   return {
     decision: { action: "advance" as const },
-    contextUpdates: { 
+    contextUpdates: {
       [storeTo]: result.row_number,
       // Also store any additional row data the AI extracted
       ...(result.extracted_row_data ?? {}),
     },
-    output: { 
+    output: {
       action: "matched",
       strategy,
       row_number: result.row_number,
@@ -205,7 +205,7 @@ function advanceWithMatch(
 
 ```ts
 async function tryExactMatch(
-  config: FindSheetRowConfig, 
+  config: FindSheetRowConfig,
   ctx: StepContext
 ): Promise<MatchResult> {
   for (const attempt of config.match_attempts) {
@@ -214,7 +214,7 @@ async function tryExactMatch(
 
     // Read the column from the sheet
     const columnValues = await readSheetColumn(
-      ctx.workspaceId, 
+      ctx.workspaceId,
       attempt.column
     );
 
@@ -245,7 +245,7 @@ function normalizeForCompare(s: string): string {
 
 ```ts
 async function tryFuzzyMatch(
-  config: FindSheetRowConfig, 
+  config: FindSheetRowConfig,
   ctx: StepContext
 ): Promise<MatchResult> {
   const fuzzyAttempts = config.match_attempts.filter(a => a.fuzzy);
@@ -255,7 +255,7 @@ async function tryFuzzyMatch(
     if (searchValue == null || searchValue === "") continue;
 
     const columnValues = await readSheetColumn(
-      ctx.workspaceId, 
+      ctx.workspaceId,
       attempt.column
     );
 
@@ -265,7 +265,7 @@ async function tryFuzzyMatch(
         value: v,
         index: idx,
         distance: levenshtein(
-          normalizeForCompare(v), 
+          normalizeForCompare(v),
           normalizeForCompare(String(searchValue))
         ),
       }))
@@ -297,7 +297,7 @@ This is where the magic happens. Read all rows (capped), give the AI everything 
 
 ```ts
 async function tryAiMatch(
-  config: FindSheetRowConfig, 
+  config: FindSheetRowConfig,
   ctx: StepContext
 ): Promise<MatchResult> {
   const fallbackConfig = config.ai_fallback ?? {};
@@ -305,18 +305,18 @@ async function tryAiMatch(
   const minConfidence = fallbackConfig.min_confidence ?? 0.7;
 
   // Decide which columns to read for inspection
-  const columnsToRead = fallbackConfig.inspect_columns 
+  const columnsToRead = fallbackConfig.inspect_columns
     ?? config.match_attempts.map(a => a.column);
 
   // Read all rows for those columns
   const rows = await readSheetRows(
-    ctx.workspaceId, 
-    columnsToRead, 
+    ctx.workspaceId,
+    columnsToRead,
     maxRows
   );
 
   // Build the context payload for the AI
-  const contextVars = fallbackConfig.context_vars 
+  const contextVars = fallbackConfig.context_vars
     ?? Object.keys(ctx.context);
   const contextPayload: Record<string, unknown> = {};
   for (const key of contextVars) {
@@ -331,7 +331,7 @@ CONTEXT WE KNOW ABOUT THE CUSTOMER:
 ${JSON.stringify(contextPayload, null, 2)}
 
 CANDIDATE ROWS (row_number is 1-indexed including header, so first data row is 2):
-${rows.map((row, i) => 
+${rows.map((row, i) =>
   `Row ${i + 2}: ${JSON.stringify(row)}`
 ).join('\n')}
 
@@ -364,15 +364,15 @@ Return JSON only.`;
       system,
       user: "Match the customer to a row.",
       responseFormat: "json_object",
-      temperature: 0.2, // low — we want consistent matching, not creativity
+      temperature: 0.2, // low - we want consistent matching, not creativity
     });
   } catch (e) {
-    return { 
-      matched: false, 
-      aiCalls: [{ 
+    return {
+      matched: false,
+      aiCalls: [{
         error: e instanceof Error ? e.message : String(e),
         duration_ms: Date.now() - startTime,
-      }] 
+      }]
     };
   }
 
@@ -380,19 +380,19 @@ Return JSON only.`;
   try {
     parsed = JSON.parse(response.content);
   } catch {
-    return { 
-      matched: false, 
+    return {
+      matched: false,
       aiCalls: [recordCall(system, response, startTime)],
     };
   }
 
   if (
-    parsed.row_number == null || 
+    parsed.row_number == null ||
     typeof parsed.row_number !== "number" ||
     parsed.confidence < minConfidence
   ) {
-    return { 
-      matched: false, 
+    return {
+      matched: false,
       aiCalls: [recordCall(system, response, startTime)],
     };
   }
@@ -425,11 +425,11 @@ You may need to add or improve `readSheetRows` in `api/services/sheets.ts`:
 
 ```ts
 /**
- * Read multiple rows from a sheet, returning each row as an object 
+ * Read multiple rows from a sheet, returning each row as an object
  * keyed by the requested column headers.
- * 
- * Per Google Sheets API docs (context7, fetched this session): 
- * uses spreadsheets.values.batchGet for efficiency when reading 
+ *
+ * Per Google Sheets API docs (context7, fetched this session):
+ * uses spreadsheets.values.batchGet for efficiency when reading
  * multiple non-contiguous columns.
  */
 export async function readSheetRows(
@@ -446,8 +446,8 @@ If `readSheetColumn` doesn't exist either, add it:
 
 ```ts
 /**
- * Read all values from a single column. Returns values for data rows 
- * (skips header). 
+ * Read all values from a single column. Returns values for data rows
+ * (skips header).
  */
 export async function readSheetColumn(
   workspaceId: number,
@@ -467,7 +467,7 @@ export async function readSheetColumn(
 cd api && deno check services/playbook/handlers/find_sheet_row.ts
 ```
 
-### 2. Postgres — set up test data
+### 2. Postgres - set up test data
 
 You need controlled test scenarios. Make sure the workspace's Google Sheet has known rows you can match against. Examples:
 
@@ -483,7 +483,7 @@ Run these as actual playbook executions, or write a small test runner that calls
 - Context: `{ customer_email: "fabien@example.com" }`
 - Expected: row_number=2, strategy="exact", confidence=1.0, no AI calls
 
-**Scenario B: exact name match** 
+**Scenario B: exact name match**
 - Context: `{ customer_name: "Fabien Brocklesby" }`
 - Expected: row_number=2, strategy="exact"
 
@@ -510,7 +510,7 @@ For each scenario, query the execution log:
 ```sql
 SELECT step_type, jsonb_pretty(output)
 FROM playbook_step_executions
-WHERE run_id = <test_run> 
+WHERE run_id = <test_run>
 ORDER BY created_at DESC LIMIT 1;
 ```
 
@@ -518,7 +518,7 @@ Verify the `output` matches expectations.
 
 ### 4. AI cost check
 
-For Scenario D (AI fallback used), check the `aiCalls` in the execution output. Note the token count. If a single match call uses > 2000 tokens, the prompt is too verbose — trim it.
+For Scenario D (AI fallback used), check the `aiCalls` in the execution output. Note the token count. If a single match call uses > 2000 tokens, the prompt is too verbose - trim it.
 
 ### 5. Integration test with the refund playbook
 

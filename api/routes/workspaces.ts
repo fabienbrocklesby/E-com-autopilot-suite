@@ -1,5 +1,5 @@
 /**
- * Workspaces route — /workspaces
+ * Workspaces route - /workspaces
  * CRUD for workspaces plus label-sync trigger.
  */
 import { Hono } from "hono";
@@ -87,7 +87,7 @@ workspacesRouter.patch("/:id", async (c) => {
   return c.json({ workspace });
 });
 
-// DELETE /workspaces/:id — prevent deletion of the last workspace
+// DELETE /workspaces/:id - prevent deletion of the last workspace
 workspacesRouter.delete("/:id", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid workspace ID");
@@ -104,7 +104,7 @@ workspacesRouter.delete("/:id", async (c) => {
   return c.json({ deleted: true });
 });
 
-// POST /workspaces/:id/sync-labels — pull Gmail labels into categories
+// POST /workspaces/:id/sync-labels - pull Gmail labels into categories
 workspacesRouter.post("/:id/sync-labels", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid workspace ID");

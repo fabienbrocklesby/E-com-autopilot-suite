@@ -1,10 +1,19 @@
 <!--
-  /categories — List and edit categories and their behaviour
+  /categories - List and edit categories and their behaviour
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { categoriesApi } from "$lib/api";
   import type { Category, CategoryPayload } from "$lib/api";
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+
+  let mounted = $state(false);
 
   let categories = $state<Category[]>([]);
   let loading = $state(true);
@@ -29,9 +38,9 @@
 
   let confidenceWarning = $derived(
     form.confidence_threshold < 0.5
-      ? `Very low — almost every email will match this category (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
+      ? `Very low - almost every email will match this category (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
       : form.confidence_threshold > 0.95
-        ? `Very strict — the AI must be extremely confident before matching (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
+        ? `Very strict - the AI must be extremely confident before matching (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
         : null
   );
 
@@ -114,13 +123,14 @@
     }
   }
 
-  onMount(() => {
-    load();
+  onMount(async () => {
+    await load();
+    mounted = true;
   });
 </script>
 
 <svelte:head>
-  <title>Categories — Email Dash</title>
+  <title>Categories - Email Dash</title>
 </svelte:head>
 
 <div class="page-header">
@@ -129,11 +139,11 @@
 </div>
 
 {#if error}
-  <div class="error-banner">{error}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>{error}</div>
 {/if}
 
 {#if success}
-  <div class="success-banner">{success}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
 {/if}
 
 {#if loading}
@@ -151,8 +161,11 @@
   </div>
 {:else}
   <div class="categories-grid">
-    {#each categories as cat (cat.id)}
-      <div class="card category-card">
+    {#each categories as cat, i (cat.id)}
+      <div
+        class="card category-card"
+        in:fly={{ y: prefersReducedMotion ? 0 : 6, duration: prefersReducedMotion ? 50 : 140, delay: mounted ? 0 : i * 30, easing: cubicOut }}
+      >
         <div class="cat-header">
           <h2>{cat.name}</h2>
           <div class="cat-actions">
@@ -229,7 +242,7 @@
         <div class="field">
           <span class="label">Instructions (for AI)</span>
           <p class="field-hint">
-            Describe this category to the AI — when to match it, tone, and any special handling.
+            Describe this category to the AI - when to match it, tone, and any special handling.
             These instructions are also used when generating replies.
           </p>
           <textarea
@@ -253,7 +266,7 @@
 
         <div class="field-row">
           <div class="field field-half">
-            <span class="label">Confidence threshold — {Math.round(form.confidence_threshold * 100)}%</span>
+            <span class="label">Confidence threshold - {Math.round(form.confidence_threshold * 100)}%</span>
             <p class="field-hint">How certain the AI must be before assigning this category. 70–85% works well for most cases.</p>
             <input
               class="input"
@@ -456,7 +469,7 @@
   }
 
   .toggle-field {
-    justify-content: space-between;
+    justify-content: flex-start;
   }
 
   .label {

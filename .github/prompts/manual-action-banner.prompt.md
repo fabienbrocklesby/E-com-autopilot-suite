@@ -10,23 +10,23 @@ When a playbook run pauses at a `manual_approval` step, the human needs to do so
 
 ## Required reading
 
-1. `.github/MCP_DOCTRINE.md` — MCP usage rules
-2. `.github/copilot-instructions.md` — project context
-3. `.github/instructions/frontend.instructions.md` — SvelteKit 5 conventions
-4. `skills/svelte5-page/SKILL.md` — runes + page patterns
-5. `skills/deno-hono-route/SKILL.md` — backend route patterns if you need to extend any
-6. `docs/PLAYBOOK_ENGINE.md` — manual_approval step config schema
-7. `docs/TASK_LOG.md` — recent state
+1. `.github/MCP_DOCTRINE.md` - MCP usage rules
+2. `.github/copilot-instructions.md` - project context
+3. `.github/instructions/frontend.instructions.md` - SvelteKit 5 conventions
+4. `skills/svelte5-page/SKILL.md` - runes + page patterns
+5. `skills/deno-hono-route/SKILL.md` - backend route patterns if you need to extend any
+6. `docs/PLAYBOOK_ENGINE.md` - manual_approval step config schema
+7. `docs/TASK_LOG.md` - recent state
 
 ## What you're building
 
-A prominent action banner on `/threads/[id]` that appears whenever the thread has an active playbook run in `waiting_for_human` status. The banner is impossible to miss — visually distinct, top of page, with everything the human needs to take action and continue the run.
+A prominent action banner on `/threads/[id]` that appears whenever the thread has an active playbook run in `waiting_for_human` status. The banner is impossible to miss - visually distinct, top of page, with everything the human needs to take action and continue the run.
 
 Plus a small indicator on the thread list (`/`) so threads needing action are scannable.
 
 ## Pre-build MCP work
 
-### 1. context7 — fetch SvelteKit 5 docs
+### 1. context7 - fetch SvelteKit 5 docs
 
 You're building a non-trivial reactive UI component. Fetch:
 - SvelteKit 5 runes reference (`$state`, `$derived`, `$effect`, `$props`)
@@ -45,7 +45,7 @@ Specifically check:
 - Modern button disabled/loading states
 - Whether `$bindable()` is needed for any of the inputs
 
-### 3. filesystem — repo awareness
+### 3. filesystem - repo awareness
 
 Read existing patterns:
 
@@ -54,14 +54,14 @@ filesystem: list frontend/src/routes/threads/[id]/
 filesystem: read frontend/src/routes/threads/[id]/+page.svelte (full)
 filesystem: list frontend/src/routes/review/
 filesystem: read frontend/src/routes/review/+page.svelte (look at how approval is currently done)
-filesystem: read frontend/src/lib/api.ts (full — see existing API client patterns)
+filesystem: read frontend/src/lib/api.ts (full - see existing API client patterns)
 filesystem: read frontend/src/routes/+layout.svelte (CSS variables for theming)
 filesystem: list frontend/src/lib/components/ (if it exists, see existing component patterns)
 ```
 
 You're going to match the styling and patterns of what's already there, not invent new ones.
 
-### 4. postgres — what does the data look like?
+### 4. postgres - what does the data look like?
 
 ```sql
 -- See an actual paused run to understand the shape
@@ -87,7 +87,7 @@ You need to know exactly what fields the manual_approval config has so the banne
 - `input_context_key` (string, default "human_notes", where to store the input)
 - `reference_context` (string[] optional, which context vars to surface to the human)
 
-### 5. context7 — fetch Hono docs
+### 5. context7 - fetch Hono docs
 
 Fetch Hono docs for:
 - Route param parsing
@@ -103,9 +103,9 @@ Even if the existing approval endpoint already exists, you may need to extend it
 Find and read the current approval endpoint. It probably lives in `api/routes/playbook-runs.ts` or similar. Confirm:
 
 ```
-GET  /playbook-runs/:id           — returns run with current step config
-POST /playbook-runs/:id/approve   — body: { input?: string }
-POST /playbook-runs/:id/reject    — body: { reason?: string }
+GET  /playbook-runs/:id           - returns run with current step config
+POST /playbook-runs/:id/approve   - body: { input?: string }
+POST /playbook-runs/:id/reject    - body: { reason?: string }
 ```
 
 If `GET /playbook-runs/:id` does not currently include the **current step's full config** in the response, extend it to do so. The frontend banner needs:
@@ -168,23 +168,23 @@ If this isn't already happening, fix it. Read `api/routes/playbook-runs.ts` and 
 export const api = {
   // ... existing
   playbookRuns: {
-    get: (id: number) => 
+    get: (id: number) =>
       fetchJson<PlaybookRunWithStep>(`/playbook-runs/${id}`),
-    approve: (id: number, body: { input?: string } = {}) => 
-      fetchJson<PlaybookRun>(`/playbook-runs/${id}/approve`, { 
-        method: "POST", 
-        body 
+    approve: (id: number, body: { input?: string } = {}) =>
+      fetchJson<PlaybookRun>(`/playbook-runs/${id}/approve`, {
+        method: "POST",
+        body
       }),
-    reject: (id: number, body: { reason?: string } = {}) => 
-      fetchJson<PlaybookRun>(`/playbook-runs/${id}/reject`, { 
-        method: "POST", 
-        body 
+    reject: (id: number, body: { reason?: string } = {}) =>
+      fetchJson<PlaybookRun>(`/playbook-runs/${id}/reject`, {
+        method: "POST",
+        body
       }),
   },
 };
 ```
 
-Add the corresponding TypeScript types in `frontend/src/lib/types.ts` (or wherever types live — check via filesystem).
+Add the corresponding TypeScript types in `frontend/src/lib/types.ts` (or wherever types live - check via filesystem).
 
 ### 2. Build the banner component
 
@@ -195,11 +195,11 @@ Create `frontend/src/lib/components/ManualActionBanner.svelte`:
   import { api } from "$lib/api";
   import type { PlaybookRunWithStep } from "$lib/types";
 
-  let { 
-    run, 
-    onComplete 
-  }: { 
-    run: PlaybookRunWithStep; 
+  let {
+    run,
+    onComplete
+  }: {
+    run: PlaybookRunWithStep;
     onComplete: () => void;  // parent calls to refresh thread
   } = $props();
 
@@ -207,7 +207,7 @@ Create `frontend/src/lib/components/ManualActionBanner.svelte`:
   let submitting = $state(false);
   let error = $state<string | null>(null);
 
-  // Derive what we show. The reason is from the step config; reference 
+  // Derive what we show. The reason is from the step config; reference
   // context items pull from the run's context bag.
   let reason = $derived(run.current_step_config?.reason ?? "Action required");
   let captureInput = $derived(run.current_step_config?.capture_input === true);
@@ -226,8 +226,8 @@ Create `frontend/src/lib/components/ManualActionBanner.svelte`:
     submitting = true;
     error = null;
     try {
-      await api.playbookRuns.approve(run.id, { 
-        input: captureInput ? humanInput : undefined 
+      await api.playbookRuns.approve(run.id, {
+        input: captureInput ? humanInput : undefined
       });
       humanInput = "";
       onComplete();
@@ -295,17 +295,17 @@ Create `frontend/src/lib/components/ManualActionBanner.svelte`:
   {/if}
 
   <div class="banner-actions">
-    <button 
-      class="btn-primary" 
-      onclick={approve} 
+    <button
+      class="btn-primary"
+      onclick={approve}
       disabled={!canApprove}
       aria-label="Mark action as done and continue the playbook run"
     >
       {submitting ? "Working…" : "Done, continue"}
     </button>
-    <button 
-      class="btn-secondary" 
-      onclick={reject} 
+    <button
+      class="btn-secondary"
+      onclick={reject}
       disabled={submitting}
       aria-label="Reject this action and escalate"
     >
@@ -499,8 +499,8 @@ Adjust CSS variables to match the actual theme variables in `+layout.svelte`. Us
 <!-- existing page header -->
 
 {#if waitingRun}
-  <ManualActionBanner 
-    run={waitingRun} 
+  <ManualActionBanner
+    run={waitingRun}
     onComplete={handleActionComplete}
   />
 {/if}
@@ -519,9 +519,9 @@ For each thread in the list, add a small indicator if the thread has any waiting
 Backend: extend the thread list query to include `has_pending_action` boolean per thread:
 
 ```sql
-SELECT t.*, 
+SELECT t.*,
   EXISTS(
-    SELECT 1 FROM playbook_runs r 
+    SELECT 1 FROM playbook_runs r
     WHERE r.thread_id = t.id AND r.status = 'waiting_for_human'
   ) as has_pending_action
 FROM threads t
@@ -553,19 +553,19 @@ cd frontend && npm run check
 cd api && deno check routes/playbook-runs.ts routes/threads.ts
 ```
 
-### 2. Postgres state — set up a test scenario
+### 2. Postgres state - set up a test scenario
 
 Find an existing run that's in `waiting_for_human` status. If none exists, trigger one by sending a fresh refund email to the test workspace and letting it reach the manual_approval step.
 
 ```sql
-SELECT id, thread_id, status, current_step_id 
-FROM playbook_runs 
+SELECT id, thread_id, status, current_step_id
+FROM playbook_runs
 WHERE status = 'waiting_for_human';
 ```
 
 Note the thread_id you'll test against.
 
-### 3. Playwright drive — the full flow
+### 3. Playwright drive - the full flow
 
 Use the playwright MCP:
 
@@ -579,7 +579,7 @@ Use the playwright MCP:
    - The reference context items (e.g. customer name, product, amount)
    - A text area with the input prompt
    - "Done, continue" and "Skip / escalate" buttons
-6. Try clicking "Done, continue" with empty input — verify the button is disabled
+6. Try clicking "Done, continue" with empty input - verify the button is disabled
 7. Type test input: "txn_test_12345, $460"
 8. Click "Done, continue"
 9. Verify the button shows "Working…" briefly
@@ -649,8 +649,8 @@ If you fetched any other docs via context7, list them.
 ## What NOT to do
 
 - Don't build a generic notification system, just this banner
-- Don't add real-time updates (polling/SSE) — manual refresh is fine for now
-- Don't redesign the review queue — this is additive, the queue still exists
+- Don't add real-time updates (polling/SSE) - manual refresh is fine for now
+- Don't redesign the review queue - this is additive, the queue still exists
 - Don't add complex animation
 - Don't add a Tailwind/UnoCSS dependency
 - Don't expand scope to handle other run statuses

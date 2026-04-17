@@ -35,18 +35,18 @@ this cycle correctly and that loop detection does not fire incorrectly.
 
 ---
 
-## Step 1 — Read the executor and handler code
+## Step 1 - Read the executor and handler code
 
 Use the filesystem MCP to read:
-- `api/services/playbook/executor.ts` — step dispatch loop, loop detection
-- `api/services/playbook/handlers/evaluate.ts` — routing logic
-- `api/services/playbook/handlers/ask_customer.ts` — pause and resume logic
-- `api/services/playbook/types.ts` — StepDecision, RunContext types
-- `api/services/playbook/registry.ts` — step type → handler mapping
+- `api/services/playbook/executor.ts` - step dispatch loop, loop detection
+- `api/services/playbook/handlers/evaluate.ts` - routing logic
+- `api/services/playbook/handlers/ask_customer.ts` - pause and resume logic
+- `api/services/playbook/types.ts` - StepDecision, RunContext types
+- `api/services/playbook/registry.ts` - step type → handler mapping
 
 ---
 
-## Step 2 — Verify evaluate handler routing
+## Step 2 - Verify evaluate handler routing
 
 In `evaluate.ts`, confirm:
 
@@ -62,7 +62,7 @@ If any of these are broken, fix them. Document what you changed and why.
 
 ---
 
-## Step 3 — Verify ask_customer pause and resume
+## Step 3 - Verify ask_customer pause and resume
 
 In `ask_customer.ts`, confirm:
 
@@ -83,7 +83,7 @@ If anything is wrong, fix it.
 
 ---
 
-## Step 4 — Verify loop detection does not fire on this cycle
+## Step 4 - Verify loop detection does not fire on this cycle
 
 The loop detection in `executor.ts` includes:
 - Per-step limit: same step fires twice within last 5 executions → escalate
@@ -131,18 +131,18 @@ fix the loop detection logic in `executor.ts`.
 
 ---
 
-## Step 5 — Integration smoke test via playwright
+## Step 5 - Integration smoke test via playwright
 
 Once the code is verified/fixed:
 
 1. Use playwright to navigate to the thread page for the failed run.
 2. Confirm the UI shows the run state correctly (escalated/failed).
-3. There is no automated way to re-run — just verify the UI renders without errors
+3. There is no automated way to re-run - just verify the UI renders without errors
    and the step execution history is visible.
 
 If the playwright test finds a UI rendering error on the thread page related to
-run status display, fix it in the relevant SvelteKit 5 component (runes only —
-`$state`, `$derived`, `$effect`, `$props` — no Svelte 4 syntax).
+run status display, fix it in the relevant SvelteKit 5 component (runes only -
+`$state`, `$derived`, `$effect`, `$props` - no Svelte 4 syntax).
 
 ---
 
@@ -152,7 +152,7 @@ run status display, fix it in the relevant SvelteKit 5 component (runes only —
 - Do not add new step types.
 - All DB writes in `transaction()` from `db/client.ts`.
 - Every workspace-owned query must filter by `workspace_id`.
-- Routes stay thin — logic in services.
+- Routes stay thin - logic in services.
 - SvelteKit 5 runes only if you touch frontend. No `$:`, no `export let`, no `onMount`.
 - Throw `AppError(message, status)` for known errors in backend code.
 

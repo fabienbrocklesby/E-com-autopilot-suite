@@ -1,5 +1,5 @@
 /**
- * Step handler registry — maps step type strings to handler implementations.
+ * Step handler registry - maps step type strings to handler implementations.
  */
 import type { StepHandler, StepType } from "./types.ts";
 import { extractHandler } from "./handlers/extract.ts";

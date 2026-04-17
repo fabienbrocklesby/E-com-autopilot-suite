@@ -36,7 +36,7 @@ export const findSheetRowHandler: StepHandler = {
         continue;
       }
 
-      // Resolve column letter — attempt.column may be a letter or a header name.
+      // Resolve column letter - attempt.column may be a letter or a header name.
       const colRow = await queryOne<{ column_letter: string }>(
         `SELECT column_letter FROM sheet_columns
          WHERE workspace_id = $1 AND (column_letter = $2 OR header_name = $2)

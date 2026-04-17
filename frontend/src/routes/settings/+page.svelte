@@ -1,8 +1,9 @@
 <!--
-  /settings — Global settings, OAuth connection status, and workspace management
+  /settings - Global settings, OAuth connection status, and workspace management
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fade } from "svelte/transition";
   import { page } from "$app/stores";
   import {
     settingsApi,
@@ -41,6 +42,13 @@
       key: "reply_signature",
       label: "Reply signature",
       description: "Appended to AI-generated drafts.",
+      type: "text",
+    },
+    {
+      key: "sender_name",
+      label: "Sender name",
+      description: "Your name used to sign AI-generated replies. Leave blank to omit a sign-off.",
+      hint: "e.g. Sarah from Support",
       type: "text",
     },
   ];
@@ -109,7 +117,7 @@
       const res = await workspacesApi.list();
       workspaces = res.workspaces;
     } catch {
-      // Silently fail workspace load — not critical
+      // Silently fail workspace load - not critical
     } finally {
       loadingWorkspaces = false;
     }
@@ -216,22 +224,22 @@
 </script>
 
 <svelte:head>
-  <title>Settings — Autopilot</title>
+  <title>Settings - Autopilot</title>
 </svelte:head>
 
 <h1>Settings</h1>
 
 {#if oauthSuccess}
-  <div class="success-banner">Google account connected successfully.</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>Google account connected successfully.</div>
 {/if}
 {#if oauthError}
-  <div class="error-banner">OAuth error: {decodeURIComponent(oauthError)}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>OAuth error: {decodeURIComponent(oauthError)}</div>
 {/if}
 {#if settingsError}
-  <div class="error-banner">{settingsError}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>{settingsError}</div>
 {/if}
 {#if success}
-  <div class="success-banner">{success}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
 {/if}
 
 <!-- OAuth Section -->
@@ -283,10 +291,10 @@
   </p>
 
   {#if workspaceSuccess}
-    <div class="success-banner ws-banner">{workspaceSuccess}</div>
+    <div class="success-banner ws-banner" transition:fade={{ duration: 150 }}>{workspaceSuccess}</div>
   {/if}
   {#if workspaceError}
-    <div class="error-banner ws-banner">{workspaceError}</div>
+    <div class="error-banner ws-banner" transition:fade={{ duration: 150 }}>{workspaceError}</div>
   {/if}
 
   {#if loadingWorkspaces}

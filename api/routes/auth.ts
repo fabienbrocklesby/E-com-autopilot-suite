@@ -1,5 +1,5 @@
 /**
- * Auth route — /auth
+ * Auth route - /auth
  * Implements the Google OAuth 2.0 web server flow using raw fetch calls.
  * Reference: https://developers.google.com/identity/protocols/oauth2/web-server
  */
@@ -30,7 +30,7 @@ const SCOPES = [
   "profile",
 ].join(" ");
 
-// GET /auth/google/start — redirect to Google consent screen
+// GET /auth/google/start - redirect to Google consent screen
 authRouter.get("/google/start", async (c) => {
   if (!CLIENT_ID) throw new AppError(500, "GOOGLE_CLIENT_ID is not configured");
 
@@ -52,7 +52,7 @@ authRouter.get("/google/start", async (c) => {
   return c.redirect(`${GOOGLE_AUTH_URL}?${params.toString()}`);
 });
 
-// GET /auth/google/callback — exchange code for tokens
+// GET /auth/google/callback - exchange code for tokens
 authRouter.get("/google/callback", async (c) => {
   const code = c.req.query("code");
   const error = c.req.query("error");
@@ -143,7 +143,7 @@ authRouter.get("/google/callback", async (c) => {
   );
   const workspaceId = tokenRow?.workspace_id ?? 1;
 
-  // Register Gmail push notifications. Fire-and-forget — don't block the redirect.
+  // Register Gmail push notifications. Fire-and-forget - don't block the redirect.
   setupGmailWatch(userInfo.email).catch((err) =>
     console.error("[auth] Failed to set up Gmail watch:", err)
   );
@@ -156,7 +156,7 @@ authRouter.get("/google/callback", async (c) => {
   return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_success=1`);
 });
 
-// GET /auth/status — check whether an OAuth token is stored (protected)
+// GET /auth/status - check whether an OAuth token is stored (protected)
 authRouter.get("/status", async (c) => {
   const authHeader = c.req.header("Authorization");
   if (!authHeader?.startsWith("Bearer ") || authHeader.slice(7) !== API_SECRET) {

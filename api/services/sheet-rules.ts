@@ -59,7 +59,7 @@ Return a JSON object:
 If you cannot confidently identify a match, return:
   { "row": null, "matched_value": null }
 
-Be liberal but sensible — e.g. "john@smith.com" can reasonably match "John Smith".`;
+Be liberal but sensible - e.g. "john@smith.com" can reasonably match "John Smith".`;
 
   const content = await chatCompletion(
     [{ role: "system", content: system }, { role: "user", content: threadContent }],
@@ -207,7 +207,7 @@ async function sheetsGetColumn(
 /**
  * Evaluate all active sheet rules for a thread after categorisation.
  * Failures per-rule are stored as executions with status="failed" and never
- * propagated — the email pipeline must not break due to sheet rule errors.
+ * propagated - the email pipeline must not break due to sheet rule errors.
  */
 export async function evaluateRules(threadId: number, workspaceId: number): Promise<void> {
   const workspace = await queryOne<Workspace>(
@@ -453,7 +453,7 @@ export async function approveExecution(executionId: number): Promise<void> {
   if (!workspace.gmail_address) throw new AppError(422, "No Gmail address configured for workspace");
 
   if (exec.row_number === null) {
-    throw new AppError(422, "Execution has no row number — cannot write to sheet");
+    throw new AppError(422, "Execution has no row number - cannot write to sheet");
   }
 
   await writeToSheet(
@@ -493,7 +493,7 @@ export async function rejectExecution(executionId: number): Promise<void> {
 /**
  * Retry a failed execution.
  * - If the execution has a row_number and proposed_updates already stored,
- *   re-apply them to the sheet directly (fast path — skips AI).
+ *   re-apply them to the sheet directly (fast path - skips AI).
  * - Otherwise re-runs the full rule evaluation pipeline from scratch
  *   (AI extraction → row lookup → resolve updates → write/queue).
  */
@@ -514,7 +514,7 @@ export async function retryExecution(executionId: number): Promise<void> {
   if (!workspace?.sheet_id) throw new AppError(422, "No sheet configured");
   if (!workspace.gmail_address) throw new AppError(422, "No Gmail address configured for workspace");
 
-  // Fast path: we already have a row number and proposed updates — just re-write.
+  // Fast path: we already have a row number and proposed updates - just re-write.
   if (exec.row_number !== null && Object.keys(exec.proposed_updates).length > 0) {
     await writeToSheet(
       workspace.gmail_address,
@@ -533,7 +533,7 @@ export async function retryExecution(executionId: number): Promise<void> {
   }
 
   // Full re-run: failed before finding a row (e.g. AI extraction or row lookup failed).
-  // Delete the old failed record first, then re-run the pipeline — the evaluation
+  // Delete the old failed record first, then re-run the pipeline - the evaluation
   // will create a fresh record with the new outcome.
   const rule = await queryOne<SheetRule>(
     "SELECT * FROM sheet_rules WHERE id = $1",
@@ -542,7 +542,7 @@ export async function retryExecution(executionId: number): Promise<void> {
   if (!rule) throw new AppError(404, "Associated rule not found");
 
   if (exec.thread_id === null) {
-    throw new AppError(422, "Execution has no thread — cannot re-run evaluation");
+    throw new AppError(422, "Execution has no thread - cannot re-run evaluation");
   }
 
   const thread = await queryOne<Thread>(
@@ -554,7 +554,7 @@ export async function retryExecution(executionId: number): Promise<void> {
   const model = await getModel(exec.workspace_id);
   const threadContent = thread.thread_summary ?? "";
   if (!threadContent.trim()) {
-    throw new AppError(422, "Thread has no summary — cannot re-run evaluation");
+    throw new AppError(422, "Thread has no summary - cannot re-run evaluation");
   }
 
   // Remove the old failed record before creating a new one.

@@ -1,5 +1,5 @@
 /**
- * Labels route — /labels
+ * Labels route - /labels
  * Provides label list and manual sync for a workspace.
  */
 import { Hono } from "hono";
@@ -12,7 +12,7 @@ export const labelsRouter = new Hono();
 
 labelsRouter.use("*", authMiddleware);
 
-// POST /labels/sync?workspace_id=1 — trigger label sync for a workspace
+// POST /labels/sync?workspace_id=1 - trigger label sync for a workspace
 labelsRouter.post("/sync", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   if (isNaN(workspaceId)) throw new AppError(400, "Invalid workspace_id");

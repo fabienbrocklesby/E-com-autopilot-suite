@@ -7,8 +7,8 @@ This is the canonical architecture reference for the Email Automation system. It
 ## System overview
 
 A dashboard that sits between Gmail + Google Sheets and the client's manual workflow. Inbound emails are categorised by AI, then:
-- Assigned to a **playbook** — a multi-step automation flow
-- Or (for categories without a playbook) processed by the **legacy draft flow** — a single AI draft queued for review
+- Assigned to a **playbook** - a multi-step automation flow
+- Or (for categories without a playbook) processed by the **legacy draft flow** - a single AI draft queued for review
 
 The client uses Gmail + Google Sheets as source of truth. The system labels Gmail threads and writes back to the sheet when threads progress.
 
@@ -31,7 +31,7 @@ The client uses Gmail + Google Sheets as source of truth. The system labels Gmai
 A named type of email (e.g. "Refund Request", "Tracking Request"). Owns a playbook. The AI classifies inbound threads into categories.
 
 ### Playbook
-A named, versioned sequence of steps attached to a category. Created and edited by the client in plain language — the AI interprets the description into structured steps. Stored in `playbooks.steps` as JSONB.
+A named, versioned sequence of steps attached to a category. Created and edited by the client in plain language - the AI interprets the description into structured steps. Stored in `playbooks.steps` as JSONB.
 
 ### Run
 A per-thread execution of a playbook. Has a context bag (key-value variables collected during execution), a current step cursor, and a status. Stored in `playbook_runs`.
@@ -130,16 +130,16 @@ settings
 Inbound email
   │
   ▼
-ingestMessage() — gmail.ts
+ingestMessage() - gmail.ts
   │  Upsert thread + message records
   │
   ├─ Thread has active waiting_for_customer run?
-  │    └─ YES: resumeRun() — advance from current step
+  │    └─ YES: resumeRun() - advance from current step
   │
-  └─ NO: categoriseAndDraft() — categorisation.ts
+  └─ NO: categoriseAndDraft() - categorisation.ts
            │
            ├─ Category has active playbook?
-           │    └─ YES: startRun() — create playbook run, begin executing
+           │    └─ YES: startRun() - create playbook run, begin executing
            │
            └─ NO: Legacy draft flow (AI draft + optional auto-send)
 ```
@@ -171,16 +171,16 @@ advanceRun(runId)
 
 ```
 api/services/playbook/
-  executor.ts          — advanceRun, resumeRun, startRun
-  registry.ts          — maps step type → handler
-  types.ts             — all type definitions
-  parser.ts            — plain-language → steps AI call
-  dry-run.ts           — sandbox execution (no side effects)
-  mod.ts               — barrel exports
+  executor.ts          - advanceRun, resumeRun, startRun
+  registry.ts          - maps step type → handler
+  types.ts             - all type definitions
+  parser.ts            - plain-language → steps AI call
+  dry-run.ts           - sandbox execution (no side effects)
+  mod.ts               - barrel exports
   handlers/
     extract.ts
-    find_sheet_row.ts  — real Sheets API call (Phase 4)
-    update_sheet.ts    — real Sheets API cell write (Phase 4)
+    find_sheet_row.ts  - real Sheets API call (Phase 4)
+    update_sheet.ts    - real Sheets API cell write (Phase 4)
     ask_customer.ts
     branch.ts
     manual_approval.ts
@@ -194,15 +194,15 @@ api/services/playbook/
 ## Frontend routes
 
 ```
-/                          — Thread list
-/threads/[id]              — Thread detail + playbook run panel
-/review                    — Review queue (drafts + playbook approvals)
-/categories                — Category CRUD
-/playbooks                 — Playbook list
-/playbooks/[id]            — Playbook editor (description → steps → dry-run → activate)
-/sheet-rules               — Sheet rule CRUD
-/sheet-updates             — Sheet rule execution history
-/settings                  — Workspace config + model settings
+/                          - Thread list
+/threads/[id]              - Thread detail + playbook run panel
+/review                    - Review queue (drafts + playbook approvals)
+/categories                - Category CRUD
+/playbooks                 - Playbook list
+/playbooks/[id]            - Playbook editor (description → steps → dry-run → activate)
+/sheet-rules               - Sheet rule CRUD
+/sheet-updates             - Sheet rule execution history
+/settings                  - Workspace config + model settings
 ```
 
 ---
@@ -212,7 +212,7 @@ api/services/playbook/
 - All external-facing API calls require `Authorization: Bearer <API_SECRET>` header.
 - OAuth tokens stored AES-256 encrypted at rest (`ENCRYPTION_KEY` env var).
 - OAuth state parameter verified to prevent CSRF (stored in `oauth_states` table, expires after 10 min).
-- All DB queries filter by `workspace_id` — no row-level security in Postgres.
+- All DB queries filter by `workspace_id` - no row-level security in Postgres.
 
 ---
 
@@ -220,6 +220,6 @@ api/services/playbook/
 
 - One connected Gmail account per workspace. Multi-account is Phase 5+.
 - One playbook per category. Conditional playbook selection requires a `branch` step inside one playbook.
-- No scheduled triggers — timeouts for silent customers require a separate Deno cron job (not yet implemented).
-- Sheet writes go directly to Google Sheets on every step — no batching or queuing.
+- No scheduled triggers - timeouts for silent customers require a separate Deno cron job (not yet implemented).
+- Sheet writes go directly to Google Sheets on every step - no batching or queuing.
 - Playbook parser uses `gpt-4o` regardless of workspace model setting (parser needs best reasoning).

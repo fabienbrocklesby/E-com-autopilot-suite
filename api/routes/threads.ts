@@ -1,5 +1,5 @@
 /**
- * Threads route — /threads
+ * Threads route - /threads
  * Handles listing threads, fetching a single thread, and updating thread status.
  * All SQL lives in this file's query helpers keeping routes thin.
  */
@@ -17,7 +17,7 @@ export const threadsRouter = new Hono();
 // All thread routes require auth.
 threadsRouter.use("*", authMiddleware);
 
-// GET /threads — list threads with pagination and optional status filter
+// GET /threads - list threads with pagination and optional status filter
 threadsRouter.get("/", async (c) => {
   const limitParam = c.req.query("limit");
   const offsetParam = c.req.query("offset");
@@ -26,6 +26,15 @@ threadsRouter.get("/", async (c) => {
 
   const limit = Math.min(parseInt(limitParam ?? "50"), 200);
   const offset = parseInt(offsetParam ?? "0");
+
+  // Filter threads by the active Google account so switching accounts shows the right inbox.
+  const activeToken = await queryOne<{ email: string }>(
+    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
+    [workspaceId],
+  );
+  if (!activeToken) {
+    return c.json({ threads: [], limit, offset });
+  }
 
   const rows = await query<ThreadListItem>(
     `SELECT
@@ -53,17 +62,18 @@ threadsRouter.get("/", async (c) => {
      ) lr ON true
      LEFT JOIN playbooks lp ON lp.id = lr.playbook_id
      WHERE t.workspace_id = $1
-       AND ($2::text IS NULL OR t.status = $2)
+       AND t.account_email = $2
+       AND ($3::text IS NULL OR t.status = $3)
      GROUP BY t.id, cat.name, lr.id, lr.status, lr.current_step_id, lp.name, lr.updated_at, lp.steps
      ORDER BY t.created_at DESC
-     LIMIT $3 OFFSET $4`,
-    [workspaceId, statusFilter ?? null, limit, offset],
+     LIMIT $4 OFFSET $5`,
+    [workspaceId, activeToken.email, statusFilter ?? null, limit, offset],
   );
 
   return c.json({ threads: rows, limit, offset });
 });
 
-// GET /threads/:id — fetch a single thread with messages and drafts
+// GET /threads/:id - fetch a single thread with messages and drafts
 threadsRouter.get("/:id", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid thread ID");
@@ -86,7 +96,7 @@ threadsRouter.get("/:id", async (c) => {
   return c.json({ thread: detail });
 });
 
-// PATCH /threads/:id/status — update a thread's status
+// PATCH /threads/:id/status - update a thread's status
 threadsRouter.patch("/:id/status", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid thread ID");
@@ -107,7 +117,7 @@ threadsRouter.patch("/:id/status", async (c) => {
   return c.json({ thread: updated });
 });
 
-// POST /threads/:id/categorise — trigger AI categorisation + draft generation
+// POST /threads/:id/categorise - trigger AI categorisation + draft generation
 threadsRouter.post("/:id/categorise", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid thread ID");
@@ -116,7 +126,7 @@ threadsRouter.post("/:id/categorise", async (c) => {
   return c.json(result);
 });
 
-// GET /threads/:id/drafts — list drafts for a thread
+// GET /threads/:id/drafts - list drafts for a thread
 threadsRouter.get("/:id/drafts", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid thread ID");
@@ -128,7 +138,7 @@ threadsRouter.get("/:id/drafts", async (c) => {
   return c.json({ drafts });
 });
 
-// PATCH /threads/:id/drafts/:draftId — approve / reject / mark sent
+// PATCH /threads/:id/drafts/:draftId - approve / reject / mark sent
 threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
   const threadId = parseInt(c.req.param("id"));
   const draftId = parseInt(c.req.param("draftId"));
@@ -224,7 +234,7 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
   return c.json({ draft });
 });
 
-// POST /threads/:id/manual-reply — operator sends a manual reply to the customer
+// POST /threads/:id/manual-reply - operator sends a manual reply to the customer
 threadsRouter.post("/:id/manual-reply", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid thread ID");

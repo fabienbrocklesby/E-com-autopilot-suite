@@ -23,12 +23,12 @@ The system runs as a Docker Compose stack on the VPS managed by Dokploy.
 2. Redeploy the affected service.
 
 Required variables:
-- `DATABASE_URL` — Postgres connection string
-- `API_SECRET` — Bearer token for all API requests
-- `OPENAI_API_KEY` — OpenAI API key
-- `ENCRYPTION_KEY` — 32-byte base64 AES key for OAuth token encryption
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — OAuth app credentials
-- `GOOGLE_REDIRECT_URI` — Must match the URI registered in Google Cloud Console
+- `DATABASE_URL` - Postgres connection string
+- `API_SECRET` - Bearer token for all API requests
+- `OPENAI_API_KEY` - OpenAI API key
+- `ENCRYPTION_KEY` - 32-byte base64 AES key for OAuth token encryption
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` - OAuth app credentials
+- `GOOGLE_REDIRECT_URI` - Must match the URI registered in Google Cloud Console
 
 ---
 
@@ -37,7 +37,7 @@ Required variables:
 If a deploy breaks something:
 
 1. In Dokploy, click the previous deployment → **Redeploy** (rolls back containers).
-2. If a migration ran and broke things, it must be reverted manually — migrations are append-only and irreversible in general. Contact the developer before rolling back data.
+2. If a migration ran and broke things, it must be reverted manually - migrations are append-only and irreversible in general. Contact the developer before rolling back data.
 
 **Never run `git reset --hard` on the production branch.** Revert via a new commit instead.
 
@@ -86,7 +86,7 @@ The OAuth tokens expire and need to be refreshed automatically. The `getGoogleAc
 
 1. Go to **Settings** → **Connect Google Account** in the dashboard.
 2. Complete the OAuth flow. The new tokens are encrypted and stored automatically.
-3. Verify with `GET /auth/status` — should return `{ "connected": true, "email": "..." }`.
+3. Verify with `GET /auth/status` - should return `{ "connected": true, "email": "..." }`.
 
 **If the OAuth flow itself fails**, check:
 - `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are correct.
@@ -100,7 +100,7 @@ The OAuth tokens expire and need to be refreshed automatically. The `getGoogleAc
 ### OpenAI
 
 If you see `429` errors from OpenAI:
-- The `chatCompletion` function in `api/services/ai.ts` does not auto-retry — errors surface as failed step executions.
+- The `chatCompletion` function in `api/services/ai.ts` does not auto-retry - errors surface as failed step executions.
 - Failed runs stay in `failed` status. Check the Review Queue; the thread will still be in `in_review` for manual handling.
 - If quota is repeatedly hit, consider upgrading the OpenAI plan or switching the model in **Settings** → `openai_model` to a cheaper option (e.g. `gpt-4o-mini`).
 
@@ -114,7 +114,7 @@ If the Gmail webhook stops delivering entirely:
    ```
    POST /gmail/watch
    ```
-   (This requires the API to be accessible from Google's servers — check firewall rules.)
+   (This requires the API to be accessible from Google's servers - check firewall rules.)
 
 ---
 

@@ -1,5 +1,5 @@
 <!--
-  /system/failed-ingestions — Failed email ingestion admin.
+  /system/failed-ingestions - Failed email ingestion admin.
   Lists unresolved DLQ entries with retry buttons.
 -->
 <script lang="ts">
@@ -50,7 +50,7 @@
   });
 </script>
 
-<svelte:head><title>Failed Ingestions — Autopilot</title></svelte:head>
+<svelte:head><title>Failed Ingestions - Autopilot</title></svelte:head>
 
 <div class="page">
   <div class="header">
@@ -72,7 +72,7 @@
   {:else if loading}
     <div class="loading">Loading…</div>
   {:else if ingestions.length === 0}
-    <div class="empty">No {showResolved ? '' : 'unresolved '}failed ingestions — all healthy.</div>
+    <div class="empty">No {showResolved ? '' : 'unresolved '}failed ingestions - all healthy.</div>
   {:else}
     <table class="table">
       <thead>

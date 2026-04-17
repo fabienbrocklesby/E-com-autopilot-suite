@@ -1,14 +1,22 @@
 <!--
-  /threads/[id] — Thread detail page
+  /threads/[id] - Thread detail page
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { threadsApi, playbooksApi } from "$lib/api";
   import type { ThreadDetail, Draft, PlaybookRun, StepExecution } from "$lib/api";
   import ManualActionBanner from "$lib/components/ManualActionBanner.svelte";
   import ManualReplyPanel from "$lib/components/ManualReplyPanel.svelte";
+  import { Zap } from '@lucide/svelte';
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
 
   const threadId = parseInt($page.params.id ?? "0");
   let thread = $state<ThreadDetail | null>(null);
@@ -23,7 +31,7 @@
   let runDetail = $state<{ run: PlaybookRun; executions: StepExecution[] } | null>(null);
   let runDetailLoading = $state(false);
 
-  // Active run waiting for human action — drives the banner.
+  // Active run waiting for human action - drives the banner.
   let waitingRun = $derived(runs.find((r) => r.status === "waiting_for_human") ?? null);
 
   async function loadRunDetail(runId: number) {
@@ -122,7 +130,7 @@
 </script>
 
 <svelte:head>
-  <title>{thread?.subject ?? "Thread"} — Autopilot</title>
+  <title>{thread?.subject ?? "Thread"} - Autopilot</title>
 </svelte:head>
 
 <div class="page-header">
@@ -144,17 +152,21 @@
       onclick={handleCategorise}
       disabled={categorising}
     >
-      {categorising ? "Categorising…" : "⚡ Categorise"}
+      {#if categorising}
+        Categorising…
+      {:else}
+        <Zap size={14} /> Categorise
+      {/if}
     </button>
   </div>
 </div>
 
 {#if error}
-  <div class="error-banner">{error}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>{error}</div>
 {/if}
 
 {#if success}
-  <div class="success-banner">{success}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
 {/if}
 
 {#if waitingRun}
@@ -162,7 +174,21 @@
 {/if}
 
 {#if loading}
-  <div class="loading">Loading thread…</div>
+  <div class="thread-skeleton">
+    <div class="skeleton-header card">
+      <div class="skeleton skeleton-title"></div>
+      <div class="skeleton skeleton-badges"></div>
+    </div>
+    <div class="skeleton-messages">
+      {#each Array.from({ length: 3 }) as _, i}
+        <div class="skeleton-msg card" style="animation-delay: {i * 0.08}s">
+          <div class="skeleton skeleton-msg-header"></div>
+          <div class="skeleton skeleton-msg-body"></div>
+          <div class="skeleton skeleton-msg-body-sm"></div>
+        </div>
+      {/each}
+    </div>
+  </div>
 {:else if thread}
   <div class="thread-layout">
     <!-- LEFT: Conversation -->
@@ -183,10 +209,16 @@
       </div>
 
       <div class="messages-list">
-        {#each thread.messages as message (message.id)}
+        {#each thread.messages as message, i (message.id)}
           <div
             class="message card"
             class:outbound={message.direction === "outbound"}
+            in:fly={{
+              y: prefersReducedMotion ? 0 : 8,
+              duration: prefersReducedMotion ? 50 : 150,
+              delay: i * 35,
+              easing: cubicOut,
+            }}
           >
             <div class="message-header">
               <span class="from">{message.from_address}</span>
@@ -316,8 +348,10 @@
     font-size: 13px;
     cursor: pointer;
     padding: 6px 0;
+    transition: color 0.15s ease, transform 0.1s ease;
   }
   .back-btn:hover { color: var(--color-text); }
+  .back-btn:active { transform: scale(0.97); }
 
   .header-actions {
     display: flex;
@@ -340,9 +374,10 @@
     font-size: 11px;
     cursor: pointer;
     text-transform: capitalize;
-    transition: all 0.15s;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
   }
   .status-btn:hover { background: var(--color-surface-2); color: var(--color-text); }
+  .status-btn:active { transform: scale(0.97); }
   .status-btn.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
 
   .loading { color: var(--color-text-muted); padding: 40px; text-align: center; }
@@ -354,6 +389,7 @@
     color: #6ee7b7;
     padding: 12px 16px;
     margin-bottom: 16px;
+    animation: flash-success 600ms ease forwards;
   }
 
   /* ─── Two-column layout ─── */
@@ -512,6 +548,7 @@
     color: var(--color-text);
     cursor: pointer;
     text-align: left;
+    transition: background 0.12s ease;
   }
   .run-header:hover { background: var(--color-surface-2); }
 
@@ -573,4 +610,51 @@
   .exec-details { margin-top: 4px; }
   .exec-details summary { color: var(--color-text-muted); cursor: pointer; font-size: 10px; }
   .exec-json { margin-top: 4px; background: var(--color-bg); padding: 6px; border-radius: 4px; font-size: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+
+  /* ------------------------------------------------------------------ */
+  /* Thread loading skeleton                                              */
+  /* ------------------------------------------------------------------ */
+  .thread-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .skeleton-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .skeleton-title {
+    height: 22px;
+    width: 60%;
+  }
+  .skeleton-badges {
+    height: 14px;
+    width: 30%;
+    opacity: 0.6;
+  }
+  .skeleton-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .skeleton-msg {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .skeleton-msg-header {
+    height: 12px;
+    width: 45%;
+    opacity: 0.7;
+  }
+  .skeleton-msg-body {
+    height: 12px;
+    width: 90%;
+  }
+  .skeleton-msg-body-sm {
+    height: 12px;
+    width: 70%;
+    opacity: 0.5;
+  }
 </style>

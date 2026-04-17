@@ -1,16 +1,24 @@
 <!--
-  /playbooks/[id] — Playbook editor
+  /playbooks/[id] - Playbook editor
   Plain-language input → AI parse → step cards → per-step edit modals → save/activate.
   Also includes dry-run: paste an example email and see the execution trace.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { playbooksApi, categoriesApi } from "$lib/api";
   import type { Playbook, PlaybookStep, Category, DryRunResult } from "$lib/api";
+  import { PlusCircle, TableProperties, Pencil, MessageCircleQuestion, GitBranch, Hand, Send, CheckCircle, AlertTriangle, ChevronUp, ChevronDown, X } from '@lucide/svelte';
 
   const playbookId = parseInt($page.params.id ?? "0");
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
 
   let playbook = $state<Playbook | null>(null);
   let categories = $state<Category[]>([]);
@@ -41,20 +49,22 @@
   let dryRunError = $state<string | null>(null);
 
   // Step type icons & labels
-  const stepMeta: Record<string, { icon: string; label: string; color: string }> = {
-    extract:         { icon: "⊕", label: "Extract",         color: "#6366f1" },
-    find_sheet_row:  { icon: "⊞", label: "Find Sheet Row",  color: "#0ea5e9" },
-    update_sheet:    { icon: "✎",  label: "Update Sheet",    color: "#0ea5e9" },
-    ask_customer:    { icon: "?",  label: "Ask Customer",    color: "#f59e0b" },
-    branch:          { icon: "⑂",  label: "Branch",          color: "#a78bfa" },
-    manual_approval: { icon: "✋",  label: "Manual Approval", color: "#f97316" },
-    send_reply:      { icon: "→",  label: "Send Reply",      color: "#10b981" },
-    complete:        { icon: "✓",  label: "Complete",        color: "#10b981" },
-    escalate:        { icon: "⚠",  label: "Escalate",        color: "#ef4444" },
+  const stepMeta: Record<string, { icon: typeof PlusCircle; label: string; color: string }> = {
+    extract:         { icon: PlusCircle,           label: "Extract",         color: "#6366f1" },
+    find_sheet_row:  { icon: TableProperties,      label: "Find Sheet Row",  color: "#0ea5e9" },
+    update_sheet:    { icon: Pencil,                label: "Update Sheet",    color: "#0ea5e9" },
+    ask_customer:    { icon: MessageCircleQuestion, label: "Ask Customer",    color: "#f59e0b" },
+    branch:          { icon: GitBranch,             label: "Branch",          color: "#a78bfa" },
+    manual_approval: { icon: Hand,                  label: "Manual Approval", color: "#f97316" },
+    send_reply:      { icon: Send,                  label: "Send Reply",      color: "#10b981" },
+    complete:        { icon: CheckCircle,           label: "Complete",        color: "#10b981" },
+    escalate:        { icon: AlertTriangle,         label: "Escalate",        color: "#ef4444" },
   };
 
+  const defaultMeta = { icon: PlusCircle, label: "Unknown", color: "#64748b" };
+
   function meta(type: string) {
-    return stepMeta[type] ?? { icon: "•", label: type, color: "#64748b" };
+    return stepMeta[type] ?? defaultMeta;
   }
 
   function stepSummary(step: PlaybookStep): string {
@@ -268,7 +278,7 @@
 </script>
 
 <svelte:head>
-  <title>{playbook?.name ?? "Playbook"} — Email Dash</title>
+  <title>{playbook?.name ?? "Playbook"} - Email Dash</title>
 </svelte:head>
 
 <div class="page-header">
@@ -287,10 +297,10 @@
 </div>
 
 {#if error}
-  <div class="error-banner">{error}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>{error}</div>
 {/if}
 {#if success}
-  <div class="success-banner">{success}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
 {/if}
 
 {#if loading}
@@ -307,7 +317,7 @@
       <div class="field">
         <label>Category</label>
         <select bind:value={categoryId}>
-          <option value={null}>— No category —</option>
+          <option value={null}>- No category -</option>
           {#each categories as cat (cat.id)}
             <option value={cat.id}>{cat.name}</option>
           {/each}
@@ -339,7 +349,7 @@
         {#if parseWarnings.length > 0}
           <div class="warnings">
             {#each parseWarnings as w}
-              <div class="warning-item">⚠ {w}</div>
+              <div class="warning-item"><AlertTriangle size={14} /> {w}</div>
             {/each}
           </div>
         {/if}
@@ -359,9 +369,15 @@
         {:else}
           <div class="step-list">
             {#each steps as step, i (step.id)}
-              <div class="step-card">
+              <div
+                class="step-card"
+                in:fly={{ y: prefersReducedMotion ? 0 : 6, duration: prefersReducedMotion ? 50 : 140, delay: i * 25, easing: cubicOut }}
+              >
                 <div class="step-icon" style="background: {meta(step.type).color}20; color: {meta(step.type).color}">
-                  {meta(step.type).icon}
+                  {#if meta(step.type).icon}
+                    {@const StepIcon = meta(step.type).icon}
+                    <StepIcon size={16} />
+                  {/if}
                 </div>
                 <div class="step-body">
                   <div class="step-type">{meta(step.type).label}</div>
@@ -369,10 +385,10 @@
                   <div class="step-summary">{stepSummary(step)}</div>
                 </div>
                 <div class="step-actions">
-                  <button class="step-btn" onclick={() => moveStep(i, -1)} disabled={i === 0} title="Move up">↑</button>
-                  <button class="step-btn" onclick={() => moveStep(i, 1)} disabled={i === steps.length - 1} title="Move down">↓</button>
-                  <button class="step-btn" onclick={() => openEdit(step, i)} title="Edit">✎</button>
-                  <button class="step-btn danger" onclick={() => deleteStep(i)} title="Delete">✕</button>
+                  <button class="step-btn" onclick={() => moveStep(i, -1)} disabled={i === 0} title="Move up"><ChevronUp size={14} /></button>
+                  <button class="step-btn" onclick={() => moveStep(i, 1)} disabled={i === steps.length - 1} title="Move down"><ChevronDown size={14} /></button>
+                  <button class="step-btn" onclick={() => openEdit(step, i)} title="Edit"><Pencil size={14} /></button>
+                  <button class="step-btn danger" onclick={() => deleteStep(i)} title="Delete"><X size={14} /></button>
                 </div>
               </div>
             {/each}
@@ -403,7 +419,7 @@
     <div class="modal" onclick={(e) => e.stopPropagation()}>
       <div class="modal-header">
         <span>Edit step: <strong>{meta(editingStep.type).label}</strong></span>
-        <button class="modal-close" onclick={closeEdit}>✕</button>
+        <button class="modal-close" onclick={closeEdit}><X size={16} /></button>
       </div>
 
       <div class="modal-body">
@@ -445,7 +461,7 @@
             <textarea rows={4} value={draftStr("message")} oninput={(e) => setDraft("message", (e.target as HTMLTextAreaElement).value)}></textarea>
           </div>
           <div class="field">
-            <label>On reply — go to step ID</label>
+            <label>On reply - go to step ID</label>
             <input type="text" value={draftStr("on_reply_goto")} oninput={(e) => setDraft("on_reply_goto", (e.target as HTMLInputElement).value)} placeholder="extract_1" />
           </div>
 
@@ -456,11 +472,11 @@
             <input type="text" value={draftStr("condition")} oninput={(e) => setDraft("condition", (e.target as HTMLInputElement).value)} />
           </div>
           <div class="field">
-            <label>If true — go to step ID</label>
+            <label>If true - go to step ID</label>
             <input type="text" value={draftStr("if_true")} oninput={(e) => setDraft("if_true", (e.target as HTMLInputElement).value)} />
           </div>
           <div class="field">
-            <label>If false — go to step ID</label>
+            <label>If false - go to step ID</label>
             <input type="text" value={draftStr("if_false")} oninput={(e) => setDraft("if_false", (e.target as HTMLInputElement).value)} />
           </div>
 
@@ -475,11 +491,11 @@
             <textarea rows={4} value={draftStr("draft_template")} oninput={(e) => setDraft("draft_template", (e.target as HTMLTextAreaElement).value)}></textarea>
           </div>
           <div class="field">
-            <label>On approve — go to step ID</label>
+            <label>On approve - go to step ID</label>
             <input type="text" value={draftStr("on_approve")} oninput={(e) => setDraft("on_approve", (e.target as HTMLInputElement).value)} />
           </div>
           <div class="field">
-            <label>On reject — go to step ID</label>
+            <label>On reject - go to step ID</label>
             <input type="text" value={draftStr("on_reject")} oninput={(e) => setDraft("on_reject", (e.target as HTMLInputElement).value)} />
           </div>
 
@@ -509,7 +525,7 @@
             <input type="text" value={draftStr("reason")} oninput={(e) => setDraft("reason", (e.target as HTMLInputElement).value)} />
           </div>
 
-        <!-- complete — no config -->
+        <!-- complete - no config -->
         {:else if editingStep.type === "complete"}
           <p class="hint-block">No configuration needed. This step ends the run cleanly.</p>
         {/if}
@@ -529,7 +545,7 @@
     <div class="modal modal-wide" onclick={(e) => e.stopPropagation()}>
       <div class="modal-header">
         <span>Test with example email</span>
-        <button class="modal-close" onclick={() => { showDryRun = false; }}>✕</button>
+        <button class="modal-close" onclick={() => { showDryRun = false; }}><X size={16} /></button>
       </div>
       <div class="modal-body">
         {#if dryRunError}

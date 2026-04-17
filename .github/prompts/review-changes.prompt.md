@@ -11,11 +11,11 @@ tools: ['search/codebase', 'runCommands']
 1. **Run `git diff` and `git status`** to see uncommitted changes.
 
 2. **Read the relevant convention files** for the areas being changed:
-   - `.github/copilot-instructions.md` — always
-   - `.github/instructions/backend.instructions.md` — if `api/**` changes
-   - `.github/instructions/frontend.instructions.md` — if `frontend/**` changes
-   - `.github/instructions/sql.instructions.md` — if `*.sql` changes
-   - `docs/PLAYBOOK_ENGINE.md` — if playbook engine changes
+   - `.github/copilot-instructions.md` - always
+   - `.github/instructions/backend.instructions.md` - if `api/**` changes
+   - `.github/instructions/frontend.instructions.md` - if `frontend/**` changes
+   - `.github/instructions/sql.instructions.md` - if `*.sql` changes
+   - `docs/PLAYBOOK_ENGINE.md` - if playbook engine changes
 
 3. **Check for**:
    - Convention violations (style, patterns, banned APIs)

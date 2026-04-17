@@ -1,5 +1,5 @@
 /**
- * Webhooks route — /webhooks
+ * Webhooks route - /webhooks
  * Receives Gmail Pub/Sub push notifications and processes new emails.
  *
  * Reference: https://developers.google.com/gmail/api/guides/push
@@ -14,7 +14,7 @@ import { processNewMessages } from "../services/gmail.ts";
 
 export const webhooksRouter = new Hono();
 
-// POST /webhooks/gmail — receives Gmail Pub/Sub push notifications
+// POST /webhooks/gmail - receives Gmail Pub/Sub push notifications
 webhooksRouter.post("/gmail", async (c) => {
   const body = await c.req.json<GmailPushNotificationPayload>();
 
@@ -45,7 +45,7 @@ webhooksRouter.post("/gmail", async (c) => {
     throw new AppError(400, "Push data missing emailAddress or historyId");
   }
 
-  // Process asynchronously — return 204 quickly so Google does not retry.
+  // Process asynchronously - return 204 quickly so Google does not retry.
   // Errors during processing are logged but must not cause a non-2xx response
   // here (that would trigger Pub/Sub retries for already-processed messages).
   processNewMessages(pushData.emailAddress, pushData.historyId).catch((err) => {

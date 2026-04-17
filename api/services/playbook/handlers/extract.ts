@@ -1,5 +1,5 @@
 /**
- * Extract handler — uses AI to pull named variables from the thread messages.
+ * Extract handler - uses AI to pull named variables from the thread messages.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep, ExtractStep } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";

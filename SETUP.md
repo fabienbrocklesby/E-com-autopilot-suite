@@ -74,10 +74,10 @@ Claude Code will read the file and start working through the steps.
 
 ## What Claude Code does differently from Copilot
 
-- It reads files directly (no MCP needed for filesystem — it has native file access)
+- It reads files directly (no MCP needed for filesystem - it has native file access)
 - It runs terminal commands directly (no MCP needed for bash)
 - MCP servers are for EXTERNAL tools: postgres queries, browser automation, doc fetching
-- It manages its own context window — you'll see it summarize long conversations
+- It manages its own context window - you'll see it summarize long conversations
 - It asks for permission before editing files or running commands (configurable)
 
 ## Tips for this session
@@ -85,7 +85,7 @@ Claude Code will read the file and start working through the steps.
 - Let it read everything in Step 1 before it starts coding. Don't rush it.
 - When it shows you a diff, actually read it. Especially the evaluate handler changes.
 - When it runs the test scenarios, watch the postgres output. The execution trace tells you if it's really working.
-- If it says "I've completed X" — ask it to prove it with a postgres query. Trust but verify.
+- If it says "I've completed X" - ask it to prove it with a postgres query. Trust but verify.
 
 ## After the session
 
@@ -93,7 +93,7 @@ If everything passes, commit the changes:
 
 ```bash
 git add -A
-git commit -m "fix: production-ready playbook engine — evaluate handler, design guide, action banner, escalation reasons"
+git commit -m "fix: production-ready playbook engine - evaluate handler, design guide, action banner, escalation reasons"
 ```
 
 Then test with your client's real email patterns. Send a few test emails that match the categories they care about and verify the playbooks handle them correctly.

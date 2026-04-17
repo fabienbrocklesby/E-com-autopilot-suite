@@ -16,11 +16,11 @@ The `ask_customer` skip bug is fixed separately. This prompt fixes the structura
 2. `.github/copilot-instructions.md`
 3. `docs/PLAYBOOK_ENGINE.md`
 4. `skills/ai-driven-step/SKILL.md`
-5. `docs/TASK_LOG.md` — especially the diagnosis showing parser produced bad layout
+5. `docs/TASK_LOG.md` - especially the diagnosis showing parser produced bad layout
 
 ## Pre-build MCP work
 
-### 1. filesystem — current parser
+### 1. filesystem - current parser
 
 ```
 filesystem: read api/services/playbook/parser.ts (full)
@@ -33,12 +33,12 @@ Pay attention to:
 - The validation logic
 - The available step type list
 
-### 2. postgres — current playbook layouts
+### 2. postgres - current playbook layouts
 
 ```sql
 -- See the actual step ordering of existing playbooks
-SELECT id, name, version, jsonb_pretty(steps) 
-FROM playbooks 
+SELECT id, name, version, jsonb_pretty(steps)
+FROM playbooks
 WHERE workspace_id = 1 AND is_active = true;
 ```
 
@@ -48,7 +48,7 @@ For each playbook, walk the step array:
 
 This is the bug pattern. Document which playbooks have it and how.
 
-### 3. context7 — fetch docs
+### 3. context7 - fetch docs
 
 Fetch:
 - **OpenAI Chat Completions** docs for `response_format: json_object`, structured outputs, and best practices for getting reliable JSON
@@ -108,7 +108,7 @@ FALLBACK / TERMINAL (below happy path):
 ```
 
 Key changes:
-- No `branch_1` — the routing is in `evaluate_1`
+- No `branch_1` - the routing is in `evaluate_1`
 - `find_1` falls through naturally to `evaluate_1`
 - `evaluate_1` routes explicitly: satisfied (forward), missing (back to ask_1), escalate (terminal)
 - `ask_1` lives at the bottom as a clear fallback
@@ -121,26 +121,26 @@ Key changes:
 In `api/services/playbook/parser.ts`, find the system prompt. Add a new section after the step type reference, BEFORE the examples:
 
 ```
-STEP LAYOUT RULES (CRITICAL — get this wrong and runs will loop):
+STEP LAYOUT RULES (CRITICAL - get this wrong and runs will loop):
 
 1. The step array is the visual order. Lay out the HAPPY PATH first, top to bottom.
 
-2. Every step's natural sequential next step (the next item in the array) should 
-   be a step that comes next on the happy path. The engine advances sequentially 
-   when a step returns "advance" without specifying a destination. If a fallback 
-   step sits in the middle of the array, the happy path will accidentally fall 
+2. Every step's natural sequential next step (the next item in the array) should
+   be a step that comes next on the happy path. The engine advances sequentially
+   when a step returns "advance" without specifying a destination. If a fallback
+   step sits in the middle of the array, the happy path will accidentally fall
    into it.
 
-3. After the happy path, place FALLBACK steps (steps only reachable via explicit 
+3. After the happy path, place FALLBACK steps (steps only reachable via explicit
    advance_to from elsewhere in the playbook).
 
 4. After fallbacks, place TERMINAL steps (complete, escalate).
 
-5. Use `evaluate` to route between happy path and fallbacks. Do NOT use `branch` 
+5. Use `evaluate` to route between happy path and fallbacks. Do NOT use `branch`
    to skip over fallback steps in the array.
 
-6. `ask_customer` is almost always a fallback (we ask only when needed). Place 
-   it below the happy path. Its `on_reply_goto` typically routes back to the 
+6. `ask_customer` is almost always a fallback (we ask only when needed). Place
+   it below the happy path. Its `on_reply_goto` typically routes back to the
    step before the routing decision (usually `extract_X`).
 
 WRONG LAYOUT EXAMPLE (will loop):
@@ -168,7 +168,7 @@ RIGHT LAYOUT EXAMPLE:
   {"id": "escalate_1"}
 ]
 
-When you generate steps, write the happy path first, end with terminal steps, 
+When you generate steps, write the happy path first, end with terminal steps,
 and put fallbacks just before the terminals.
 ```
 
@@ -192,11 +192,11 @@ function validateStepLayout(steps: PlaybookStep[]): string[] {
     const current = steps[i];
     const next = steps[i + 1];
 
-    // For steps that advance sequentially (no explicit nextStepId in 
+    // For steps that advance sequentially (no explicit nextStepId in
     // common cases), check that the next step is a sensible happy-path next.
-    
-    // If `current` is `find_sheet_row`, the next step should usually be 
-    // `evaluate` (to check if a row was found). If next is `ask_customer`, 
+
+    // If `current` is `find_sheet_row`, the next step should usually be
+    // `evaluate` (to check if a row was found). If next is `ask_customer`,
     // that's the bad pattern.
     if (current.type === "find_sheet_row" && next.type === "ask_customer") {
       warnings.push(
@@ -215,14 +215,14 @@ function validateStepLayout(steps: PlaybookStep[]): string[] {
     }
   }
 
-  // Check that ask_customer steps appear AFTER any non-fallback steps that 
-  // might use them. A simple heuristic: ask_customer should not appear in 
-  // the first half of the playbook unless the playbook is genuinely 
+  // Check that ask_customer steps appear AFTER any non-fallback steps that
+  // might use them. A simple heuristic: ask_customer should not appear in
+  // the first half of the playbook unless the playbook is genuinely
   // ask-first.
   const askIndices = steps
     .map((s, i) => ({ s, i }))
     .filter(({ s }) => s.type === "ask_customer");
-  
+
   for (const { s, i } of askIndices) {
     if (i < steps.length / 2) {
       warnings.push(
@@ -236,7 +236,7 @@ function validateStepLayout(steps: PlaybookStep[]): string[] {
 }
 ```
 
-The parser should return these warnings alongside the steps so the UI can surface them. They're not blocking errors — sometimes a playbook genuinely is ask-first — but they prompt the human to double-check.
+The parser should return these warnings alongside the steps so the UI can surface them. They're not blocking errors - sometimes a playbook genuinely is ask-first - but they prompt the human to double-check.
 
 If your parser has a return shape like `{ steps, warnings }`, add the layout warnings to the warnings array. If not, extend the return type.
 
@@ -249,12 +249,12 @@ function reorderForLayout(steps: PlaybookStep[]): PlaybookStep[] {
   // Identify happy path: starts at first step, follows advance/advance_to chains
   // until terminal or until we hit a step we've seen before (loop guard)
   const happyPath = traceHappyPath(steps);
-  const fallbacks = steps.filter(s => 
-    !happyPath.includes(s) && 
-    s.type !== "complete" && 
+  const fallbacks = steps.filter(s =>
+    !happyPath.includes(s) &&
+    s.type !== "complete" &&
     s.type !== "escalate"
   );
-  const terminals = steps.filter(s => 
+  const terminals = steps.filter(s =>
     s.type === "complete" || s.type === "escalate"
   );
 
@@ -307,9 +307,9 @@ Run the parser against 5 different plain-language descriptions:
 
 For each, verify the layout follows the rule. Document the percentage that came out correctly. Target: 5/5.
 
-If less than 5/5, iterate on the prompt. The few-shot examples are the strongest signal — adjust them to cover the failure cases.
+If less than 5/5, iterate on the prompt. The few-shot examples are the strongest signal - adjust them to cover the failure cases.
 
-### 4. Postgres — save the new playbooks for testing
+### 4. Postgres - save the new playbooks for testing
 
 For the refund playbook generation, save it to a new playbook record:
 
@@ -351,10 +351,10 @@ In your TASK_LOG entry, cite:
 - [ ] 5/5 test playbook generations follow correct layout
 - [ ] End-to-end test on fresh thread shows the happy path completing in ~7-9 step executions
 - [ ] Layout warnings appear correctly when given a bad-layout input
-- [ ] Existing Refund v2 playbook still works (backward compat — handler fix is what really matters)
+- [ ] Existing Refund v2 playbook still works (backward compat - handler fix is what really matters)
 - [ ] All TypeScript checks pass
 - [ ] TASK_LOG updated with before/after parser output, MCP usage trace, doc citations
-- [ ] Commit message: `feat(parser): step layout rules — happy path first, fallbacks below`
+- [ ] Commit message: `feat(parser): step layout rules - happy path first, fallbacks below`
 
 ## What NOT to do
 

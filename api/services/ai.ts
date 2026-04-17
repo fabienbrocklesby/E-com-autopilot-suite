@@ -1,5 +1,5 @@
 /**
- * AI service — OpenAI API integration.
+ * AI service - OpenAI API integration.
  * Uses raw fetch against the /v1/chat/completions endpoint.
  * Reference: https://platform.openai.com/docs/api-reference/chat/create
  */
@@ -135,7 +135,7 @@ export async function chatCompletion(
     try {
       res = await doRequest();
     } catch (err) {
-      // Network error — retriable
+      // Network error - retriable
       cbRecord();
       if (attempt < MAX_ATTEMPTS - 1) {
         const delay = BACKOFF_SECS[attempt] ?? 4;

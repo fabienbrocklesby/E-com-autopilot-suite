@@ -1,12 +1,20 @@
 <!--
-  ManualActionBanner — rendered on /threads/[id] when a playbook run is waiting_for_human.
+  ManualActionBanner - rendered on /threads/[id] when a playbook run is waiting_for_human.
   Props:
-    run        — a PlaybookRun in waiting_for_human status (from playbooksApi.listRuns)
-    onComplete — called after approve or reject so the parent can reload state
+    run        - a PlaybookRun in waiting_for_human status (from playbooksApi.listRuns)
+    onComplete - called after approve or reject so the parent can reload state
 -->
 <script lang="ts">
   import { playbooksApi } from "$lib/api";
   import type { PlaybookRun } from "$lib/api";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+  import { Bell } from '@lucide/svelte';
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
 
   let {
     run,
@@ -28,8 +36,8 @@
   let inputPrompt = $derived(run.step_input_prompt ?? "What did you do?");
 
   // $derived.by() is used here because we map over an array and need the full
-  // context bag — a plain $derived expression would be harder to read.
-  // Ref: Svelte 5 docs — "derived" / "Using $derived.by"
+  // context bag - a plain $derived expression would be harder to read.
+  // Ref: Svelte 5 docs - "derived" / "Using $derived.by"
   let referenceItems = $derived.by(() => {
     const keys = run.step_reference_context ?? [];
     return keys.map((key) => ({
@@ -77,9 +85,14 @@
   }
 </script>
 
-<div class="banner" role="alert" aria-live="polite">
+<div
+  class="banner"
+  role="alert"
+  aria-live="polite"
+  in:fly={{ y: prefersReducedMotion ? 0 : -8, duration: prefersReducedMotion ? 50 : 180, easing: cubicOut }}
+>
   <div class="banner-header">
-    <span class="banner-icon" aria-hidden="true">🔔</span>
+    <span class="banner-icon" aria-hidden="true"><Bell size={18} /></span>
     <h2 class="banner-title">Action required</h2>
   </div>
 
@@ -142,6 +155,7 @@
     margin-bottom: 1.5rem;
     border-radius: var(--radius, 8px);
     color: var(--color-text, #e2e8f0);
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0 0 0 / 0.3));
   }
 
   .banner-header {
@@ -216,11 +230,13 @@
     margin-bottom: 1rem;
     resize: vertical;
     box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   textarea:focus {
-    outline: 2px solid var(--color-primary, #6366f1);
-    outline-offset: -1px;
+    outline: none;
+    border-color: var(--color-primary, #6366f1);
+    box-shadow: 0 0 0 3px rgba(99 102 241 / 0.2);
   }
 
   textarea:disabled {
@@ -248,11 +264,15 @@
     cursor: pointer;
     font-weight: 600;
     font-size: 0.9rem;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s ease, transform 0.1s ease;
   }
 
   .btn-approve:hover:not(:disabled) {
     opacity: 0.88;
+  }
+
+  .btn-approve:not(:disabled):active {
+    transform: scale(0.97);
   }
 
   .btn-approve:disabled {
@@ -269,12 +289,16 @@
     cursor: pointer;
     font-weight: 500;
     font-size: 0.9rem;
-    transition: background 0.15s;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
   }
 
   .btn-skip:hover:not(:disabled) {
     background: var(--color-surface-2, #22263a);
     color: var(--color-text, #e2e8f0);
+  }
+
+  .btn-skip:not(:disabled):active {
+    transform: scale(0.97);
   }
 
   .btn-skip:disabled {

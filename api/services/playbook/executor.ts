@@ -1,5 +1,5 @@
 /**
- * Playbook executor — the dispatch loop that advances a run through its steps.
+ * Playbook executor - the dispatch loop that advances a run through its steps.
  */
 import { query, queryOne, execute, transaction } from "../../db/client.ts";
 import { getHandler } from "./registry.ts";
@@ -117,6 +117,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   );
   if (!tokenRow) throw new Error(`No OAuth token for workspace ${run.workspace_id}`);
 
+  // Load sender name from settings (used to sign replies)
+  const senderNameRow = await queryOne<{ value: string }>(
+    "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'sender_name'",
+    [run.workspace_id],
+  );
+  const senderName = senderNameRow?.value ?? null;
+
   // Build context
   const variables: Record<string, unknown> =
     typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
@@ -198,6 +205,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       email: tokenRow.email,
       gmailThreadId: thread.gmail_thread_id,
       subject: thread.subject,
+      senderName,
     };
 
     // Record step execution start
@@ -237,7 +245,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         return { runId, status, currentStepId, context: variables };
       }
 
-      // Non-retriable or exhausted retries — permanent failure
+      // Non-retriable or exhausted retries - permanent failure
       status = "failed";
       await execute(
         "UPDATE playbook_runs SET status = 'failed', current_step_id = $1, context = $2 WHERE id = $3",
@@ -273,7 +281,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         if (currentIndex < steps.length - 1) {
           currentStepId = steps[currentIndex + 1].id;
         } else {
-          // No more steps — complete
+          // No more steps - complete
           currentStepId = null;
           status = "complete";
         }
@@ -360,7 +368,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       await sendAlert(run.workspace_id, "run_escalated", { run_id: runId, thread_id: run.thread_id }).catch(() => {});
     }
   }
-  // retrying: don't change thread status — the run will resume automatically
+  // retrying: don't change thread status - the run will resume automatically
 
   logger.info("playbook.run_finished", { run_id: runId, status });
   return { runId, status, currentStepId, context: variables };
@@ -408,10 +416,10 @@ export async function resumeRun(runId: number): Promise<RunResult> {
     }
   } else if (run.status === "waiting_for_human") {
     // For manual_approval, the approve/reject endpoints set current_step_id directly.
-    // resumeRun should NOT be called for waiting_for_human runs — approval routing
+    // resumeRun should NOT be called for waiting_for_human runs - approval routing
     // is handled by POST /runs/:id/approve and /reject. If called anyway (e.g. by
     // mistake), log a warning and do nothing rather than advancing to the wrong step.
-    logger.warn("resumeRun called on waiting_for_human run — approval endpoints should handle this", {
+    logger.warn("resumeRun called on waiting_for_human run - approval endpoints should handle this", {
       run_id: runId,
       current_step_id: run.current_step_id,
     });

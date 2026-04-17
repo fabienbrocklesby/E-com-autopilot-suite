@@ -1,5 +1,5 @@
 /**
- * Dry-run executor — sandbox that simulates a playbook without side effects.
+ * Dry-run executor - sandbox that simulates a playbook without side effects.
  * Calls AI for extract steps, but does NOT send emails or write to sheets.
  */
 import { queryOne } from "../../db/client.ts";
@@ -142,7 +142,7 @@ export async function dryRunPlaybook(
         const askStep = step as AskCustomerStep;
         const message = askStep.message
           ? interpolate(typeof askStep.message === "string" ? askStep.message : "", context)
-          : `[AI would ask for: ${(askStep.required_context ?? []).join(", ")} — goal: ${askStep.goal ?? "gather info"}]`;
+          : `[AI would ask for: ${(askStep.required_context ?? []).join(", ")} - goal: ${askStep.goal ?? "gather info"}]`;
         trace.push({
           stepId: step.id,
           stepType: step.type,
@@ -178,7 +178,7 @@ export async function dryRunPlaybook(
         let message: string;
         if (sendStep.goal) {
           const refs = (sendStep.reference_context ?? []).map((k) => `${k}=${context[k] ?? "?"}`);
-          message = `[AI would draft reply — goal: "${sendStep.goal}"${refs.length > 0 ? `, referencing: ${refs.join(", ")}` : ""}]`;
+          message = `[AI would draft reply - goal: "${sendStep.goal}"${refs.length > 0 ? `, referencing: ${refs.join(", ")}` : ""}]`;
         } else if (typeof sendStep.message === "string") {
           message = interpolate(sendStep.message, context);
         } else if (sendStep.message && "ai_generate_using_category_voice" in (sendStep.message as object)) {

@@ -1,5 +1,5 @@
 /**
- * Branch handler — evaluates a condition against the context bag and routes
+ * Branch handler - evaluates a condition against the context bag and routes
  * to if_true or if_false step.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep, BranchStep } from "../types.ts";

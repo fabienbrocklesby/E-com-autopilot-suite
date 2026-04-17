@@ -43,7 +43,7 @@ app.use("*", loggerMiddleware);
 app.use("*", cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 
 // ─── Error handler ────────────────────────────────────────────────────────────
-// Must use app.onError — Hono v4 compose() catches route errors internally
+// Must use app.onError - Hono v4 compose() catches route errors internally
 // before they can reach a try/catch in middleware.
 app.onError((err, c) => {
   if (err instanceof AppError) {

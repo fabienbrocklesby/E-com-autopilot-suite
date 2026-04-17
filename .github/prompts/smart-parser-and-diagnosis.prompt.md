@@ -10,11 +10,11 @@ This prompt does three things in one session because they're tangled:
 
 1. **Diagnose** why run #5 failed even though find_sheet_row succeeded (the context bag shows row_number=2, but escalate_1 fired with reason "Could not find order in sheet")
 2. **Extract** the parser's system prompt from TypeScript into `docs/PLAYBOOK_DESIGN_GUIDE.md` so it's editable without code changes
-3. **Rewrite** the design guide to be sheet-aware and variable-agnostic — playbooks should adapt to what's in the actual sheet, not assume order_number exists
+3. **Rewrite** the design guide to be sheet-aware and variable-agnostic - playbooks should adapt to what's in the actual sheet, not assume order_number exists
 
 ## Required reading
 
-1. `.github/MCP_DOCTRINE.md` — MCP rules, non-negotiable
+1. `.github/MCP_DOCTRINE.md` - MCP rules, non-negotiable
 2. `.github/copilot-instructions.md`
 3. `docs/PLAYBOOK_ENGINE.md`
 4. `skills/ai-driven-step/SKILL.md`
@@ -37,7 +37,7 @@ ORDER BY created_at;
 Report back the full trace. Pay special attention to:
 - What did `approval_1` output say? (Did someone reject? Did it timeout? Did it pause normally?)
 - What's the step_id of whatever ran between `approval_1` and `escalate_1`?
-- The 76-second gap between approval_1 (11:38:33) and escalate_1 (11:39:49) — what happened in that window?
+- The 76-second gap between approval_1 (11:38:33) and escalate_1 (11:39:49) - what happened in that window?
 
 ### Step 1.2: Check for concurrent runs on the thread
 
@@ -49,7 +49,7 @@ WHERE thread_id = (SELECT thread_id FROM playbook_runs WHERE id = 5)
 ORDER BY created_at;
 ```
 
-If there are multiple active runs, that's an architectural problem — a thread shouldn't have concurrent runs fighting each other.
+If there are multiple active runs, that's an architectural problem - a thread shouldn't have concurrent runs fighting each other.
 
 ### Step 1.3: Check for inbound messages during the run
 
@@ -90,23 +90,23 @@ The parser's system prompt is currently hardcoded in `api/services/playbook/pars
 filesystem: read api/services/playbook/parser.ts (full)
 ```
 
-Identify the system prompt template. Note the template variables (which values get interpolated in — workspace sheet columns, available step types, etc.).
+Identify the system prompt template. Note the template variables (which values get interpolated in - workspace sheet columns, available step types, etc.).
 
 ### Step 2.2: Create the design guide
 
 Create `docs/PLAYBOOK_DESIGN_GUIDE.md`. This file has TWO audiences:
 
-1. The runtime parser AI (GPT-4o) — loaded into system prompt every generation
-2. Humans (Fabien, future developers) — reviewing and editing how playbooks should be designed
+1. The runtime parser AI (GPT-4o) - loaded into system prompt every generation
+2. Humans (Fabien, future developers) - reviewing and editing how playbooks should be designed
 
 Structure:
 
 ```markdown
 # Playbook Design Guide
 
-This document is the canonical reference for how playbooks should be structured. 
-It is loaded into the parser AI's system prompt at runtime. Edit this file to 
-change how the AI designs playbooks — no code changes required.
+This document is the canonical reference for how playbooks should be structured.
+It is loaded into the parser AI's system prompt at runtime. Edit this file to
+change how the AI designs playbooks - no code changes required.
 
 ## What a playbook is
 
@@ -114,14 +114,14 @@ change how the AI designs playbooks — no code changes required.
 
 ## Available step types
 
-[Full reference for each: extract, find_sheet_row, update_sheet, 
+[Full reference for each: extract, find_sheet_row, update_sheet,
 ask_customer, evaluate, branch, manual_approval, send_reply, complete, escalate]
 
 [For each: when to use, config schema, examples of good vs bad usage]
 
 ## Workspace context (injected at runtime)
 
-[Placeholder section. The parser injects the actual sheet columns and any 
+[Placeholder section. The parser injects the actual sheet columns and any
 workspace-specific variables here before sending to the AI.]
 
 ## Design principles
@@ -147,13 +147,13 @@ Instead of inlining the system prompt, read the file at runtime:
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// Per Deno docs (context7, fetched this session): for static files loaded 
-// at module init, we can use await at module level. For files that might 
+// Per Deno docs (context7, fetched this session): for static files loaded
+// at module init, we can use await at module level. For files that might
 // change, load on each call.
 const DESIGN_GUIDE_PATH = join(Deno.cwd(), "docs", "PLAYBOOK_DESIGN_GUIDE.md");
 
 /**
- * Load the playbook design guide from disk. Cached in memory but reloadable 
+ * Load the playbook design guide from disk. Cached in memory but reloadable
  * in development. In production, deploy triggers a restart which re-reads it.
  */
 let cachedGuide: string | null = null;
@@ -176,7 +176,7 @@ export async function parsePlaybook(input: {
   workspaceId: number;
 }): Promise<ParseResult> {
   const guide = await loadDesignGuide();
-  
+
   // Inject workspace-specific context into the guide
   const workspaceContext = await buildWorkspaceContext(input.workspaceId);
   const systemPrompt = guide.replace(
@@ -197,7 +197,7 @@ export async function parsePlaybook(input: {
 
 async function buildWorkspaceContext(workspaceId: number): Promise<string> {
   const columns = await query<SheetColumn>(
-    `SELECT column_letter, header_name FROM sheet_columns 
+    `SELECT column_letter, header_name FROM sheet_columns
      WHERE workspace_id = $1 ORDER BY column_letter`,
     [workspaceId]
   );
@@ -211,7 +211,7 @@ async function buildWorkspaceContext(workspaceId: number): Promise<string> {
 ${columnList}
 
 The playbook you generate MUST only reference columns that exist in this list.
-Match logic should only use context variables that can be extracted from 
+Match logic should only use context variables that can be extracted from
 typical customer emails AND have a corresponding column in this sheet.`;
 }
 ```
@@ -240,7 +240,7 @@ Write `docs/PLAYBOOK_DESIGN_GUIDE.md` with these principles:
 
 Playbooks only reference columns that exist in the workspace's sheet. The runtime workspace context section lists them. Never generate steps that reference columns not in that list.
 
-Extraction variables should map to sheet columns. If the sheet has a "Name" column but no "Email" column, extract customer_name but don't bother extracting customer_email — we can't match on it anyway.
+Extraction variables should map to sheet columns. If the sheet has a "Name" column but no "Email" column, extract customer_name but don't bother extracting customer_email - we can't match on it anyway.
 
 **Principle 2: Match with whatever the customer actually provides.**
 
@@ -288,11 +288,11 @@ For `extract`:
 For `find_sheet_row`:
 - List the actual available columns in the workspace context (injected at runtime)
 - Match attempts should span all columns that might identify the customer, not just one
-- The `match_strategy` defaults to "aggressive" — use it
+- The `match_strategy` defaults to "aggressive" - use it
 
 For `evaluate`:
 - Use when the decision is "do we have enough to proceed" with AI judgment
-- The required_context should be the MINIMUM needed — usually just `row_number` for any sheet-aware playbook
+- The required_context should be the MINIMUM needed - usually just `row_number` for any sheet-aware playbook
 - Routing: `if_satisfied_goto` (happy path), `if_missing_goto` (usually ask_customer, back of playbook), `if_escalate_goto` (escalate step)
 
 For `ask_customer`:
@@ -343,7 +343,7 @@ Concrete wrong/right pairs:
 WRONG: Extracting order_number when the sheet has no order number column
 RIGHT: Extract only variables that map to sheet columns or later-used config
 
-WRONG: Gating find_sheet_row on "do we have order_number"  
+WRONG: Gating find_sheet_row on "do we have order_number"
 RIGHT: Always run find_sheet_row with all available signals, let it do the matching
 
 WRONG: ask_customer before find_sheet_row ("let me know your order number first")
@@ -363,7 +363,7 @@ After all three parts above are done:
 1. Go to the playbook editor in the UI
 2. Paste this description for the Refund playbook:
 
-> When someone asks for a refund, find them in the sheet using whatever we know about them — their name, email if we have it, what they bought. Don't require an order number. Once we find the row, update the Status to "Refund Requested" and store their reason. Pause for me to process the refund in Stripe and enter the transaction details. After I approve, update Status to "Refunded" with my notes. Send them a casual NZ-friendly reply confirming the refund and mentioning the amount.
+> When someone asks for a refund, find them in the sheet using whatever we know about them - their name, email if we have it, what they bought. Don't require an order number. Once we find the row, update the Status to "Refund Requested" and store their reason. Pause for me to process the refund in Stripe and enter the transaction details. After I approve, update Status to "Refunded" with my notes. Send them a casual NZ-friendly reply confirming the refund and mentioning the amount.
 
 3. Click "Generate Steps"
 4. Verify the output:

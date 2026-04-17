@@ -235,6 +235,20 @@
 		border-radius: var(--radius-lg);
 		padding: 20px;
 		box-shadow: var(--shadow-sm);
+		transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+	}
+
+	/* Cards that act as clickable items get a subtle hover lift */
+	:global(.card:hover) {
+		transform: translateY(-1px);
+		box-shadow: var(--shadow-md);
+	}
+	/* Opt out of hover lift for static containers (modals, forms, etc.) */
+	:global(.modal .card:hover),
+	:global(.card.no-hover:hover),
+	:global(.editor-layout .card:hover) {
+		transform: none;
+		box-shadow: var(--shadow-sm);
 	}
 
 	:global(.error-banner) {
@@ -244,6 +258,28 @@
 		color: #fca5a5;
 		padding: 12px 16px;
 		margin-bottom: 16px;
+		animation: banner-enter 0.2s ease;
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Modal transitions (CSS-driven for cross-browser)                    */
+	/* ------------------------------------------------------------------ */
+	:global(.modal-overlay) {
+		animation: overlay-fade-in 0.15s ease;
+	}
+	:global(.modal-overlay > .modal),
+	:global(.modal-overlay > .card) {
+		animation: modal-slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+	}
+
+	/* ------------------------------------------------------------------ */
+	/* Success / info banner entry                                         */
+	/* ------------------------------------------------------------------ */
+	:global(.success-banner) {
+		animation: banner-enter 0.2s ease;
+	}
+	:global(.info-banner) {
+		animation: banner-enter 0.2s ease;
 	}
 
 	.app {
@@ -324,7 +360,8 @@
 		border-radius: var(--radius);
 		color: var(--color-text-muted);
 		font-weight: 500;
-		transition: color 0.15s, background 0.15s;
+		transition: color 0.15s, background 0.15s, border-color 0.15s, padding-left 0.15s;
+		border-left: 3px solid transparent;
 	}
 
 	.nav-icon {
@@ -342,6 +379,7 @@
 	.nav-link.active {
 		background: rgba(99 102 241 / 0.15);
 		color: var(--color-primary);
+		border-left-color: var(--color-primary);
 	}
 
 	.sidebar-footer {
@@ -395,46 +433,60 @@
 	}
 
 	/* ------------------------------------------------------------------ */
-	/* Keyframes                                                             */
+	/* Keyframes (global - not scoped so they work across components)      */
 	/* ------------------------------------------------------------------ */
-	@keyframes shimmer {
-		from { background-position: -200% 0; }
-		to   { background-position:  200% 0; }
-	}
+	:global {
+		@keyframes shimmer {
+			from { background-position: -200% 0; }
+			to   { background-position:  200% 0; }
+		}
 
-	@keyframes flash-success {
-		0%   { box-shadow: 0 0 0 0   rgba(16 185 129 / 0.6); }
-		40%  { box-shadow: 0 0 0 4px rgba(16 185 129 / 0.35); }
-		100% { box-shadow: 0 0 0 0   rgba(16 185 129 / 0); }
-	}
+		@keyframes flash-success {
+			0%   { box-shadow: 0 0 0 0   rgba(16 185 129 / 0.6); }
+			40%  { box-shadow: 0 0 0 4px rgba(16 185 129 / 0.35); }
+			100% { box-shadow: 0 0 0 0   rgba(16 185 129 / 0); }
+		}
 
-	@keyframes pulse-error {
-		0%   { border-color: var(--color-danger); box-shadow: 0 0 0 0   rgba(239 68 68 / 0.5); }
-		40%  { box-shadow: 0 0 0 4px rgba(239 68 68 / 0.3); }
-		100% { border-color: var(--color-border); box-shadow: none; }
+		@keyframes pulse-error {
+			0%   { border-color: var(--color-danger); box-shadow: 0 0 0 0   rgba(239 68 68 / 0.5); }
+			40%  { box-shadow: 0 0 0 4px rgba(239 68 68 / 0.3); }
+			100% { border-color: var(--color-border); box-shadow: none; }
+		}
+
+		@keyframes vt-out {
+			to { opacity: 0; transform: translateY(4px); }
+		}
+
+		@keyframes vt-in {
+			from { opacity: 0; transform: translateY(-4px); }
+		}
+
+		@keyframes overlay-fade-in {
+			from { opacity: 0; }
+		}
+
+		@keyframes modal-slide-in {
+			from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+		}
+
+		@keyframes banner-enter {
+			from { opacity: 0; transform: translateY(-6px); }
+		}
 	}
 
 	/* ------------------------------------------------------------------ */
 	/* View Transitions (Chrome/Edge/Safari 18+, graceful fallback)        */
-	/* Default cross-fade kept intentionally short — this should feel      */
-	/* like a refresh, not a cinematic transition.                          */
+	/* Short cross-fade: feels like a refresh, not a cinematic transition. */
 	/* ------------------------------------------------------------------ */
 	:global(::view-transition-old(root)) {
-		animation: vt-out 90ms ease;
+		animation: vt-out 120ms ease;
 	}
 	:global(::view-transition-new(root)) {
-		animation: vt-in 90ms ease;
-	}
-
-	@keyframes vt-out {
-		to { opacity: 0; }
-	}
-	@keyframes vt-in {
-		from { opacity: 0; }
+		animation: vt-in 120ms ease;
 	}
 
 	/* ------------------------------------------------------------------ */
-	/* Reduced motion — override ALL animations and transitions             */
+	/* Reduced motion - override ALL animations and transitions             */
 	/* Svelte JS-transition y values are nullified by setting duration      */
 	/* very low; opacity-only is still allowed (mild fade only).           */
 	/* ------------------------------------------------------------------ */

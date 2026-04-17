@@ -10,7 +10,7 @@ import { getCircuitBreakerState, resetCircuitBreaker } from "../services/ai.ts";
 export const systemRouter = new Hono();
 systemRouter.use("*", authMiddleware);
 
-// GET /system/stats — live dashboard data
+// GET /system/stats - live dashboard data
 systemRouter.get("/stats", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
 
@@ -110,7 +110,7 @@ systemRouter.get("/stats", async (c) => {
       unresolved_count: failedIngestions.length,
       recent: failedIngestions,
     },
-    // NUMERIC columns come back as strings from the postgres driver — parse explicitly
+    // NUMERIC columns come back as strings from the postgres driver - parse explicitly
     rate_limit_buckets: rateLimitBuckets.map((b) => ({
       ...b,
       tokens: parseFloat(String(b.tokens)),
@@ -120,7 +120,7 @@ systemRouter.get("/stats", async (c) => {
   });
 });
 
-// GET /system/failed-ingestions — paginated list
+// GET /system/failed-ingestions - paginated list
 systemRouter.get("/failed-ingestions", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   const showResolved = c.req.query("resolved") === "true";
@@ -147,7 +147,7 @@ systemRouter.get("/failed-ingestions", async (c) => {
   return c.json({ ingestions: rows });
 });
 
-// POST /system/failed-ingestions/:id/retry — manual retry
+// POST /system/failed-ingestions/:id/retry - manual retry
 systemRouter.post("/failed-ingestions/:id/retry", async (c) => {
   const id = parseInt(c.req.param("id"));
   const { retryIngest } = await import("../services/gmail.ts");
@@ -179,7 +179,7 @@ systemRouter.get("/circuit-breaker", (c) => {
   return c.json(getCircuitBreakerState());
 });
 
-// POST /system/circuit-breaker/reset — manual reset
+// POST /system/circuit-breaker/reset - manual reset
 systemRouter.post("/circuit-breaker/reset", (c) => {
   resetCircuitBreaker();
   return c.json({ ok: true, state: getCircuitBreakerState() });

@@ -61,11 +61,11 @@ async function renewExpiringWatches(): Promise<void> {
         const expiryMs = parseInt(row.value, 10); // Gmail returns ms-since-epoch string
         const msRemaining = expiryMs - Date.now();
         if (msRemaining > WATCH_RENEW_THRESHOLD_MS) {
-          // Watch is healthy — skip
+          // Watch is healthy - skip
           continue;
         }
       }
-      // No expiry recorded or expiry is within the threshold — renew.
+      // No expiry recorded or expiry is within the threshold - renew.
       console.log(`[watch] Renewing Gmail watch for ${token.email}`);
       await setupGmailWatch(token.email);
     } catch (err) {

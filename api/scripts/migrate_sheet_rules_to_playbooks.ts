@@ -2,10 +2,10 @@
  * Sheet rules → playbook migration script.
  *
  * For each active sheet_rules row, generates a playbook with:
- *   1. extract — pull the match value from the email
- *   2. find_sheet_row — locate the row in the sheet
- *   3. branch — if row found → update_sheet, else → ask_customer or escalate
- *   4. update_sheet — write the configured columns
+ *   1. extract - pull the match value from the email
+ *   2. find_sheet_row - locate the row in the sheet
+ *   3. branch - if row found → update_sheet, else → ask_customer or escalate
+ *   4. update_sheet - write the configured columns
  *   5. complete
  *
  * After creating the playbook:
@@ -25,7 +25,7 @@ const WORKSPACE_ID = 1;
 const DRY_RUN = Deno.args.includes("--dry-run");
 
 if (DRY_RUN) {
-  console.log("[migrate] DRY RUN — no writes will be made\n");
+  console.log("[migrate] DRY RUN - no writes will be made\n");
 }
 
 async function migrate() {
@@ -145,7 +145,7 @@ async function migrate() {
       [WORKSPACE_ID, primaryCategoryId, playbookName, description, JSON.stringify(steps)],
     );
 
-    console.log(`  → Created playbook #${playbook!.id} "${playbookName}" (inactive — review and activate manually)`);
+    console.log(`  → Created playbook #${playbook!.id} "${playbookName}" (inactive - review and activate manually)`);
 
     await execute(
       "UPDATE sheet_rules SET is_active = false WHERE id = $1",

@@ -77,12 +77,12 @@ Be direct. Skip preamble. State what you're doing, do it, report what happened. 
 
 ## Important files
 
-- `docs/PLAYBOOK_ENGINE.md` — architecture spec
-- `docs/PLAYBOOK_DESIGN_GUIDE.md` — parser AI instructions (loaded at runtime)
-- `docs/TASK_LOG.md` — living progress doc, update after every meaningful change
-- `api/services/playbook/executor.ts` — the step dispatch loop
-- `api/services/playbook/parser.ts` — loads design guide, calls GPT-4o to generate playbooks
-- `api/services/playbook/handlers/` — one file per step type
-- `api/services/ai.ts` — OpenAI wrapper
-- `api/services/gmail.ts` — Gmail integration + ingest flow
-- `api/services/sheets.ts` — Google Sheets integration
+- `docs/PLAYBOOK_ENGINE.md` - architecture spec
+- `docs/PLAYBOOK_DESIGN_GUIDE.md` - parser AI instructions (loaded at runtime)
+- `docs/TASK_LOG.md` - living progress doc, update after every meaningful change
+- `api/services/playbook/executor.ts` - the step dispatch loop
+- `api/services/playbook/parser.ts` - loads design guide, calls GPT-4o to generate playbooks
+- `api/services/playbook/handlers/` - one file per step type
+- `api/services/ai.ts` - OpenAI wrapper
+- `api/services/gmail.ts` - Gmail integration + ingest flow
+- `api/services/sheets.ts` - Google Sheets integration

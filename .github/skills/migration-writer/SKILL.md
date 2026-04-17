@@ -29,13 +29,13 @@ COMMIT;
 
 ## Conventions (non-negotiable)
 
-1. **Wrap in `BEGIN; ... COMMIT;`** — partial failures don't leave broken state
+1. **Wrap in `BEGIN; ... COMMIT;`** - partial failures don't leave broken state
 2. **Use `IF NOT EXISTS`** on CREATE TABLE, CREATE INDEX
-3. **Foreign keys: explicit `ON DELETE`** — never default
+3. **Foreign keys: explicit `ON DELETE`** - never default
 4. **Workspace scoping**: every workspace-owned table has `workspace_id INT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE`
 5. **Timestamps**: `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` and `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
 6. **Updated_at trigger**: `CREATE TRIGGER trg_<table>_updated_at BEFORE UPDATE ON <table> FOR EACH ROW EXECUTE FUNCTION set_updated_at();`
-7. **Enums**: `TEXT CHECK (col IN ('a', 'b'))` — never Postgres ENUM
+7. **Enums**: `TEXT CHECK (col IN ('a', 'b'))` - never Postgres ENUM
 8. **JSONB over JSON**, always
 9. **Index FKs** unless table is tiny
 
@@ -138,7 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_table_config_status ON table((config->>'status'))
    \d table_name
    SELECT * FROM schema_migrations WHERE filename = '0NN_...';
    ```
-3. **Test rollback** if the migration is risky — `BEGIN; <migration>; ROLLBACK;` to verify it doesn't leave artifacts
+3. **Test rollback** if the migration is risky - `BEGIN; <migration>; ROLLBACK;` to verify it doesn't leave artifacts
 4. **Document** in `docs/TASK_LOG.md`
 5. **Commit message**: `db: <description from migration filename>`
 

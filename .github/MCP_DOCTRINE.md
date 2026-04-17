@@ -5,11 +5,11 @@ This document defines how every prompt in this project uses the available MCP se
 ## The 5 MCP servers and their roles
 
 You have access to:
-- **postgres** — query the live dev database for schema, data, and validation
-- **filesystem** — read and edit files in the repo with full directory awareness  
-- **context7** — fetch real, current documentation for any library or framework before using it
-- **svelte** — official Svelte/SvelteKit MCP for runes, kit features, and best practices
-- **playwright** — drive a real browser to verify UI changes end to end
+- **postgres** - query the live dev database for schema, data, and validation
+- **filesystem** - read and edit files in the repo with full directory awareness
+- **context7** - fetch real, current documentation for any library or framework before using it
+- **svelte** - official Svelte/SvelteKit MCP for runes, kit features, and best practices
+- **playwright** - drive a real browser to verify UI changes end to end
 
 You use ALL of them in every non-trivial task. Not as decoration. Each one has a specific job.
 
@@ -33,7 +33,7 @@ You DO NOT write code based on memory. You fetch the docs first, you read them, 
 
 When you fetch docs, cite the specific section in your output. Example:
 
-> Per Hono context docs (context7, fetched this session), `c.req.json()` 
+> Per Hono context docs (context7, fetched this session), `c.req.json()`
 > returns Promise<unknown> and we need to validate before use.
 
 ### Rule 2: svelte MCP for any frontend work
@@ -96,7 +96,7 @@ Every implementation task follows this pattern:
    - Reference docs you fetched (don't write from memory)
    - Match existing code patterns from repo
 
-4. VERIFY  
+4. VERIFY
    - postgres: query DB to confirm data side effects
    - playwright: drive UI to confirm visual/interactive behaviour
    - Run any existing tests, lint, type check via terminal

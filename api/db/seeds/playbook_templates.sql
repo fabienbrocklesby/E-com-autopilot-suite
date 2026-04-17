@@ -24,7 +24,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
    {"id":"complete_denied","type":"complete"},
    {"id":"escalate_not_found","type":"escalate","reason":"Order not found in sheet"}
  ]'::jsonb,
- 'Hey! Your refund is sorted — you''ll see it back on your card in 3-5 business days.',
+ 'Hey! Your refund is sorted - you''ll see it back on your card in 3-5 business days.',
  ARRAY['Order Number', 'Total', 'Refund Status', 'Refund Reason']),
 
 ('ecom-tracking', 'Where Is My Order', 'tracking', 'ecommerce',
@@ -74,7 +74,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
    {"id":"ask_details","type":"ask_customer","goal":"Ask the customer for their order number and a description (or photo) of the damage.","on_reply_goto":"extract_1"},
    {"id":"find_order","type":"find_sheet_row","match_attempts":[{"column":"Order Number","value_var":"order_number"}],"store_to":"order_row"},
    {"id":"branch_found","type":"branch","condition":"context.order_row != null","if_true":"manual_review","if_false":"escalate_not_found"},
-   {"id":"manual_review","type":"manual_approval","reason":"Damaged item reported — review needed for refund or replacement","draft_template":"damaged_item","on_approve":"reply_resolved","on_reject":"reply_denied"},
+   {"id":"manual_review","type":"manual_approval","reason":"Damaged item reported - review needed for refund or replacement","draft_template":"damaged_item","on_approve":"reply_resolved","on_reject":"reply_denied"},
    {"id":"reply_resolved","type":"send_reply","goal":"Let the customer know we''re sorting out a replacement or refund for their damaged item."},
    {"id":"complete_1","type":"complete"},
    {"id":"reply_denied","type":"send_reply","goal":"Apologise but explain the damage claim couldn''t be verified. Suggest they reach out again with more details."},
@@ -178,7 +178,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
  'When a customer sends feedback about their experience, acknowledge it warmly and let them know we appreciate it. Send to manual review so the team can see it.',
  '[
    {"id":"extract_1","type":"extract","variables":["feedback_type","feedback_summary"]},
-   {"id":"manual_review","type":"manual_approval","reason":"Customer feedback received — review and respond","draft_template":"feedback_response","on_approve":"reply_thanks","on_reject":"reply_thanks"},
+   {"id":"manual_review","type":"manual_approval","reason":"Customer feedback received - review and respond","draft_template":"feedback_response","on_approve":"reply_thanks","on_reject":"reply_thanks"},
    {"id":"reply_thanks","type":"send_reply","goal":"Thank the customer sincerely for their feedback. If it was positive, express genuine appreciation. If constructive, acknowledge it and let them know we take it on board."},
    {"id":"complete_1","type":"complete"}
  ]'::jsonb,
@@ -187,7 +187,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
 
 ('cs-complaint', 'Complaint Handling', 'complaint', 'ecommerce',
  'Routes complaints to manual review with full context for human resolution.',
- 'When a customer complains, extract the key details of what went wrong. Always escalate complaints to manual review — the AI drafts a response acknowledging the issue, but a human approves before sending.',
+ 'When a customer complains, extract the key details of what went wrong. Always escalate complaints to manual review - the AI drafts a response acknowledging the issue, but a human approves before sending.',
  '[
    {"id":"extract_1","type":"extract","variables":["complaint_topic","order_number"]},
    {"id":"branch_has_order","type":"branch","condition":"context.order_number != null","if_true":"find_order","if_false":"manual_review"},
@@ -201,7 +201,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
 
 ('cs-compliment', 'Compliment / Positive Review', 'compliment', 'ecommerce',
  'Warmly acknowledges positive messages and auto-replies.',
- 'When a customer says something nice, thank them warmly. These can be auto-sent — no manual review needed.',
+ 'When a customer says something nice, thank them warmly. These can be auto-sent - no manual review needed.',
  '[
    {"id":"extract_1","type":"extract","variables":["compliment_topic"]},
    {"id":"send_thanks","type":"send_reply","goal":"Thank the customer genuinely for their kind words. Be warm and personal, not corporate."},
@@ -229,7 +229,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
  'When someone enquires about wholesale, partnerships, or bulk orders, extract their business details and what they''re interested in. Send to manual review.',
  '[
    {"id":"extract_1","type":"extract","variables":["business_name","contact_name","enquiry_type","volume_interest"]},
-   {"id":"manual_review","type":"manual_approval","reason":"B2B enquiry — needs team review","draft_template":"b2b_response","on_approve":"send_reply_1","on_reject":"send_reply_1"},
+   {"id":"manual_review","type":"manual_approval","reason":"B2B enquiry - needs team review","draft_template":"b2b_response","on_approve":"send_reply_1","on_reject":"send_reply_1"},
    {"id":"send_reply_1","type":"send_reply","goal":"Thank them for their interest in working with us. Let them know someone from the team will be in touch shortly with more details."},
    {"id":"complete_1","type":"complete"}
  ]'::jsonb,
@@ -241,7 +241,7 @@ INSERT INTO playbook_templates (slug, name, category, industry, description, pla
  'When a journalist or media outlet reaches out, extract their name, outlet, and what they''re asking about. Always send to manual review.',
  '[
    {"id":"extract_1","type":"extract","variables":["journalist_name","media_outlet","topic"]},
-   {"id":"manual_review","type":"manual_approval","reason":"Press enquiry — needs founder or marketing review","draft_template":"press_response","on_approve":"send_reply_1","on_reject":"send_reply_1"},
+   {"id":"manual_review","type":"manual_approval","reason":"Press enquiry - needs founder or marketing review","draft_template":"press_response","on_approve":"send_reply_1","on_reject":"send_reply_1"},
    {"id":"send_reply_1","type":"send_reply","goal":"Thank them for reaching out. Let them know the right person will get back to them shortly."},
    {"id":"complete_1","type":"complete"}
  ]'::jsonb,

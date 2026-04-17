@@ -1,5 +1,5 @@
 /**
- * Playbooks route — /playbooks
+ * Playbooks route - /playbooks
  * CRUD, parser, dry-run, run management, and manual approval.
  */
 import { Hono } from "hono";
@@ -165,7 +165,7 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    // no body — that's fine
+    // no body - that's fine
   }
 
   if (body.input !== undefined && body.input !== null) {

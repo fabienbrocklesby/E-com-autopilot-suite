@@ -10,11 +10,11 @@ The current loop detection (3 same-step fires, 50 total) was a useful safety net
 
 ## Required reading
 
-1. `.github/MCP_DOCTRINE.md` — MCP rules
-2. `.github/copilot-instructions.md` — project context
-3. `.github/instructions/backend.instructions.md` — Deno conventions
-4. `docs/PLAYBOOK_ENGINE.md` — engine architecture
-5. `docs/TASK_LOG.md` — recent state, especially the ask_customer fix
+1. `.github/MCP_DOCTRINE.md` - MCP rules
+2. `.github/copilot-instructions.md` - project context
+3. `.github/instructions/backend.instructions.md` - Deno conventions
+4. `docs/PLAYBOOK_ENGINE.md` - engine architecture
+5. `docs/TASK_LOG.md` - recent state, especially the ask_customer fix
 
 ## What you're building
 
@@ -22,7 +22,7 @@ Four detection mechanisms in the executor, plus better escalation reasons so the
 
 ## Pre-build MCP work
 
-### 1. filesystem — current state
+### 1. filesystem - current state
 
 ```
 filesystem: read api/services/playbook/executor.ts (full)
@@ -31,13 +31,13 @@ filesystem: list api/services/playbook/handlers/ (which handlers exist)
 filesystem: read api/services/playbook/handlers/extract.ts (so you understand context-update detection)
 ```
 
-Find the existing loop detection code. Note exactly where it sits in `advanceRun` — typically at the top of the function, before step execution.
+Find the existing loop detection code. Note exactly where it sits in `advanceRun` - typically at the top of the function, before step execution.
 
-### 2. postgres — historical loop data
+### 2. postgres - historical loop data
 
 ```sql
 -- Find runs that hit the existing loop detection
-SELECT id, thread_id, status, 
+SELECT id, thread_id, status,
        (SELECT COUNT(*) FROM playbook_step_executions WHERE run_id = playbook_runs.id) as exec_count
 FROM playbook_runs
 WHERE status = 'escalated'
@@ -54,7 +54,7 @@ ORDER BY created_at;
 
 Look for patterns. Do most loops repeat the same single step? Same pair? Same triple? This informs how aggressive the detection needs to be.
 
-### 3. context7 — relevant docs
+### 3. context7 - relevant docs
 
 Fetch:
 - Deno standard library docs for any time/duration utilities you might use
@@ -88,9 +88,9 @@ if (sameStepRecent.length >= 2) {
   return await escalateRun(runId, {
     code: "loop_per_step",
     message: `Step '${currentStepId}' fired ${sameStepRecent.length} times in the last 5 executions. Likely stuck.`,
-    detail: { 
-      step_id: currentStepId, 
-      recent_fires: sameStepRecent.map(e => e.created_at) 
+    detail: {
+      step_id: currentStepId,
+      recent_fires: sameStepRecent.map(e => e.created_at)
     },
   });
 }
@@ -155,8 +155,8 @@ Belt-and-braces. Even if all other detections fail, no run should exceed 30 step
 ```ts
 // Mechanism 4: total step cap
 const { rows: [{ count }] } = await query<{ count: string }>(
-  `SELECT COUNT(*)::text as count 
-   FROM playbook_step_executions 
+  `SELECT COUNT(*)::text as count
+   FROM playbook_step_executions
    WHERE run_id = $1`,
   [runId]
 );
@@ -176,10 +176,10 @@ Notice all 4 mechanisms call `escalateRun(runId, structuredReason)`. Refactor th
 
 ```ts
 export interface EscalationReason {
-  code: 
-    | "loop_per_step" 
-    | "loop_pair" 
-    | "no_progress" 
+  code:
+    | "loop_per_step"
+    | "loop_pair"
+    | "no_progress"
     | "max_executions"
     | "step_failed"
     | "ai_escalated"
@@ -189,33 +189,33 @@ export interface EscalationReason {
 }
 
 export async function escalateRun(
-  runId: number, 
+  runId: number,
   reason: EscalationReason
 ): Promise<void> {
   await transaction(async (tx) => {
     // Update the run status
     await tx.queryArray(
-      `UPDATE playbook_runs 
-       SET status = 'escalated', 
-           updated_at = NOW() 
+      `UPDATE playbook_runs
+       SET status = 'escalated',
+           updated_at = NOW()
        WHERE id = $1`,
       [runId]
     );
-    
+
     // Log a synthetic step execution so the UI can show why
     await tx.queryArray(
-      `INSERT INTO playbook_step_executions 
+      `INSERT INTO playbook_step_executions
          (run_id, step_id, step_type, status, output, created_at, completed_at)
-       VALUES 
+       VALUES
          ($1, '_escalation', '_escalation', 'failed', $2, NOW(), NOW())`,
       [runId, JSON.stringify(reason)]
     );
 
     // Optionally update the linked thread to in_review so it surfaces in the queue
     await tx.queryArray(
-      `UPDATE threads 
-       SET status = 'in_review', 
-           updated_at = NOW() 
+      `UPDATE threads
+       SET status = 'in_review',
+           updated_at = NOW()
        WHERE id = (SELECT thread_id FROM playbook_runs WHERE id = $1)`,
       [runId]
     );
@@ -227,7 +227,7 @@ The synthetic `_escalation` step in the execution log gives the UI a place to sh
 
 ## Order of detection in `advanceRun`
 
-Run the detections in order of cheapness. Cheap query first, expensive last. Per-step and pair-loop both use the same `recentExecutions` query so do them together. No-progress also uses it. Total step cap needs a separate count query — do that one last.
+Run the detections in order of cheapness. Cheap query first, expensive last. Per-step and pair-loop both use the same `recentExecutions` query so do them together. No-progress also uses it. Total step cap needs a separate count query - do that one last.
 
 ```ts
 async function advanceRun(runId: number): Promise<void> {
@@ -348,11 +348,11 @@ After an escalation, verify:
 - The linked thread status is `in_review` (so it shows in the review queue)
 
 ```sql
-SELECT r.id, r.status as run_status, t.status as thread_status, 
-       (SELECT jsonb_pretty(output) FROM playbook_step_executions 
+SELECT r.id, r.status as run_status, t.status as thread_status,
+       (SELECT jsonb_pretty(output) FROM playbook_step_executions
         WHERE run_id = r.id AND step_id = '_escalation') as escalation_reason
-FROM playbook_runs r 
-JOIN threads t ON t.id = r.thread_id 
+FROM playbook_runs r
+JOIN threads t ON t.id = r.thread_id
 WHERE r.id = <test_run_id>;
 ```
 

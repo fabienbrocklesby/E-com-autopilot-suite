@@ -1,5 +1,5 @@
 /**
- * Playbook Templates route — /playbook-templates
+ * Playbook Templates route - /playbook-templates
  * Browse templates and create playbooks from them.
  */
 import { Hono } from "hono";
@@ -27,7 +27,7 @@ export const playbookTemplatesRouter = new Hono();
 
 playbookTemplatesRouter.use("*", authMiddleware);
 
-// GET /playbook-templates — list all templates
+// GET /playbook-templates - list all templates
 playbookTemplatesRouter.get("/", async (c) => {
   const category = c.req.query("category");
   const industry = c.req.query("industry");
@@ -59,7 +59,7 @@ playbookTemplatesRouter.get("/", async (c) => {
   return c.json({ templates });
 });
 
-// GET /playbook-templates/:slug — single template detail
+// GET /playbook-templates/:slug - single template detail
 playbookTemplatesRouter.get("/:slug", async (c) => {
   const slug = c.req.param("slug");
 
@@ -72,7 +72,7 @@ playbookTemplatesRouter.get("/:slug", async (c) => {
   return c.json({ template });
 });
 
-// POST /playbooks/from-template — create a playbook from a template
+// POST /playbooks/from-template - create a playbook from a template
 // NOTE: This is registered on the playbooks router, but defined here for co-location.
 // The route is mounted at /playbook-templates/create-from in main.ts and the
 // actual /playbooks/from-template is added in the playbooks route file.

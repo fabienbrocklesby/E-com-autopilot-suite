@@ -1,5 +1,5 @@
 /**
- * Evaluate handler — AI-driven three-way routing.
+ * Evaluate handler - AI-driven three-way routing.
  *
  * Fast path: if all required vars are present (non-null, non-empty), advance
  * deterministically without any AI call. This avoids GPT-4o misinterpreting a
@@ -43,7 +43,7 @@ export const evaluateHandler: StepHandler = {
     // Show the AI the FULL context bag so it can spot info that the extract
     // step may have missed (e.g. the customer quoted their order number in a
     // free-text reply that wasn't formally extracted).
-    // No GOAL string — the AI's job is variable presence/validity, not intent.
+    // No GOAL string - the AI's job is variable presence/validity, not intent.
     const recentMessages = ctx.messages.slice(-3);
     const recentMessagesText = recentMessages
       .map((m) => `${m.direction === "inbound" ? "CUSTOMER" : "US"}: ${m.body_plain.trim()}`)
@@ -98,7 +98,7 @@ Output JSON only. No markdown, no explanation outside the JSON.`;
     try {
       parsed = JSON.parse(response);
     } catch {
-      // Unparseable AI response — default to missing so the run asks the customer
+      // Unparseable AI response - default to missing so the run asks the customer
       // rather than escalating or advancing with unknown state.
       console.warn(
         `[playbook] evaluate: AI response parse failed, defaulting to missing for run ${ctx.run.id}`,
@@ -123,7 +123,7 @@ Output JSON only. No markdown, no explanation outside the JSON.`;
 
     if (parsed.action === "escalate") {
       console.log(
-        `[playbook] evaluate: AI escalated — ${parsed.reason} for run ${ctx.run.id}`,
+        `[playbook] evaluate: AI escalated - ${parsed.reason} for run ${ctx.run.id}`,
       );
       return {
         decision: { action: "advance_to", stepId: evalStep.if_escalate_goto },

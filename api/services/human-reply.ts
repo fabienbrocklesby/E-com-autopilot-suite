@@ -73,7 +73,7 @@ export async function sendHumanReply(
     throw new AppError(422, "No inbound message to reply to on this thread");
   }
 
-  // ── 4. Send via Gmail (external call — happens before DB transaction) ───────
+  // ── 4. Send via Gmail (external call - happens before DB transaction) ───────
   // sendReply() also writes the outbound row to messages via ON CONFLICT DO NOTHING
   // when dbThreadId is provided, so we do not insert a second messages row.
   await sendReply(
@@ -123,7 +123,7 @@ export async function sendHumanReply(
     );
 
     // Inject _human_intervention into active run context using the JSONB || merge
-    // operator (keys in the right-hand object take precedence — confirmed PG 16 docs).
+    // operator (keys in the right-hand object take precedence - confirmed PG 16 docs).
     if (activeRun) {
       await tx.queryArray(
         `UPDATE playbook_runs
@@ -142,7 +142,7 @@ export async function sendHumanReply(
   });
 
   // ── 6. Run state transition ─────────────────────────────────────────────────
-  // Only act on waiting_for_customer — treated as a "reply received" event
+  // Only act on waiting_for_customer - treated as a "reply received" event
   // identical to a Gmail inbound webhook. resumeRun() reads on_reply_goto from
   // the current ask_customer step and advances.
   //
@@ -159,7 +159,7 @@ export async function sendHumanReply(
       finalRunStatus = result.status;
       logger.info("human_reply.run_resumed", { run_id: activeRun.id, new_status: result.status });
     } catch (err) {
-      // Gmail send and context injection already committed — don't unwind them.
+      // Gmail send and context injection already committed - don't unwind them.
       // Log and surface partial success to the caller.
       logger.error("human_reply.resume_run_failed", {
         run_id: activeRun.id,

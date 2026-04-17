@@ -1,5 +1,5 @@
 <!--
-  /sheet-updates — Review sheet rule executions
+  /sheet-updates - Review sheet rule executions
   Shows pending and historical rule execution records with approve/reject/retry actions.
 -->
 <script lang="ts">
@@ -110,7 +110,7 @@
 </script>
 
 <svelte:head>
-  <title>Sheet Updates — Email Dash</title>
+  <title>Sheet Updates - Email Dash</title>
 </svelte:head>
 
 <div class="page-header">

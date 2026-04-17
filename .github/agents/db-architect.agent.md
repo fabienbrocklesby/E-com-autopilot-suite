@@ -65,8 +65,8 @@ When proposing a schema change, output:
 **Tables affected**: list
 **New columns/tables**: list with types
 **Access patterns**:
-  - Query A: SELECT ... — uses index X
-  - Query B: UPDATE ... — single-row by PK
+  - Query A: SELECT ... - uses index X
+  - Query B: UPDATE ... - single-row by PK
 
 **Migration strategy**:
   - Existing data: how it's preserved

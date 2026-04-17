@@ -7,7 +7,7 @@ description: How to add a new Hono route to the Deno backend. Use when extending
 
 ## Where routes live
 
-`api/routes/<resource>.ts` — one file per resource (categories, threads, playbooks, etc.)
+`api/routes/<resource>.ts` - one file per resource (categories, threads, playbooks, etc.)
 
 ## Standard route file
 
@@ -43,7 +43,7 @@ app.get("/:id", async (c) => {
 // POST /examples
 app.post("/", async (c) => {
   const body = await c.req.json();
-  // Validate manually for now — no Zod yet
+  // Validate manually for now - no Zod yet
   if (!body.name || typeof body.name !== "string") {
     throw new AppError("name is required", 400);
   }
@@ -132,9 +132,9 @@ export const exampleService = {
 ## Conventions
 
 - **Workspace scoping is mandatory** on every query touching workspace data
-- **Throw `AppError(message, status)`** for known errors — the global handler catches it
+- **Throw `AppError(message, status)`** for known errors - the global handler catches it
 - **Don't catch errors in routes** unless you're recovering, let them bubble
-- **Don't put DB queries in routes** — always go through a service
+- **Don't put DB queries in routes** - always go through a service
 - **Return `c.json(data)` for success, `c.body(null, 204)` for no-content**
 - **POST returns 201 with the created resource**
 - **PATCH for partial updates, PUT for full replacement**
@@ -155,11 +155,11 @@ If you find yourself doing this a lot in one route, extract to a helper. If you 
 
 All routes use `authMiddleware` which checks the `Authorization: Bearer <API_SECRET>` header. There's no per-user auth yet.
 
-If you're building a webhook that receives external traffic (Gmail Pub/Sub, etc.), DO NOT use `authMiddleware` — those have their own validation. See `api/routes/webhooks.ts` for the pattern.
+If you're building a webhook that receives external traffic (Gmail Pub/Sub, etc.), DO NOT use `authMiddleware` - those have their own validation. See `api/routes/webhooks.ts` for the pattern.
 
 ## What not to do
 
-- Don't fetch external APIs from a route — that goes in a service
+- Don't fetch external APIs from a route - that goes in a service
 - Don't put OpenAI calls in a route
 - Don't write multi-statement DB operations without a transaction (in the service)
-- Don't return raw DB rows that include sensitive fields (oauth tokens, etc.) — strip them in the service
+- Don't return raw DB rows that include sensitive fields (oauth tokens, etc.) - strip them in the service

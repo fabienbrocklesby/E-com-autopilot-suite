@@ -1,5 +1,5 @@
 /**
- * Manual approval handler — pauses the run for human review.
+ * Manual approval handler - pauses the run for human review.
  * Includes capture_input config in output so the review UI can render it.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep, ManualApprovalStep } from "../types.ts";
@@ -7,7 +7,7 @@ import type { StepHandler, StepResult, RunContext, PlaybookStep, ManualApprovalS
 export const manualApprovalHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
     const approvalStep = step as ManualApprovalStep;
-    console.log(`[playbook] manual_approval: run ${ctx.run.id} — ${approvalStep.reason}`);
+    console.log(`[playbook] manual_approval: run ${ctx.run.id} - ${approvalStep.reason}`);
     return {
       decision: { action: "pause", status: "waiting_for_human" },
       output: {

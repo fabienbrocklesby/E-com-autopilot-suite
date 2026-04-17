@@ -1,5 +1,5 @@
 <!--
-  / — Inbox: unified thread dashboard with urgency grouping
+  / - Inbox: unified thread dashboard with urgency grouping
   Groups: Needs attention → In progress → Other
 -->
 <script lang="ts">
@@ -10,6 +10,7 @@
   import { threadsApi } from "$lib/api";
   import { threadsStore, workspaceStore } from "$lib/stores";
   import type { ThreadListItem } from "$lib/api";
+  import { Inbox, RefreshCw } from '@lucide/svelte';
 
   // Detect reduced-motion preference once at init so stagger can respect it.
   // Svelte transitions are JS-driven, so CSS media queries alone can't suppress them.
@@ -144,10 +145,10 @@
     return t.latest_run_status;
   }
 
-  function urgencyIcon(key: UrgencyGroup): string {
-    if (key === "attention") return "🔴";
-    if (key === "progress") return "🟡";
-    return "⚪";
+  function urgencyColor(key: UrgencyGroup): string {
+    if (key === "attention") return "var(--color-danger)";
+    if (key === "progress") return "var(--color-warning)";
+    return "var(--color-text-muted)";
   }
 
   onMount(() => {
@@ -157,7 +158,7 @@
 </script>
 
 <svelte:head>
-  <title>Inbox — Autopilot</title>
+  <title>Inbox - Autopilot</title>
 </svelte:head>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -166,7 +167,7 @@
   <h1>Inbox</h1>
   <div class="header-actions">
     <span class="thread-count">{threads.length} thread{threads.length !== 1 ? "s" : ""}</span>
-    <button class="btn btn-ghost" onclick={loadThreads}>↻ Refresh</button>
+    <button class="btn btn-ghost" onclick={loadThreads}><RefreshCw size={14} /> Refresh</button>
   </div>
 </div>
 
@@ -188,7 +189,7 @@
   </div>
 {:else if threads.length === 0}
   <div class="empty-state">
-    <div class="empty-icon">📭</div>
+    <div class="empty-icon"><Inbox size={40} strokeWidth={1.5} /></div>
     <p>No threads yet. Connect Gmail in Settings to start.</p>
   </div>
 {:else}
@@ -196,7 +197,7 @@
     {#if group.threads.length > 0}
       <section class="thread-group">
         <button class="group-header" onclick={() => toggleGroup(group.key)}>
-          <span class="group-indicator">{urgencyIcon(group.key)}</span>
+          <span class="group-indicator" style="background: {urgencyColor(group.key)}"></span>
           <span class="group-label">{group.label}</span>
           <span class="group-count">{group.threads.length}</span>
           <span class="group-chevron" class:collapsed={collapsedGroups[group.key]}>▾</span>
@@ -298,8 +299,8 @@
   }
 
   .empty-icon {
-    font-size: 40px;
     margin-bottom: 12px;
+    color: var(--color-text-muted);
   }
 
   .thread-group {
@@ -326,6 +327,13 @@
 
   .group-header:hover {
     background: var(--color-surface);
+  }
+
+  .group-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
 
   .group-count {
@@ -467,5 +475,53 @@
     font-size: 11px;
     color: var(--color-text-muted);
     white-space: nowrap;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Loading skeleton                                                     */
+  /* ------------------------------------------------------------------ */
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+
+  .skeleton-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .skeleton-row:last-child {
+    border-bottom: none;
+  }
+
+  .skeleton-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* .skeleton base is provided globally via +layout.svelte */
+  .skeleton-subject {
+    height: 14px;
+    width: 55%;
+  }
+  .skeleton-meta {
+    height: 11px;
+    width: 35%;
+    opacity: 0.6;
+  }
+  .skeleton-time {
+    height: 11px;
+    width: 48px;
+    flex-shrink: 0;
+    opacity: 0.5;
   }
 </style>

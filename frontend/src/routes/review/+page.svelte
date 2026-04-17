@@ -1,12 +1,22 @@
 <!--
-  /review — Manual reply queue
+  /review - Manual reply queue
   Shows threads needing human review with draft approval UI.
   Also surfaces playbook runs waiting for human approval (manual_approval steps).
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { threadsApi, playbooksApi } from "$lib/api";
   import type { ThreadListItem, ThreadDetail, Draft, PlaybookRun } from "$lib/api";
+  import { CheckCircle } from '@lucide/svelte';
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
+
+  let mounted = $state(false);
 
   let reviewThreads = $state<ThreadListItem[]>([]);
   let expandedThread = $state<ThreadDetail | null>(null);
@@ -95,7 +105,7 @@
     try {
       const input = captureInput ? runInputs[runId] : undefined;
       await playbooksApi.approveRun(runId, input);
-      successMessage = "Approved — playbook resumed.";
+      successMessage = "Approved - playbook resumed.";
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
     } catch (e) {
@@ -110,7 +120,7 @@
     error = null;
     try {
       await playbooksApi.rejectRun(runId);
-      successMessage = "Rejected — run escalated.";
+      successMessage = "Rejected - run escalated.";
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
     } catch (e) {
@@ -120,13 +130,14 @@
     }
   }
 
-  onMount(() => {
-    load();
+  onMount(async () => {
+    await load();
+    mounted = true;
   });
 </script>
 
 <svelte:head>
-  <title>Review Queue — Email Dash</title>
+  <title>Review Queue - Email Dash</title>
 </svelte:head>
 
 <div class="page-header">
@@ -135,11 +146,11 @@
 </div>
 
 {#if error}
-  <div class="error-banner">{error}</div>
+  <div class="error-banner" transition:fade={{ duration: 150 }}>{error}</div>
 {/if}
 
 {#if successMessage}
-  <div class="success-banner">{successMessage}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{successMessage}</div>
 {/if}
 
 {#if loading}
@@ -152,8 +163,11 @@
     {#each Object.entries(runsByReason) as [reason, runs]}
       <div class="reason-group">
         <div class="reason-label">{reason}</div>
-        {#each runs as run (run.id)}
-          <div class="approval-card card">
+        {#each runs as run, i (run.id)}
+          <div
+            class="approval-card card"
+            in:fly={{ y: prefersReducedMotion ? 0 : 6, duration: prefersReducedMotion ? 50 : 140, delay: mounted ? 0 : i * 30, easing: cubicOut }}
+          >
             <div class="approval-info">
               <span class="approval-playbook">{run.playbook_name ?? `Playbook #${run.playbook_id}`}</span>
               <span class="approval-meta">Run #{run.id} · <a href="/threads/{run.thread_id}" class="thread-link">Thread #{run.thread_id}</a></span>
@@ -199,7 +213,7 @@
 
 {#if reviewThreads.length === 0 && pendingRuns.length === 0}
   <div class="empty">
-    <div class="empty-icon">✓</div>
+    <div class="empty-icon"><CheckCircle size={40} strokeWidth={1.5} /></div>
     <p>No threads need review right now.</p>
   </div>
 {:else if reviewThreads.length === 0}
@@ -207,11 +221,12 @@
 {:else}
   <div class="review-layout">
     <div class="thread-list">
-      {#each reviewThreads as thread (thread.id)}
+      {#each reviewThreads as thread, i (thread.id)}
         <button
           class="thread-item"
           class:selected={expandedThread?.id === thread.id}
           onclick={() => openThread(thread.id)}
+          in:fly={{ y: prefersReducedMotion ? 0 : 6, duration: prefersReducedMotion ? 50 : 140, delay: mounted ? 0 : i * 25, easing: cubicOut }}
         >
           <div class="thread-subject">{thread.subject || "(no subject)"}</div>
           <div class="thread-meta">
@@ -284,7 +299,7 @@
                   ></textarea>
                   {#if editingBodies[draft.id] !== draft.body}
                     <p class="edit-notice">
-                      Body edited — changes will be sent on approval.
+                      Body edited - changes will be sent on approval.
                     </p>
                   {/if}
                   <div class="draft-actions">

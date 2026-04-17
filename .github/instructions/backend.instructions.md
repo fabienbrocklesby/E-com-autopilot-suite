@@ -6,14 +6,14 @@ applyTo: "api/**"
 
 ## Project layout
 
-- `main.ts` — entry, registers middleware and routes
-- `db/client.ts` — Postgres pool, `query`, `queryOne`, `execute`, `transaction`
-- `db/migrate.ts` — sequential migration runner
-- `db/migrations/*.sql` — append-only migrations
-- `middleware/` — Hono middleware (auth, logger). NOT business logic.
-- `routes/` — HTTP routes, thin. Validate input, call service, return JSON.
-- `services/` — business logic. AI calls, Gmail/Sheets integration, orchestration.
-- `types/index.ts` — shared types. Add new types here, don't duplicate inline.
+- `main.ts` - entry, registers middleware and routes
+- `db/client.ts` - Postgres pool, `query`, `queryOne`, `execute`, `transaction`
+- `db/migrate.ts` - sequential migration runner
+- `db/migrations/*.sql` - append-only migrations
+- `middleware/` - Hono middleware (auth, logger). NOT business logic.
+- `routes/` - HTTP routes, thin. Validate input, call service, return JSON.
+- `services/` - business logic. AI calls, Gmail/Sheets integration, orchestration.
+- `types/index.ts` - shared types. Add new types here, don't duplicate inline.
 
 ## Routing patterns
 

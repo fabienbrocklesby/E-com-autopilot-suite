@@ -32,7 +32,7 @@ export interface AskCustomerStep {
   required_context?: string[];
   voice_hint?: string;
   on_reply_goto: string;
-  /** Legacy literal message — used when goal is absent */
+  /** Legacy literal message - used when goal is absent */
   message?: string;
 }
 
@@ -79,7 +79,7 @@ export interface ManualApprovalStep {
 export interface SendReplyStep {
   id: string;
   type: "send_reply";
-  /** Literal message (legacy — if provided without goal, sent as-is) */
+  /** Literal message (legacy - if provided without goal, sent as-is) */
   message?: string | { from_template: string } | { ai_generate_using_category_voice: true };
   /** AI-drafted reply goal */
   goal?: string;
@@ -174,7 +174,7 @@ export interface RunContext {
   playbook: Playbook;
   threadId: number;
   workspaceId: number;
-  /** The full context bag — handlers read and write to this */
+  /** The full context bag - handlers read and write to this */
   variables: Record<string, unknown>;
   /** All messages on this thread, oldest first */
   messages: Array<{
@@ -191,6 +191,8 @@ export interface RunContext {
   gmailThreadId: string;
   /** The thread subject */
   subject: string;
+  /** Sender name from workspace settings - used to sign replies */
+  senderName: string | null;
 }
 
 export type StepDecision =

@@ -10,9 +10,9 @@ Goal: Eliminate the duplication and dead code that will make Phase 2 (the playbo
 
 ## Required reading
 
-- `docs/TASK_LOG.md` — confirm Phase 0 is done
-- `api/services/gmail.ts`, `api/services/sheets.ts`, `api/services/sheet-rules.ts` — token refresh duplication lives here
-- `api/services/ai.ts` — the OpenAI wrapper to consolidate around
+- `docs/TASK_LOG.md` - confirm Phase 0 is done
+- `api/services/gmail.ts`, `api/services/sheets.ts`, `api/services/sheet-rules.ts` - token refresh duplication lives here
+- `api/services/ai.ts` - the OpenAI wrapper to consolidate around
 
 ## Tasks
 
@@ -32,7 +32,7 @@ export async function getGoogleAccessToken(workspaceId: number): Promise<{ token
 
 Update all three files to import and use this. Delete the three local implementations.
 
-**Validation**: 
+**Validation**:
 - Use Postgres MCP to confirm oauth_tokens table is updated correctly after a refresh
 - Run a test: temporarily set an expiry to 30 seconds in the future, trigger any flow that uses Gmail or Sheets, verify the token gets refreshed exactly once
 
@@ -75,9 +75,9 @@ Fix:
 
 Delete from the codebase (verify with grep first that nothing imports them):
 
-- `api/middleware/error.ts` (the `errorMiddleware` export — unused)
+- `api/middleware/error.ts` (the `errorMiddleware` export - unused)
 - `api/services/sheets.ts` functions: `applyUpdates`, `readThreadsSheet`, `findRowByValue`, `sheetsAppend`
-- `sheet_updates` table — migration `009_drop_sheet_updates.sql`
+- `sheet_updates` table - migration `009_drop_sheet_updates.sql`
 
 If grep finds an import you didn't expect, investigate before deleting.
 

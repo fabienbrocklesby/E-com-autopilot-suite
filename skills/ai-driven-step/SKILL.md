@@ -98,37 +98,37 @@ Return JSON only. No preamble, no explanation outside the JSON.
 
 Every AI-driven step has a small set of actions. Common ones:
 
-### `ask` — send a message to the customer
+### `ask` - send a message to the customer
 ```json
 {"action": "ask", "message": "..."}
 ```
 Handler: send the message via Gmail, return `pause('waiting_for_customer', resumeStepId)`.
 
-### `skip` — we already have what we need
+### `skip` - we already have what we need
 ```json
 {"action": "skip", "extracted": {"var1": "value"}, "reasoning": "..."}
 ```
 Handler: merge `extracted` into context, advance to next step. Don't send anything.
 
-### `escalate` — this needs a human
+### `escalate` - this needs a human
 ```json
 {"action": "escalate", "reason": "..."}
 ```
 Handler: return `fail` with reason; executor handles escalation.
 
-### `draft` — produce a message for later use
+### `draft` - produce a message for later use
 ```json
 {"action": "draft", "message": "..."}
 ```
 Handler: store in context or execution output; don't send yet. Used by `send_reply` with optional human review.
 
-### `classify` — pick from a set
+### `classify` - pick from a set
 ```json
 {"action": "classify", "class": "refund_request", "confidence": 0.85, "reasoning": "..."}
 ```
 Handler: store result in context, advance based on class.
 
-### `route` — pick one of N paths (for evaluate)
+### `route` - pick one of N paths (for evaluate)
 ```json
 {"action": "route", "path": "satisfied" | "missing" | "escalate", "extracted": {...}, "reasoning": "..."}
 ```
@@ -142,7 +142,7 @@ Never trust the AI response blindly. Every handler must validate:
 const parsed = JSON.parse(aiResponse);
 
 if (!parsed.action || typeof parsed.action !== 'string') {
-  // Fallback to safe default — escalate
+  // Fallback to safe default - escalate
   return { decision: { kind: 'fail', error: 'AI response missing action' } };
 }
 
@@ -157,7 +157,7 @@ if (parsed.action === 'ask' && (!parsed.message || typeof parsed.message !== 'st
 // ... etc
 ```
 
-If validation fails, escalate rather than retrying — something's wrong with the prompt or the model is having a bad day.
+If validation fails, escalate rather than retrying - something's wrong with the prompt or the model is having a bad day.
 
 ## Observability
 
@@ -371,7 +371,7 @@ AI-driven = non-deterministic. Can't unit test with fixed assertions.
 
 Approach:
 1. **Unit test the deterministic parts** (validation, pre-checks, decision mapping)
-2. **Integration test with recorded AI responses** — mock `chatCompletion` to return fixed JSON, verify the handler maps it correctly
-3. **End-to-end test with real AI** — send real test emails, assert on behaviour at the run level (did the run complete? did it escalate? did it ask the right number of times?)
+2. **Integration test with recorded AI responses** - mock `chatCompletion` to return fixed JSON, verify the handler maps it correctly
+3. **End-to-end test with real AI** - send real test emails, assert on behaviour at the run level (did the run complete? did it escalate? did it ask the right number of times?)
 
 The Phase 7 testing harness is the proper tool for end-to-end. Use it.

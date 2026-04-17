@@ -1,11 +1,11 @@
 <!--
-  ManualReplyPanel — rendered on /threads/[id] to allow the operator to send
+  ManualReplyPanel - rendered on /threads/[id] to allow the operator to send
   a manual reply to the customer at any time, bypassing the playbook draft flow.
 
   Props:
-    threadId    — the DB thread id (integer)
-    workspaceId — defaults to 1 (current single-workspace setup)
-    onSent      — called after a successful send so the parent can reload state
+    threadId    - the DB thread id (integer)
+    workspaceId - defaults to 1 (current single-workspace setup)
+    onSent      - called after a successful send so the parent can reload state
 
   On submit:
     - Calls threadsApi.sendManualReply()
@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import { threadsApi } from "$lib/api";
+  import { PenLine } from '@lucide/svelte';
 
   let {
     threadId,
@@ -35,7 +36,7 @@
   let error = $state<string | null>(null);
   let successMsg = $state<string | null>(null);
 
-  // Character counter — Svelte 5 $derived reacts to replyBody automatically.
+  // Character counter - Svelte 5 $derived reacts to replyBody automatically.
   // Confirmed syntax from Svelte MCP docs and context7 snapshots example.
   let charCount = $derived(replyBody.length);
   let overLimit = $derived(charCount > 10_000);
@@ -73,7 +74,7 @@
 
 <div class="panel card" aria-label="Send manual reply">
   <div class="panel-header">
-    <span class="panel-icon" aria-hidden="true">✍️</span>
+    <span class="panel-icon" aria-hidden="true"><PenLine size={18} /></span>
     <h3 class="panel-title">Send manual reply</h3>
   </div>
 
@@ -157,12 +158,13 @@
     font-size: 0.9rem;
     resize: vertical;
     box-sizing: border-box;
-    transition: border-color 0.15s;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   textarea:focus {
-    outline: 2px solid var(--color-primary, #6366f1);
-    outline-offset: -1px;
+    outline: none;
+    border-color: var(--color-primary, #6366f1);
+    box-shadow: 0 0 0 3px rgba(99 102 241 / 0.2);
   }
 
   textarea:disabled {
@@ -203,13 +205,17 @@
     cursor: pointer;
     font-weight: 600;
     font-size: 0.9rem;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s ease, transform 0.1s ease;
     white-space: nowrap;
     flex-shrink: 0;
   }
 
   .btn-send:hover:not(:disabled) {
     opacity: 0.88;
+  }
+
+  .btn-send:not(:disabled):active {
+    transform: scale(0.97);
   }
 
   .btn-send:disabled {
@@ -227,5 +233,6 @@
     color: var(--color-success, #10b981);
     font-size: 0.875rem;
     margin: 0.5rem 0 0;
+    animation: flash-success 600ms ease forwards;
   }
 </style>

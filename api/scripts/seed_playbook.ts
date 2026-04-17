@@ -1,5 +1,5 @@
 /**
- * Seed script — inserts the tracking-request playbook for testing.
+ * Seed script - inserts the tracking-request playbook for testing.
  * Run with: deno run --allow-env --allow-net api/scripts/seed_playbook.ts
  *
  * Prerequisites:
@@ -44,7 +44,7 @@ async function seed() {
   );
 
   if (existing) {
-    console.log(`Playbook already exists for category ${categoryId} (id ${existing.id}) — skipping`);
+    console.log(`Playbook already exists for category ${categoryId} (id ${existing.id}) - skipping`);
     Deno.exit(0);
   }
 

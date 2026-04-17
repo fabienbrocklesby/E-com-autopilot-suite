@@ -13,7 +13,7 @@ applyTo: "frontend/**"
 - Stores (legacy `writable`) in `src/lib/stores.ts`
 - Bearer token in `localStorage` as `api_token`
 
-## Runes — non-negotiable
+## Runes - non-negotiable
 
 Use runes. Do not write Svelte 4 syntax even if it would work.
 
@@ -114,4 +114,4 @@ Don't refactor existing stores to runes. That's a separate project.
 - No client-side routing libraries (SvelteKit handles it)
 - No global event buses
 - No setting up component libraries (we hand-roll components for now)
-- No localStorage abuse — only `api_token` lives there
+- No localStorage abuse - only `api_token` lives there

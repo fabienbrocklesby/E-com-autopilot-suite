@@ -127,7 +127,7 @@ export async function processNewMessages(
   }>(email, `/history?startHistoryId=${startHistoryId}&historyTypes=messageAdded`);
 
   if (!history.history?.length) {
-    // No new messages — update the stored historyId and return.
+    // No new messages - update the stored historyId and return.
     await execute(
       "UPDATE oauth_tokens SET last_history_id = $1 WHERE email = $2",
       [historyId, email],
@@ -203,7 +203,7 @@ async function ingestMessage(
   const receivedAt = new Date(parseInt(gmailMsg.internalDate)).toISOString();
   const { plain, html } = extractBody(gmailMsg);
 
-  // Determine message direction. Gmail's SENT label is the authoritative signal —
+  // Determine message direction. Gmail's SENT label is the authoritative signal -
   // compare against the connected account email as a secondary check.
   const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
   const fromNormalised = from.toLowerCase();
@@ -215,15 +215,18 @@ async function ingestMessage(
   // Build a short summary by truncating plain text to 1000 chars.
   const threadSummary = plain.replace(/\s+/g, " ").trim().slice(0, 1000);
 
-  // Upsert the thread record, now with workspace_id and thread_summary.
+  // Upsert the thread record, now with workspace_id, thread_summary, and account_email.
+  // account_email ties the thread to the specific Google account that ingested it so that
+  // switching accounts hides threads from the old inbox.
   const threadRow = await queryOne<{ id: number }>(
-    `INSERT INTO threads (workspace_id, gmail_thread_id, subject, snippet, thread_summary)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO threads (workspace_id, gmail_thread_id, subject, snippet, thread_summary, account_email)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (gmail_thread_id) DO UPDATE
        SET snippet = EXCLUDED.snippet,
-           thread_summary = EXCLUDED.thread_summary
+           thread_summary = EXCLUDED.thread_summary,
+           account_email = EXCLUDED.account_email
      RETURNING id`,
-    [workspaceId, gmailThreadId, subject, gmailMsg.snippet, threadSummary],
+    [workspaceId, gmailThreadId, subject, gmailMsg.snippet, threadSummary, email],
   );
 
   if (!threadRow) return;
@@ -317,7 +320,7 @@ export async function sendReply(
   replyToAddress: string,
   body: string,
   inReplyToMessageId?: string | null,
-  /** DB thread.id — when provided the sent message is written immediately so
+  /** DB thread.id - when provided the sent message is written immediately so
    *  it appears in the dashboard without waiting for the Pub/Sub webhook. */
   dbThreadId?: number,
   workspaceId = 1,
@@ -350,7 +353,7 @@ export async function sendReply(
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
-  // Pass threadId only when we also have valid reply headers — otherwise Gmail
+  // Pass threadId only when we also have valid reply headers - otherwise Gmail
   // will return 404 if the headers don't reference a message in that thread.
   const payload: Record<string, string> = { raw: encoded };
   if (inReplyToMessageId) {
@@ -428,7 +431,7 @@ export async function applyLabel(
 }
 
 /**
- * Synchronise Gmail labels with workspace categories — bidirectional.
+ * Synchronise Gmail labels with workspace categories - bidirectional.
  *
  * Pass 1 (categories → Gmail): For each category without a gmail_label_id,
  *   create the Gmail label. For categories whose stored label no longer exists,
@@ -468,7 +471,7 @@ export async function syncLabels(
 
   // ── Pass 1: categories → Gmail ─────────────────────────────────────────────
   for (const cat of categories) {
-    // Already linked — check if the category was renamed and propagate to Gmail.
+    // Already linked - check if the category was renamed and propagate to Gmail.
     if (cat.gmail_label_id && labelById.has(cat.gmail_label_id)) {
       const gmailName = labelById.get(cat.gmail_label_id);
       if (gmailName?.toLowerCase() !== cat.name.toLowerCase()) {
@@ -483,7 +486,7 @@ export async function syncLabels(
       continue;
     }
 
-    // A label with the same name already exists in Gmail — link it.
+    // A label with the same name already exists in Gmail - link it.
     const existingId = labelByName.get(cat.name.toLowerCase());
     if (existingId) {
       await execute(
@@ -513,7 +516,7 @@ export async function syncLabels(
 
   // ── Pass 2: Gmail → categories ────────────────────────────────────────────
   // Dashboard is the source of truth. Gmail-side label creates/renames are
-  // surfaced as untracked labels (logged) rather than auto-imported — the
+  // surfaced as untracked labels (logged) rather than auto-imported - the
   // client must create or rename categories in the dashboard.
   for (const label of existingLabels) {
     // Skip system labels.
@@ -528,7 +531,7 @@ export async function syncLabels(
     const linkedCategory = categories.find((c) => c.gmail_label_id === label.id);
     if (linkedCategory) continue;
 
-    // Untracked label — log it for visibility but do not auto-create a category.
+    // Untracked label - log it for visibility but do not auto-create a category.
     logger.debug("gmail.untracked_label", { workspace_id: workspaceId, label_name: label.name, label_id: label.id });
   }
 
@@ -537,7 +540,7 @@ export async function syncLabels(
 }
 
 /**
- * Re-ingest a specific Gmail message — used by the retry worker to replay
+ * Re-ingest a specific Gmail message - used by the retry worker to replay
  * failed ingestions from the dead letter queue.
  */
 export async function retryIngest(

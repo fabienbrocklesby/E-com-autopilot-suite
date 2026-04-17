@@ -11,7 +11,7 @@ Goal: The engine works and is smart (Phase 5). Now make it survive real producti
 ## Required reading
 
 - `docs/PLAYBOOK_ENGINE.md`
-- `docs/TASK_LOG.md` — Phase 5 done with all playbooks regenerated and tested
+- `docs/TASK_LOG.md` - Phase 5 done with all playbooks regenerated and tested
 
 ## The 8 hardening tasks
 
@@ -49,7 +49,7 @@ Replace the retry logic with:
 - Exponential backoff: 1s, 2s, 4s (honouring `Retry-After` header if present)
 - Circuit breaker: if 5 consecutive failures across the whole app in 60 seconds, skip AI calls for 2 minutes and return a graceful fallback
 
-The circuit breaker lives as a module-level state (or cleaner: a single row in a new `system_state` table with a `last_ai_failure_burst TIMESTAMPTZ` column — survives restarts).
+The circuit breaker lives as a module-level state (or cleaner: a single row in a new `system_state` table with a `last_ai_failure_burst TIMESTAMPTZ` column - survives restarts).
 
 When circuit is open:
 - `chatCompletion` throws `AppError("AI temporarily unavailable", 503)`
@@ -132,7 +132,7 @@ CREATE INDEX idx_failed_ingestions_unresolved ON failed_ingestions(workspace_id)
 
 **Code change**: wrap `ingestMessage` in try/catch. On failure: insert into `failed_ingestions`, log, continue. Don't crash the webhook handler.
 
-**Retry worker**: same `retry_worker.ts` also handles this — every 5 minutes, retry unresolved failed ingestions up to 3 times. After 3 attempts, mark `resolved=true` with error "Gave up after 3 attempts" and alert (see task 8).
+**Retry worker**: same `retry_worker.ts` also handles this - every 5 minutes, retry unresolved failed ingestions up to 3 times. After 3 attempts, mark `resolved=true` with error "Gave up after 3 attempts" and alert (see task 8).
 
 **UI**: add a `/system/failed-ingestions` admin page showing unresolved failures with a retry button. Simple table, nothing fancy.
 
@@ -193,9 +193,9 @@ Simple dashboard showing:
 All backed by SQL queries on the tables we already have (`playbook_runs`, `playbook_step_executions`, `failed_ingestions`). No fancy metrics system yet, just live DB reads with a 30s client-side refresh.
 
 **Backend**: new route `api/routes/system.ts` with endpoints:
-- `GET /system/stats` — returns the dashboard data
-- `GET /system/circuit-breaker` — returns circuit breaker state
-- `POST /system/circuit-breaker/reset` — manual reset (for when you know the downstream is back)
+- `GET /system/stats` - returns the dashboard data
+- `GET /system/circuit-breaker` - returns circuit breaker state
+- `POST /system/circuit-breaker/reset` - manual reset (for when you know the downstream is back)
 
 ### 8. Alerting hook
 

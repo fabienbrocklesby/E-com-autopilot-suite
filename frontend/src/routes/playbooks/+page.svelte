@@ -1,12 +1,20 @@
 <!--
-  /playbooks — Categories & Playbooks (merged view)
+  /playbooks - Categories & Playbooks (merged view)
   Each category is a row. Its playbook status is shown inline.
 -->
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { playbooksApi, categoriesApi } from "$lib/api";
   import { workspaceStore } from "$lib/stores";
   import type { Playbook, Category } from "$lib/api";
+  import { ClipboardList, Plus, Trash2 } from '@lucide/svelte';
+
+  const prefersReducedMotion =
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      : false;
 
   interface CategoryRow {
     category: Category;
@@ -19,6 +27,7 @@
   let error = $state<string | null>(null);
   let success = $state<string | null>(null);
   let currentWorkspaceId = $state(1);
+  let mounted = $state(false);
 
   const unsubWs = workspaceStore.subscribe((id) => {
     currentWorkspaceId = id;
@@ -74,16 +83,31 @@
     }
   }
 
+  async function deletePlaybook(pb: Playbook) {
+    if (!confirm(`Delete playbook "${pb.name}"? This cannot be undone.`)) return;
+    error = null;
+    try {
+      await playbooksApi.delete(pb.id);
+      flash("Playbook deleted.");
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to delete";
+    }
+  }
+
   function flash(msg: string) {
     success = msg;
     setTimeout(() => { success = null; }, 3000);
   }
 
-  onMount(load);
+  onMount(() => {
+    load();
+    mounted = true;
+  });
 </script>
 
 <svelte:head>
-  <title>Playbooks — Autopilot</title>
+  <title>Playbooks - Autopilot</title>
 </svelte:head>
 
 <div class="page-header">
@@ -98,21 +122,40 @@
   <div class="error-banner">{error}</div>
 {/if}
 {#if success}
-  <div class="success-banner">{success}</div>
+  <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
 {/if}
 
 {#if loading}
-  <div class="loading">Loading…</div>
+  <div class="skeleton-list">
+    {#each Array.from({ length: 4 }) as _, i}
+      <div class="skeleton-row card" style="animation-delay: {i * 0.06}s">
+        <div class="skeleton-col">
+          <div class="skeleton skeleton-cat-name"></div>
+          <div class="skeleton skeleton-cat-desc"></div>
+          <div class="skeleton skeleton-cat-chips"></div>
+        </div>
+        <div class="skeleton skeleton-pb-col"></div>
+      </div>
+    {/each}
+  </div>
 {:else if categories.length === 0}
   <div class="empty-state">
-    <div class="empty-icon">📋</div>
+    <div class="empty-icon"><ClipboardList size={40} strokeWidth={1.5} /></div>
     <p>No categories yet. Categories define email types. Playbooks automate how each type is handled.</p>
     <a href="/categories" class="btn btn-primary">Create First Category</a>
   </div>
 {:else}
   <div class="category-list">
-    {#each rows as row (row.category.id)}
-      <div class="category-row card">
+    {#each rows as row, i (row.category.id)}
+      <div
+        class="category-row card"
+        in:fly={{
+          y: prefersReducedMotion ? 0 : 6,
+          duration: prefersReducedMotion ? 50 : 140,
+          delay: mounted ? 0 : i * 30,
+          easing: cubicOut,
+        }}
+      >
         <div class="cat-main">
           <div class="cat-info">
             <h2>{row.category.name}</h2>
@@ -143,11 +186,14 @@
                   {row.playbook.is_active ? "Deactivate" : "Activate"}
                 </button>
                 <a href="/playbooks/{row.playbook.id}" class="btn-action">Edit</a>
+                <button class="btn-action danger" onclick={() => deletePlaybook(row.playbook!)} title="Delete playbook">
+                  <Trash2 size={13} />
+                </button>
               </div>
             {:else}
               <div class="no-playbook">
                 <span class="text-muted">No playbook</span>
-                <a href="/playbooks/new?category_id={row.category.id}" class="btn-action primary">+ Create</a>
+                <a href="/playbooks/new?category_id={row.category.id}" class="btn-action"><Plus size={13} /> Create</a>
               </div>
             {/if}
           </div>
@@ -188,18 +234,12 @@
     gap: 8px;
   }
 
-  .loading {
-    color: var(--color-text-muted);
-    padding: 40px;
-    text-align: center;
-  }
-
   .empty-state {
     text-align: center;
     padding: 60px 20px;
     color: var(--color-text-muted);
   }
-  .empty-icon { font-size: 40px; margin-bottom: 12px; }
+  .empty-icon { margin-bottom: 12px; color: var(--color-text-muted); }
 
   .success-banner {
     background: rgba(16 185 129 / 0.1);
@@ -259,6 +299,7 @@
     flex-shrink: 0;
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 12px;
     min-width: 280px;
   }
@@ -288,6 +329,9 @@
   .status-dot.inactive { background: var(--color-text-muted); }
 
   .btn-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     background: none;
     border: 1px solid var(--color-border);
     color: var(--color-text-muted);
@@ -297,15 +341,19 @@
     cursor: pointer;
     text-decoration: none;
     white-space: nowrap;
+    transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
   }
   .btn-action:hover { background: var(--color-surface-2); color: var(--color-text); }
-  .btn-action.primary { border-color: var(--color-primary); color: var(--color-primary); }
-  .btn-action.primary:hover { background: rgba(99 102 241 / 0.1); }
+  .btn-action:active { transform: scale(0.97); }
+  .btn-action.danger { border-color: var(--color-danger); color: var(--color-danger); }
+  .btn-action.danger:hover { background: rgba(239 68 68 / 0.1); }
 
   .no-playbook {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 10px;
+    width: 100%;
   }
 
   .text-muted { color: var(--color-text-muted); font-size: 13px; }
@@ -327,5 +375,48 @@
     align-items: center;
     gap: 12px;
     padding: 10px 16px;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Loading skeleton                                                     */
+  /* ------------------------------------------------------------------ */
+  .skeleton-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .skeleton-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 16px 20px;
+  }
+  .skeleton-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .skeleton-cat-name {
+    height: 15px;
+    width: 40%;
+  }
+  .skeleton-cat-desc {
+    height: 12px;
+    width: 65%;
+    opacity: 0.7;
+  }
+  .skeleton-cat-chips {
+    height: 10px;
+    width: 30%;
+    opacity: 0.5;
+  }
+  .skeleton-pb-col {
+    height: 32px;
+    width: 200px;
+    flex-shrink: 0;
+    opacity: 0.6;
+    border-radius: var(--radius);
   }
 </style>

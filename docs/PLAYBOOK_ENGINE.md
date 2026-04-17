@@ -1,4 +1,4 @@
-# Playbook Engine — Architecture Reference
+# Playbook Engine - Architecture Reference
 
 This is the canonical reference for the playbook engine. Every Phase 2+ piece of work must align with this document. If reality diverges from this doc, update this doc first, then code.
 
@@ -129,10 +129,10 @@ The AI returns JSON. We validate, render in the UI as cards, the client tunes in
 ## UX principles
 
 1. **Plain language is the source of truth**, structured is the projection
-2. **Every step is editable individually** — don't make the user re-write the whole thing to change one question
-3. **Dry-run before activate** — paste an example email, see the trace, before turning it on
-4. **Per-thread visibility** — the thread page shows current playbook, current step, context bag, full execution log
-5. **Pause states are first-class** — "waiting for customer" and "waiting for human" must be visually distinct from "running"
+2. **Every step is editable individually** - don't make the user re-write the whole thing to change one question
+3. **Dry-run before activate** - paste an example email, see the trace, before turning it on
+4. **Per-thread visibility** - the thread page shows current playbook, current step, context bag, full execution log
+5. **Pause states are first-class** - "waiting for customer" and "waiting for human" must be visually distinct from "running"
 
 ## Versioning
 
@@ -140,7 +140,7 @@ When a playbook is edited, increment `version`. Active runs continue on the vers
 
 There's no automatic migration of in-flight runs to new versions. If the client wants that, they can manually escalate the run and let it re-start.
 
-## Sheet rules — the migration
+## Sheet rules - the migration
 
 In Phase 4, sheet rules become single-step playbooks (or get absorbed into multi-step ones). A sheet rule with one match column and three updates becomes:
 
@@ -158,7 +158,7 @@ These need answers before Phase 2 starts. Track resolutions here:
 
 1. **Where does customer-silence timeout live?** Per-step config (`pause_timeout_hours`)? Per-playbook? Workspace default? **Decision**: per-playbook setting `customer_silence_hours: int` defaulting to 168 (7 days). After timeout, run goes to `escalated`.
 
-2. **Can a playbook switch categories mid-run?** Customer asks about tracking, then mid-thread asks about a refund. **Decision** for v1: no, the run continues on the original playbook. The `manual_approval` step is the escape hatch — the human can re-categorise from the review queue.
+2. **Can a playbook switch categories mid-run?** Customer asks about tracking, then mid-thread asks about a refund. **Decision** for v1: no, the run continues on the original playbook. The `manual_approval` step is the escape hatch - the human can re-categorise from the review queue.
 
 3. **Multiple playbooks per category?** v1: one per category. The category determines the playbook deterministically. If you need conditional playbook selection, do it inside one playbook with a `branch` step.
 
@@ -178,7 +178,7 @@ These need answers before Phase 2 starts. Track resolutions here:
 | Rename category in dashboard | Gmail label renamed via `users.labels.patch` on next sync |
 | Delete category in dashboard | Gmail label is NOT deleted automatically (manual cleanup) |
 | Create label in Gmail | Logged as "untracked label"; no category auto-created |
-| Rename label in Gmail | On next sync, dashboard sees the old linked label id still exists, so no rename propagates back — the Gmail label takes the dashboard name on next rename sync |
+| Rename label in Gmail | On next sync, dashboard sees the old linked label id still exists, so no rename propagates back - the Gmail label takes the dashboard name on next rename sync |
 
 ### Implementation
 
@@ -189,7 +189,7 @@ These need answers before Phase 2 starts. Track resolutions here:
 
 ## What this engine does NOT do (yet)
 
-- External API calls beyond Gmail and Sheets (no shipping APIs, no Stripe, no Slack — those are step types we add later)
+- External API calls beyond Gmail and Sheets (no shipping APIs, no Stripe, no Slack - those are step types we add later)
 - Scheduled triggers (no "remind me in 24 hours" without a customer reply)
 - Cross-thread orchestration (each thread is independent)
 - A/B testing of playbooks (Phase 4 might add this)

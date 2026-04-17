@@ -1,5 +1,5 @@
 /**
- * Escalate handler — marks the run as escalated, flags for human review.
+ * Escalate handler - marks the run as escalated, flags for human review.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep, EscalateStep } from "../types.ts";
 
@@ -16,7 +16,7 @@ export const escalateHandler: StepHandler = {
       ? `Rejected by human: ${rejectionSource}`
       : escalateStep.reason;
 
-    console.log(`[playbook] escalate: run ${ctx.run.id} — ${reason}`);
+    console.log(`[playbook] escalate: run ${ctx.run.id} - ${reason}`);
     return {
       decision: { action: "fail", error: `Escalated: ${reason}` },
       output: { reason },

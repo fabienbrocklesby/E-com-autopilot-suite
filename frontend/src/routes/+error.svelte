@@ -1,5 +1,5 @@
 <!--
-  Global error boundary — shown when a page throws an unhandled exception or
+  Global error boundary - shown when a page throws an unhandled exception or
   a +layout/+page load function returns an error.
 -->
 <script lang="ts">
@@ -7,7 +7,7 @@
 </script>
 
 <svelte:head>
-  <title>Error — Email Dash</title>
+  <title>Error - Email Dash</title>
 </svelte:head>
 
 <div class="error-page">

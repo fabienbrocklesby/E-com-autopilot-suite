@@ -5,7 +5,7 @@ description: How to build a SvelteKit 5 page using runes. Use when creating new 
 
 # SvelteKit 5 Page Skill
 
-## Runes — quick reference
+## Runes - quick reference
 
 ```svelte
 <script lang="ts">
@@ -14,7 +14,7 @@ description: How to build a SvelteKit 5 page using runes. Use when creating new 
 
   // Derived (replaces `$: doubled = count * 2`)
   let doubled = $derived(count * 2);
-  
+
   // Multi-line derived
   let summary = $derived.by(() => {
     if (count === 0) return "Nothing yet";
@@ -128,7 +128,7 @@ description: How to build a SvelteKit 5 page using runes. Use when creating new 
 ```svelte
 <!-- src/routes/examples/[id]/+page.svelte -->
 <script lang="ts">
-  import { page } from "$app/state"; // Svelte 5 — NOT $app/stores
+  import { page } from "$app/state"; // Svelte 5 - NOT $app/stores
   import { onMount } from "svelte";
   import { api } from "$lib/api";
 
@@ -257,11 +257,11 @@ In components:
 
 ## Banned
 
-- `let x = ...` for reactive state — use `$state`
-- `$: derived = x * 2` — use `$derived`
-- `onMount(() => { /* reactive logic */ })` — use `$effect`
-- `export let prop` — use `$props`
-- `$app/stores` — use `$app/state` in Svelte 5
-- Direct `fetch()` in components — use `api`
+- `let x = ...` for reactive state - use `$state`
+- `$: derived = x * 2` - use `$derived`
+- `onMount(() => { /* reactive logic */ })` - use `$effect`
+- `export let prop` - use `$props`
+- `$app/stores` - use `$app/state` in Svelte 5
+- Direct `fetch()` in components - use `api`
 - New top-level dependencies without justification
-- Tailwind/UnoCSS/styled-components — match existing patterns
+- Tailwind/UnoCSS/styled-components - match existing patterns

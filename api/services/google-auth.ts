@@ -1,5 +1,5 @@
 /**
- * Google OAuth token service — single source of truth for access tokens.
+ * Google OAuth token service - single source of truth for access tokens.
  * All services that call Gmail or Sheets APIs go through `getGoogleAccessToken`.
  *
  * Tokens are stored encrypted (AES-256-GCM) in the oauth_tokens table.
@@ -22,7 +22,7 @@ async function loadEncryptionKey(): Promise<CryptoKey> {
 
   const keyB64 = Deno.env.get("ENCRYPTION_KEY");
   if (!keyB64) {
-    throw new AppError(500, "ENCRYPTION_KEY is not configured — run `openssl rand -base64 32` and add to .env");
+    throw new AppError(500, "ENCRYPTION_KEY is not configured - run `openssl rand -base64 32` and add to .env");
   }
 
   const raw = Uint8Array.from(atob(keyB64), (c) => c.charCodeAt(0));
@@ -117,7 +117,7 @@ export async function getGoogleAccessToken(
     return { token, email };
   }
 
-  // Token expired or about to expire — refresh.
+  // Token expired or about to expire - refresh.
   const refreshToken = await decryptToken(tokenRow.refresh_token_encrypted);
   const token = await refreshAndPersist(email, refreshToken);
   return { token, email };

@@ -1,5 +1,5 @@
 /**
- * Retry worker — processes two queues:
+ * Retry worker - processes two queues:
  *
  * 1. Playbook runs in 'retrying' status whose next_retry_at has passed.
  *    Calls advanceRun() to resume. After MAX_RETRIES, escalates permanently.
@@ -89,7 +89,7 @@ async function processFailedIngestions(): Promise<void> {
 
       await retryIngest(item.workspace_id, item.gmail_message_id, item.gmail_thread_id);
 
-      // Success — mark resolved
+      // Success - mark resolved
       await execute(
         `UPDATE failed_ingestions SET resolved = true WHERE id = $1`,
         [item.id],

@@ -11,7 +11,7 @@ Goal: Move all existing category logic into playbooks. Deprecate `categoriseAndD
 ## Required reading
 
 - `docs/PLAYBOOK_ENGINE.md`
-- `docs/TASK_LOG.md` — Phase 3 done with passing Playwright test
+- `docs/TASK_LOG.md` - Phase 3 done with passing Playwright test
 - All existing categories and sheet rules in production data (use Postgres MCP to inspect)
 
 ## Tasks
@@ -19,7 +19,7 @@ Goal: Move all existing category logic into playbooks. Deprecate `categoriseAndD
 ### 1. Migrate existing categories one at a time
 
 For each existing category in production:
-1. Talk to Fabien about what the category should actually do (the current behaviour is auto-reply or manual review based on confidence — that's it)
+1. Talk to Fabien about what the category should actually do (the current behaviour is auto-reply or manual review based on confidence - that's it)
 2. Write a playbook for it using the editor built in Phase 3
 3. Activate it on a small percentage of incoming threads (use a feature flag in workspace settings, e.g. `playbook_rollout_percentage`)
 4. Monitor for 24 hours

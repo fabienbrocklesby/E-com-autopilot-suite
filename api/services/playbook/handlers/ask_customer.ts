@@ -1,5 +1,5 @@
 /**
- * Ask customer handler — AI-driven contextual message to gather missing info.
+ * Ask customer handler - AI-driven contextual message to gather missing info.
  * Falls back to literal message for backward compatibility.
  */
 import type { StepHandler, StepResult, RunContext, PlaybookStep, AskCustomerStep } from "../types.ts";
@@ -101,6 +101,7 @@ export const askCustomerHandler: StepHandler = {
 TASK: ${askStep.goal}
 
 VOICE: ${voice}
+${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
 
 WHAT WE KNOW:
 ${JSON.stringify(haveContext, null, 2)}
@@ -114,7 +115,7 @@ ${transcript}
 PREVIOUS MESSAGES WE ALREADY SENT ON THIS THREAD (do NOT repeat these questions):
 ${previousMessages.length > 0 ? previousMessages.map((m) => `- ${m}`).join("\n") : "none"}
 
-YOUR DECISION — return one of:
+YOUR DECISION - return one of:
 - {"action": "skip", "extracted": {"var1": "value", ...}, "reasoning": "..."} if the customer's messages already gave us what we need (even if loosely phrased)
 - {"action": "escalate", "reason": "..."} if the customer is frustrated, confused, repeating themselves, or this conversation is going in circles
 - {"action": "ask", "message": "..."} to write a brief, contextual message that references what the customer said and asks specifically for what's still missing
@@ -122,8 +123,9 @@ YOUR DECISION — return one of:
 RULES:
 - Do not repeat a question that appears in PREVIOUS MESSAGES WE ALREADY SENT.
 - Acknowledge the customer's most recent message before asking for anything.
-- Keep it brief — one short paragraph.
-- Match the VOICE.
+- Keep it brief - one short paragraph.
+- Match the VOICE.${ctx.senderName ? `\n- Sign off using the exact name: ${ctx.senderName}` : "\n- Do not include a name placeholder."}
+- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
 - Output JSON only. No preamble, no markdown.`;
 
     const response = await chatCompletion(
@@ -162,7 +164,7 @@ RULES:
     }
 
     if (parsed.action === "escalate") {
-      console.log(`[playbook] ask_customer: AI escalated — ${parsed.reason} for run ${ctx.run.id}`);
+      console.log(`[playbook] ask_customer: AI escalated - ${parsed.reason} for run ${ctx.run.id}`);
       return {
         decision: { action: "fail", error: `ask_customer escalated: ${parsed.reason}` },
         output: { action: "escalated", reason: parsed.reason },

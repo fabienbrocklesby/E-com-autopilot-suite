@@ -1,5 +1,5 @@
 /**
- * Timeout worker — escalates playbook runs that have been waiting for a customer
+ * Timeout worker - escalates playbook runs that have been waiting for a customer
  * reply longer than the playbook's configured customer_silence_hours.
  * Runs every 30 minutes.
  */

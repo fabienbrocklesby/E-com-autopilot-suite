@@ -46,7 +46,7 @@ async function run(): Promise<void> {
 
     for (const row of rows) {
       if (!row.access_token_encrypted || !row.refresh_token_encrypted) {
-        console.warn(`  [missing] ${row.email} — encrypted tokens are NULL. User needs to re-authenticate.`);
+        console.warn(`  [missing] ${row.email} - encrypted tokens are NULL. User needs to re-authenticate.`);
         missing++;
         continue;
       }
@@ -58,7 +58,7 @@ async function run(): Promise<void> {
         console.log(`  [ok] ${row.email}`);
         ok++;
       } catch (err) {
-        console.error(`  [ERROR] ${row.email} — decryption failed:`, err);
+        console.error(`  [ERROR] ${row.email} - decryption failed:`, err);
         Deno.exit(1);
       }
     }

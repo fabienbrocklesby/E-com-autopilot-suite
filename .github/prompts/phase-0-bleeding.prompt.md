@@ -10,10 +10,10 @@ Goal: Fix the 5 critical bugs in the current system that make it feel broken to 
 
 ## Required reading before starting
 
-- `docs/PLAYBOOK_ENGINE.md` — for context on where we're going
-- `docs/TASK_LOG.md` — to see what's already done
-- `api/services/categorisation.ts` — most fixes touch this
-- `api/services/sheet-rules.ts` — fix #4 is here
+- `docs/PLAYBOOK_ENGINE.md` - for context on where we're going
+- `docs/TASK_LOG.md` - to see what's already done
+- `api/services/categorisation.ts` - most fixes touch this
+- `api/services/sheet-rules.ts` - fix #4 is here
 
 ## The 5 fixes
 
@@ -25,8 +25,8 @@ Goal: Fix the 5 critical bugs in the current system that make it feel broken to 
 
 **Fix**: After inserting a draft with `status='pending'`, update the thread to `status='in_review'`. Wrap both writes in a transaction.
 
-**Validation**: 
-- Use the Postgres MCP to check: `SELECT t.id, t.status, d.status FROM threads t LEFT JOIN drafts d ON d.thread_id = t.id WHERE d.status = 'pending'` — every row should show `t.status = 'in_review'`
+**Validation**:
+- Use the Postgres MCP to check: `SELECT t.id, t.status, d.status FROM threads t LEFT JOIN drafts d ON d.thread_id = t.id WHERE d.status = 'pending'` - every row should show `t.status = 'in_review'`
 - After the fix, manually trigger categorisation on a thread with low confidence and verify it appears in `/review`
 
 ### Fix 2: Stop re-categorising threads that already have a category
@@ -35,7 +35,7 @@ Goal: Fix the 5 critical bugs in the current system that make it feel broken to 
 
 **Current bug**: Every inbound message on a thread runs full categorisation, potentially overwriting the existing category and deleting any pending draft.
 
-**Fix**: In `categoriseAndDraft`, if the thread already has a `category_id` AND a pending draft exists, skip re-categorisation entirely and just notify (or no-op). The proper resume-the-playbook behaviour comes in Phase 2 — for now, just stop the destructive re-categorisation.
+**Fix**: In `categoriseAndDraft`, if the thread already has a `category_id` AND a pending draft exists, skip re-categorisation entirely and just notify (or no-op). The proper resume-the-playbook behaviour comes in Phase 2 - for now, just stop the destructive re-categorisation.
 
 If the thread has a category but NO pending draft, it's safe to draft a new reply if conditions allow (this is the "customer replied to a sent reply" case).
 
