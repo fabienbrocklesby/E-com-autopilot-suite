@@ -307,6 +307,14 @@ function extractBody(msg: GmailMessage): { plain: string; html: string } {
   return { plain, html };
 }
 
+function textToHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<html><body><p>${escaped.replace(/\n/g, "<br>")}</p></body></html>`;
+}
+
 /**
  * Send a reply to a Gmail thread on behalf of the authenticated user.
  * Constructs a minimal RFC 2822 message, base64url-encodes it, and sends
@@ -333,7 +341,7 @@ export async function sendReply(
     `To: ${replyToAddress}`,
     `Subject: Re: ${subject.replace(/^Re:\s*/i, "")}`,
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Type: text/html; charset=UTF-8",
   ];
 
   if (inReplyToMessageId) {
@@ -345,7 +353,7 @@ export async function sendReply(
     headers.push(`References: ${mid}`);
   }
 
-  const rawMessage = [...headers, "", body].join("\r\n");
+  const rawMessage = [...headers, "", textToHtml(body)].join("\r\n");
 
   // base64url encode (no padding, URL-safe chars).
   const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
