@@ -30,19 +30,6 @@
       hint: "e.g. gpt-4o (recommended, best quality), gpt-4o-mini (faster / cheaper), gpt-4-turbo (older)",
       type: "text",
     },
-    {
-      key: "reply_signature",
-      label: "Reply signature",
-      description: "Appended to AI-generated drafts.",
-      type: "text",
-    },
-    {
-      key: "sender_name",
-      label: "Sender name",
-      description: "Your name used to sign AI-generated replies. Leave blank to omit a sign-off.",
-      hint: "e.g. Sarah from Support",
-      type: "text",
-    },
   ];
 
   let settings = $state<Record<string, string>>({});
@@ -51,6 +38,9 @@
   let settingsError = $state<string | null>(null);
   let success = $state<string | null>(null);
   let openaiModels = $state<string[]>([]);
+
+  let senderName = $state("");
+  let savingSenderName = $state(false);
 
   let oauthStatus = $state<{
     connected: boolean;
@@ -85,6 +75,7 @@
     try {
       const res = await settingsApi.getAll();
       settings = res.settings;
+      senderName = res.settings["sender_name"] ?? "";
     } catch (e) {
       settingsError =
         e instanceof Error ? e.message : "Failed to load settings";
@@ -113,6 +104,23 @@
       // Silently fail workspace load - not critical
     } finally {
       loadingWorkspaces = false;
+    }
+  }
+
+  async function saveSenderName() {
+    savingSenderName = true;
+    settingsError = null;
+    try {
+      await settingsApi.set("sender_name", senderName);
+      settings["sender_name"] = senderName;
+      success = "Signature saved.";
+      setTimeout(() => {
+        success = null;
+      }, 3000);
+    } catch (e) {
+      settingsError = e instanceof Error ? e.message : "Failed to save signature";
+    } finally {
+      savingSenderName = false;
     }
   }
 
@@ -393,6 +401,50 @@
   {/if}
 </section>
 
+<!-- Email Signature -->
+<section class="card section">
+  <h2>Email Signature</h2>
+  <p class="section-description">
+    The AI signs every outbound email with this name. Leave blank to omit a sign-off.
+  </p>
+
+  {#if loadingSettings}
+    <div class="loading-text">Loading…</div>
+  {:else}
+    <div class="signature-editor">
+      <div class="signature-input-row">
+        <input
+          class="input signature-input"
+          type="text"
+          placeholder="e.g. Sarah from Support"
+          bind:value={senderName}
+        />
+        <button
+          class="btn btn-primary btn-sm"
+          onclick={saveSenderName}
+          disabled={savingSenderName}
+        >
+          {savingSenderName ? "Saving…" : "Save"}
+        </button>
+      </div>
+
+      <div class="signature-preview">
+        <span class="signature-preview-label">Preview</span>
+        <div class="signature-preview-body">
+          <span class="signature-preview-line">…your reply text here…</span>
+          {#if senderName.trim()}
+            <span class="signature-preview-line">
+              Best regards,<br />{senderName.trim()}
+            </span>
+          {:else}
+            <span class="signature-preview-line signature-preview-empty">No sign-off (name is blank)</span>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+</section>
+
 <!-- General Settings -->
 <section class="card section">
   <h2>General</h2>
@@ -655,6 +707,57 @@
     padding: 1px 4px;
     border-radius: 3px;
     font-size: 11px;
+  }
+
+  .signature-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .signature-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .signature-input {
+    width: 260px;
+  }
+
+  .signature-preview {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .signature-preview-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+  }
+
+  .signature-preview-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .signature-preview-line {
+    color: var(--color-text);
+  }
+
+  .signature-preview-empty {
+    color: var(--color-text-muted);
+    font-style: italic;
   }
 
   .setting-control {
