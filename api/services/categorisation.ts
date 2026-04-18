@@ -1,8 +1,8 @@
 /**
  * Categorisation service.
- * Orchestrates fetching thread data, calling the AI service, storing results,
- * and optionally triggering an auto-reply and Gmail labelling.
- * Sheet rule evaluation is handled by evaluateRules() after the reply decision.
+ * Categorises a thread then routes to the playbook engine if the category
+ * has an active playbook. Without a playbook the thread is placed in_review
+ * for manual handling. The legacy auto-draft flow is removed.
  */
 import { query, queryOne, transaction } from "../db/client.ts";
 import {
@@ -13,16 +13,17 @@ import {
   Setting,
   OAuthToken,
 } from "../types/index.ts";
-import { categoriseEmail, draftReply } from "./ai.ts";
-import { applyLabel, sendReply } from "./gmail.ts";
+import { categoriseEmail } from "./ai.ts";
+import { applyLabel } from "./gmail.ts";
 import { evaluateRules } from "./sheet-rules.ts";
 import { startRun } from "./playbook/executor.ts";
 import type { Playbook } from "./playbook/types.ts";
 
 /**
- * Categorise a thread and generate a draft reply if the category allows it.
- * Also applies a Gmail label and triggers any sheet updates the AI detects.
- * Called both by the webhook pipeline and the manual "re-categorise" endpoint.
+ * Categorise a thread and route it to the appropriate playbook.
+ * If the matched category has an active playbook and confidence meets the
+ * playbook's threshold, the playbook engine takes over.
+ * If no playbook is available the thread is placed in_review for manual handling.
  */
 export async function categoriseAndDraft(threadId: number): Promise<{
   thread: Thread;
@@ -118,11 +119,23 @@ export async function categoriseAndDraft(threadId: number): Promise<{
         });
       });
 
-      console.log(`[categorisation] Category ${categoryId} has playbook "${playbook.name}" - routing to engine`);
-      try {
-        await startRun(workspaceId, threadId, playbook.id);
-      } catch (err) {
-        console.error(`[categorisation] Playbook run failed for thread ${threadId}:`, err);
+      // Playbook confidence threshold gates whether the run starts automatically.
+      // Below threshold: thread sits in_review for manual triage.
+      if (confidence < playbook.confidence_threshold) {
+        await transaction(async (tx) => {
+          await tx.queryObject({
+            text: "UPDATE threads SET status = 'in_review' WHERE id = $1",
+            args: [threadId],
+          });
+        });
+        console.log(`[categorisation] Confidence ${confidence} below playbook threshold ${playbook.confidence_threshold} for thread ${threadId} - placing in_review`);
+      } else {
+        console.log(`[categorisation] Category ${categoryId} has playbook "${playbook.name}" - routing to engine`);
+        try {
+          await startRun(workspaceId, threadId, playbook.id);
+        } catch (err) {
+          console.error(`[categorisation] Playbook run failed for thread ${threadId}:`, err);
+        }
       }
 
       const updatedThread = await queryOne<Thread>(
@@ -140,89 +153,12 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     }
   }
 
-  // Determine whether to auto-draft or auto-send.
-  // Auto-reply is gated solely on the per-category toggle and threshold - no global switch.
-  const globalThreshold = parseFloat(globalSettings["default_confidence_threshold"] ?? "0.8");
-  const categoryThreshold = category?.confidence_threshold ?? globalThreshold;
-
-  // Resolve draft body and send outcome before opening the transaction.
-  let draftBody: string | null = null;
-  let modelUsed: string | null = null;
-  let autoSendSuccess = false;
-
-  if (category && category.allow_auto_reply && confidence >= categoryThreshold) {
-    const modelSetting = await queryOne<Setting>(
-      "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'openai_model'",
-      [workspaceId],
-    );
-    modelUsed = modelSetting?.value ?? null;
-
-    const { body } = await draftReply(thread, messages, category, globalSettings, workspaceId);
-    draftBody = body;
-
-    // Resolve the connected email. Use the last *inbound* message as reply target
-    // so we never accidentally reply to our own sent messages.
-    const tokenRow = await queryOne<OAuthToken>(
-      "SELECT * FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
-      [workspaceId],
-    );
-    const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound") ?? null;
-
-    if (tokenRow && lastInbound?.from_address) {
-      try {
-        await sendReply(
-          tokenRow.email,
-          thread.gmail_thread_id,
-          thread.subject,
-          lastInbound.from_address,
-          body,
-          lastInbound.message_id_header,
-          threadId,
-        );
-        autoSendSuccess = true;
-        console.log(`[categorisation] Auto-sent reply for thread ${threadId}`);
-      } catch (err) {
-        console.error(`[categorisation] Auto-send failed for thread ${threadId}, saving as draft:`, err);
-      }
-    }
-  }
-
-  // Fix 3: Wrap all DB writes in a single transaction.
+  // No active playbook for this category (or no category matched).
+  // Place thread in_review for manual handling.
   await transaction(async (tx) => {
-    await tx.queryObject({ text: "UPDATE threads SET category_id = $1 WHERE id = $2", args: [categoryId, threadId] });
-
-    if (draftBody !== null) {
-      // Remove any stale pending draft - one draft per thread at a time.
-      await tx.queryObject({ text: "DELETE FROM drafts WHERE thread_id = $1 AND status = 'pending'", args: [threadId] });
-
-      if (autoSendSuccess) {
-        // Auto-send succeeded - record as sent and mark thread replied.
-        await tx.queryObject({
-          text: "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used, sent_at) VALUES ($1, $2, 'sent', true, $3, now())",
-          args: [threadId, draftBody, modelUsed],
-        });
-        await tx.queryObject({
-          text: "UPDATE threads SET status = 'replied', auto_replied = true WHERE id = $1",
-          args: [threadId],
-        });
-      } else {
-        // Fix 1: Pending draft - move thread to in_review so it appears in the review queue.
-        await tx.queryObject({
-          text: "INSERT INTO drafts (thread_id, body, status, was_auto_sent, ai_model_used) VALUES ($1, $2, 'pending', false, $3)",
-          args: [threadId, draftBody, modelUsed],
-        });
-        await tx.queryObject({
-          text: "UPDATE threads SET status = 'in_review' WHERE id = $1",
-          args: [threadId],
-        });
-      }
-    }
+    await tx.queryObject({ text: "UPDATE threads SET category_id = $1, status = 'in_review' WHERE id = $2", args: [categoryId, threadId] });
   });
 
-  const draftCreated = draftBody !== null;
-
-  // Evaluate sheet rules after the reply decision. Must not block or affect the
-  // email flow - failures are logged and stored but never propagated up.
   evaluateRules(threadId, workspaceId).catch(
     (err: unknown) => console.error("[categorisation] Sheet rule evaluation error:", err),
   );
@@ -232,5 +168,5 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     [threadId],
   ) as Thread;
 
-  return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated };
+  return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated: false };
 }

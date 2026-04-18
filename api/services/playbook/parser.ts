@@ -189,3 +189,65 @@ export async function parsePlaybook(
 
   return { steps: validatedSteps, warnings };
 }
+
+/**
+ * Generate a single playbook step from a plain-language description.
+ * Useful for inserting a new step into an existing playbook without regenerating everything.
+ */
+export async function parsePlaybookStep(
+  description: string,
+  previousSteps: PlaybookStep[],
+  nextSteps: PlaybookStep[],
+  playbookContext: string,
+  workspaceId: number,
+): Promise<PlaybookStep> {
+  const guide = await loadDesignGuide();
+  const workspaceContext = await buildWorkspaceContext(workspaceId);
+
+  const contextLines: string[] = [];
+  if (playbookContext) contextLines.push(`Playbook purpose: ${playbookContext}`);
+  if (previousSteps.length > 0) {
+    contextLines.push(`Previous steps: ${previousSteps.map((s) => `${s.id} (${s.type})`).join(", ")}`);
+  }
+  if (nextSteps.length > 0) {
+    contextLines.push(`Next steps: ${nextSteps.map((s) => `${s.id} (${s.type})`).join(", ")}`);
+  }
+
+  const systemPrompt = `${guide.replace(
+    "## Workspace context (injected at runtime)\n\nThis section is replaced at runtime with the actual workspace sheet columns and configuration. The parser injects this before sending to the AI. You will see the specific columns available for this workspace here when the prompt is assembled.",
+    `## Workspace context\n\n${workspaceContext}`,
+  )}
+
+## Task
+Generate a SINGLE step object as JSON (not an array). The step must fit the existing playbook context.
+${contextLines.join("\n")}
+
+Respond with a single JSON object (no array wrapper) representing one playbook step.`;
+
+  const content = await chatCompletion(
+    [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `Generate a single step for: ${description}` },
+    ],
+    "gpt-4o",
+    { type: "json_object" },
+  );
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("AI returned invalid JSON for step");
+  }
+
+  if (!parsed.id || typeof parsed.id !== "string") {
+    // Auto-generate an id from the description
+    parsed.id = description.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30) + "_" + Date.now();
+  }
+
+  if (!parsed.type || !VALID_STEP_TYPES.includes(parsed.type as typeof VALID_STEP_TYPES[number])) {
+    throw new Error(`AI returned unknown step type: "${parsed.type}"`);
+  }
+
+  return parsed as unknown as PlaybookStep;
+}

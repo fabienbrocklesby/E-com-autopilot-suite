@@ -11,6 +11,110 @@ Each entry:
 
 ---
 
+## 2026-04-18 - Bug fix: require_approval on ask_customer steps
+
+**Phase**: bugfix
+**Status**: complete
+
+### What was done
+
+**Root causes identified:**
+1. The legacy path in `ask_customer` (steps with a literal `message` but no `goal`) was sending the message directly without checking `require_approval`. The AI-driven path (steps with `goal`) already checked `require_approval` correctly.
+2. The `ManualActionBanner` component did not differentiate between `manual_approval` pauses and `require_approval` message-draft pauses. It showed generic "Action required" UI with no message preview, so users had no way to see or edit the draft before approving. When they clicked "Done, continue" the AI draft was sent silently via the backend fallback.
+
+**Backend fix** (`api/services/playbook/handlers/ask_customer.ts`):
+- Legacy path (no `goal`) now checks `requireApprovalLegacy = askStep.require_approval === true || ctx.playbook.reply_mode === "draft_only"` before sending.
+- When `requireApprovalLegacy` is true, returns `{ action: "pause", status: "waiting_for_human" }` with `output.action = "pending_approval"` — the same format the approve route already handles for AI-driven steps.
+
+**Frontend fix** (`frontend/src/lib/components/ManualActionBanner.svelte`):
+- Added `isPendingSend` derived state: true when `run.step_pending_send` is a non-empty string.
+- When `isPendingSend` is true: shows "Review draft reply" heading (Mail icon), displays the AI-drafted message in an editable textarea, and the approve button reads "Send reply" — passing the (possibly edited) body to `approveRun(run.id, undefined, draftBody)`.
+- When `isPendingSend` is false: existing `manual_approval` UI is unchanged (reason, reference context, optional input field, "Done, continue" button).
+- Added `banner-draft` CSS modifier for visual distinction.
+- Used `untrack()` from svelte to safely initialize `draftBody` from `run.step_pending_send` at mount time without triggering reactive warnings.
+
+**No migrations needed** — all changes are logic/UI only.
+
+---
+
+## 2026-04-17 - Playbooks as source of truth (Phase 1 follow-up)
+
+**Phase**: 1 follow-up (pending-send approval UX + cleanup)
+**Status**: complete
+
+### What was done
+
+Completed the remaining items after Phase 1:
+
+**Dead code removal**:
+- `api/services/ai.ts` — removed `draftReply()` function and `DraftReplyResult` import
+- `api/types/index.ts` — removed `DraftReplyResult` interface
+
+**Backend: pending-send approval API** (`api/routes/playbooks.ts`):
+- `GET /playbooks/runs` — added `step_type` and `step_pending_send` columns to the query response. `step_type` returns the step's type from the playbook steps array; `step_pending_send` fetches `output->>'pending_send'` from the most recent `playbook_step_executions` row with `action = 'pending_approval'` for `waiting_for_human` runs.
+- `POST /playbooks/runs/:runId/approve` — now accepts optional `{ body: string }` in request body. When a pending_send step is being approved and `body` is provided (and non-empty), that body is used instead of the AI-drafted `pending_send` from the step execution.
+- `POST /playbooks/runs/:runId/reject` — now handles `ask_customer` and `send_reply` step types: rejects by escalating the run (instead of erroring with "not a manual_approval step").
+
+**Docs**: `docs/PLAYBOOK_DESIGN_GUIDE.md`:
+- Updated `ask_customer` step fields: `voice_hint` description updated to "step-level tone override", added `require_approval` field documentation
+- Added Principle 7: voice/tone lives at the playbook level, steps only use `voice_hint` when deviating
+- Added Principle 8: `require_approval` is explicit, not assumed — parser should only add it when description explicitly says so
+
+**Frontend**:
+- `frontend/src/lib/api.ts` — added `step_type` and `step_pending_send` to `PlaybookRun` interface; updated `approveRun()` to accept optional `body` parameter and send it in the request
+- `frontend/src/routes/review/+page.svelte`:
+  - Added `runBodies` state (`Record<number, string>`) for per-run editable reply bodies
+  - `load()` initialises `runBodies` from `step_pending_send` on each run
+  - `approveRun()` now passes `runBodies[runId]` as the body override
+  - Approval card: when `run.step_pending_send` is set, shows `<textarea>` with the AI draft (editable), "edited" badge when changed, "Reset to AI draft" button
+  - Label distinguishes `ask_customer` ("Message to customer (held for approval)") vs `send_reply` ("Reply to send (held for approval)")
+
+**Verified**:
+- `deno check main.ts` → 0 errors
+- `pnpm check` → 0 errors
+- API: `GET /playbooks/runs?status=waiting_for_human` returns correct `step_type` + `step_pending_send`
+- Browser: approval card shows editable draft, "edited" badge appears on change, "Reset to AI draft" restores original, Approve sends edited body to API, Reject escalates the run, queue clears after action
+
+---
+
+## 2026-04-17 - Playbooks as source of truth (Phase 1)
+
+**Phase**: 1 (playbooks own reply behaviour)
+**Status**: complete
+
+### What was done
+
+Migrated all reply configuration from categories to playbooks. Categories are now pure classification labels. Per-step approval and voice hints added.
+
+**Migration**: `api/db/migrations/021_playbook_source_of_truth.sql`
+- Added `writing_style TEXT NOT NULL DEFAULT ''`, `reply_mode TEXT NOT NULL DEFAULT 'draft_only' CHECK (...)`, `confidence_threshold NUMERIC(4,3) NOT NULL DEFAULT 0.800` to `playbooks`
+- Dropped `allow_auto_reply`, `confidence_threshold`, `writing_style`, `migrated_to_flows` from `categories`
+
+**Backend**:
+- `api/types/index.ts` - `Category` / `CreateCategoryPayload` stripped to name, description, instructions, gmail_label_id only
+- `api/services/playbook/types.ts` - `Playbook` gets `writing_style`, `reply_mode`, `confidence_threshold`; `AskCustomerStep` and `SendReplyStep` get optional `require_approval`, `voice_hint`
+- `api/services/categorisation.ts` - removed legacy auto-draft path; confidence checked against `playbook.confidence_threshold`; voice inherited from playbook
+- `api/services/playbook/handlers/ask_customer.ts` - voice from `step.voice_hint ?? playbook.writing_style`; pause if `require_approval` or `reply_mode === 'draft_only'`
+- `api/services/playbook/handlers/send_reply.ts` - same treatment
+- `api/services/playbook/approval-sender.ts` - new service: `sendApprovedReply(run, body)` for approved pending-send steps
+- `api/services/playbook/parser.ts` - added `parsePlaybookStep()` for inline step generation
+- `api/routes/playbooks.ts` - POST/PUT accept new fields; added `POST /playbooks/parse-step`; `approve` endpoint handles `pending_send` steps via `sendApprovedReply()`
+- `api/routes/categories.ts` - CREATE/UPDATE/PATCH restricted to name, description, instructions only
+
+**Frontend**:
+- `frontend/src/lib/api.ts` - updated Category/Playbook interfaces, added `parseStep()` method
+- `frontend/src/routes/categories/+page.svelte` - removed all reply config fields; added info note redirecting to playbook
+- `frontend/src/routes/playbooks/+page.svelte` - playbook cards now show reply_mode and confidence from playbook
+- `frontend/src/routes/playbooks/[id]/+page.svelte` - top bar has Writing style, Reply mode, Min confidence; step editors show Voice hint and Require approval toggle; inline `+ insert step` rows and `+ Add step` flow using `parsePlaybookStep`
+
+**Verified**:
+- `deno check main.ts` → 0 errors
+- `pnpm check` → 0 errors (52 pre-existing warnings)
+- API smoke: categories return no reply fields, playbooks return all three new fields
+- Browser: categories modal shows only name/desc/instructions; playbook cards show reply_mode+confidence; editor shows writing_style, reply_mode, confidence, per-step voice_hint and require_approval toggles; Add step form renders; writing_style persists to DB ✓
+
+---
+
 ## 2026-04-16 - Sender name in AI replies
 
 **Phase**: polish

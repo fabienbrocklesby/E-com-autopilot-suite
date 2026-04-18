@@ -1,5 +1,8 @@
 <!--
   ManualActionBanner - rendered on /threads/[id] when a playbook run is waiting_for_human.
+  Handles two distinct waiting states:
+    1. manual_approval step - shows reason, optional reference context, optional input field
+    2. ask_customer / send_reply with require_approval - shows the AI-drafted message for review/edit before sending
   Props:
     run        - a PlaybookRun in waiting_for_human status (from playbooksApi.listRuns)
     onComplete - called after approve or reject so the parent can reload state
@@ -9,7 +12,8 @@
   import type { PlaybookRun } from "$lib/api";
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { Bell } from '@lucide/svelte';
+  import { untrack } from "svelte";
+  import { Bell, Mail } from '@lucide/svelte';
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -25,14 +29,18 @@
   } = $props();
 
   let humanInput = $state("");
+  let draftBody = $state(untrack(() => run.step_pending_send ?? ""));
   let submitting = $state(false);
   let error = $state<string | null>(null);
 
-  // Derive display values from the run's denormalized step fields.
-  // step_reason, step_capture_input, step_input_prompt, step_reference_context
-  // are populated by the /playbooks/runs list query for waiting_for_human runs.
+  // True when this pause is for an ask_customer or send_reply step with require_approval.
+  // The pending message is stored in step_pending_send and needs human review before sending.
+  let isPendingSend = $derived(
+    typeof run.step_pending_send === "string" && run.step_pending_send.length > 0,
+  );
+
   let reason = $derived(run.step_reason ?? "Action required");
-  let captureInput = $derived(run.step_capture_input === true);
+  let captureInput = $derived(!isPendingSend && run.step_capture_input === true);
   let inputPrompt = $derived(run.step_input_prompt ?? "What did you do?");
 
   // $derived.by() is used here because we map over an array and need the full
@@ -46,10 +54,11 @@
     }));
   });
 
-  // Approve is disabled while submitting. If the step requires input, the field
-  // must be non-empty before we enable the button.
   let canApprove = $derived(
-    !submitting && (!captureInput || humanInput.trim().length > 0),
+    !submitting &&
+    (isPendingSend
+      ? draftBody.trim().length > 0
+      : !captureInput || humanInput.trim().length > 0),
   );
 
   function formatKey(key: string): string {
@@ -60,7 +69,11 @@
     submitting = true;
     error = null;
     try {
-      await playbooksApi.approveRun(run.id, captureInput ? humanInput : undefined);
+      if (isPendingSend) {
+        await playbooksApi.approveRun(run.id, undefined, draftBody.trim());
+      } else {
+        await playbooksApi.approveRun(run.id, captureInput ? humanInput : undefined);
+      }
       humanInput = "";
       onComplete();
     } catch (e) {
@@ -87,39 +100,53 @@
 
 <div
   class="banner"
+  class:banner-draft={isPendingSend}
   role="alert"
   aria-live="polite"
   in:fly={{ y: prefersReducedMotion ? 0 : -8, duration: prefersReducedMotion ? 50 : 180, easing: cubicOut }}
 >
   <div class="banner-header">
-    <span class="banner-icon" aria-hidden="true"><Bell size={18} /></span>
-    <h2 class="banner-title">Action required</h2>
+    <span class="banner-icon" aria-hidden="true">
+      {#if isPendingSend}<Mail size={18} />{:else}<Bell size={18} />{/if}
+    </span>
+    <h2 class="banner-title">{isPendingSend ? "Review draft reply" : "Action required"}</h2>
   </div>
 
-  <p class="banner-reason">{reason}</p>
-
-  {#if referenceItems.length > 0}
-    <dl class="reference-list">
-      {#each referenceItems as item (item.key)}
-        <div class="reference-row">
-          <dt>{formatKey(item.key)}</dt>
-          <dd>{item.value}</dd>
-        </div>
-      {/each}
-    </dl>
-  {/if}
-
-  {#if captureInput}
-    <label class="input-label" for="human-input">
-      {inputPrompt}
-    </label>
+  {#if isPendingSend}
+    <p class="banner-reason">Edit the AI-drafted reply if needed, then send.</p>
+    <label class="input-label" for="draft-body">Draft message</label>
     <textarea
-      id="human-input"
-      bind:value={humanInput}
-      placeholder={inputPrompt}
-      rows="3"
+      id="draft-body"
+      bind:value={draftBody}
+      rows="6"
       disabled={submitting}
     ></textarea>
+  {:else}
+    <p class="banner-reason">{reason}</p>
+
+    {#if referenceItems.length > 0}
+      <dl class="reference-list">
+        {#each referenceItems as item (item.key)}
+          <div class="reference-row">
+            <dt>{formatKey(item.key)}</dt>
+            <dd>{item.value}</dd>
+          </div>
+        {/each}
+      </dl>
+    {/if}
+
+    {#if captureInput}
+      <label class="input-label" for="human-input">
+        {inputPrompt}
+      </label>
+      <textarea
+        id="human-input"
+        bind:value={humanInput}
+        placeholder={inputPrompt}
+        rows="3"
+        disabled={submitting}
+      ></textarea>
+    {/if}
   {/if}
 
   {#if error}
@@ -131,9 +158,9 @@
       class="btn-approve"
       onclick={approve}
       disabled={!canApprove}
-      aria-label="Mark action as done and continue the playbook run"
+      aria-label={isPendingSend ? "Send the reviewed reply to the customer" : "Mark action as done and continue the playbook run"}
     >
-      {submitting ? "Working…" : "Done, continue"}
+      {submitting ? "Working…" : isPendingSend ? "Send reply" : "Done, continue"}
     </button>
     <button
       class="btn-skip"
@@ -156,6 +183,15 @@
     border-radius: var(--radius, 8px);
     color: var(--color-text, #e2e8f0);
     box-shadow: var(--shadow-sm, 0 1px 3px rgba(0 0 0 / 0.3));
+  }
+
+  .banner-draft {
+    background: rgba(99 102 241 / 0.07);
+    border-color: var(--color-primary, #6366f1);
+  }
+
+  .banner-draft .banner-title {
+    color: var(--color-primary, #6366f1);
   }
 
   .banner-header {

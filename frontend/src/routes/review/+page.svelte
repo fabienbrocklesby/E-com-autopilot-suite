@@ -32,6 +32,9 @@
   // Per-run capture_input text: runId → typed text
   let runInputs = $state<Record<number, string>>({});
 
+  // Per-run editable reply body for pending_send approvals: runId → edited body
+  let runBodies = $state<Record<number, string>>({});
+
   // Per-draft edit state: draftId → edited body
   let editingBodies = $state<Record<number, string>>({});
 
@@ -54,6 +57,12 @@
       ]);
       reviewThreads = threadsRes.threads;
       pendingRuns = runsRes.runs;
+      // Initialise editable bodies from AI-drafted pending sends
+      for (const run of runsRes.runs) {
+        if (run.step_pending_send && !(run.id in runBodies)) {
+          runBodies[run.id] = run.step_pending_send;
+        }
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load review queue";
     } finally {
@@ -104,7 +113,9 @@
     error = null;
     try {
       const input = captureInput ? runInputs[runId] : undefined;
-      await playbooksApi.approveRun(runId, input);
+      // Pass edited reply body for pending_send approvals
+      const body = runBodies[runId];
+      await playbooksApi.approveRun(runId, input, body);
       successMessage = "Approved - playbook resumed.";
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
@@ -173,6 +184,30 @@
               <span class="approval-meta">Run #{run.id} · <a href="/threads/{run.thread_id}" class="thread-link">Thread #{run.thread_id}</a></span>
               <span class="approval-time">{new Date(run.updated_at).toLocaleString()}</span>
             </div>
+            {#if run.step_pending_send}
+              <div class="pending-send-area">
+                <div class="pending-send-header">
+                  <span class="pending-send-label">
+                    {run.step_type === 'ask_customer' ? 'Message to customer (held for approval)' : 'Reply to send (held for approval)'}
+                  </span>
+                  {#if runBodies[run.id] !== run.step_pending_send}
+                    <span class="edited-notice">edited</span>
+                  {/if}
+                </div>
+                <textarea
+                  class="pending-send-textarea"
+                  rows={6}
+                  value={runBodies[run.id] ?? run.step_pending_send}
+                  oninput={(e) => { runBodies[run.id] = (e.target as HTMLTextAreaElement).value; }}
+                ></textarea>
+                {#if runBodies[run.id] !== run.step_pending_send}
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    onclick={() => { runBodies[run.id] = run.step_pending_send!; }}
+                  >Reset to AI draft</button>
+                {/if}
+              </div>
+            {/if}
             {#if run.step_capture_input}
               <div class="capture-input-area">
                 <label class="capture-label" for="run-input-{run.id}">
@@ -485,6 +520,60 @@
   .capture-textarea:focus {
     outline: none;
     border-color: var(--color-primary);
+  }
+
+  /* ─── Pending send (reply approval) ─────────────────────────────────── */
+
+  .pending-send-area {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pending-send-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pending-send-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #818cf8;
+  }
+
+  .edited-notice {
+    font-size: 11px;
+    padding: 1px 6px;
+    background: rgba(251 146 60 / 0.15);
+    color: #fb923c;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .pending-send-textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid rgba(129 140 248 / 0.4);
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--color-surface-raised);
+    color: var(--color-text);
+    resize: vertical;
+    box-sizing: border-box;
+    line-height: 1.5;
+  }
+
+  .pending-send-textarea:focus {
+    outline: none;
+    border-color: #818cf8;
+  }
+
+  .btn-sm {
+    font-size: 12px;
+    padding: 4px 10px;
+    align-self: flex-start;
   }
 
   .empty-icon {

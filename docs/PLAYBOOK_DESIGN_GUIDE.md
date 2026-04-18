@@ -176,7 +176,8 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 - `goal` (string, required): Describes WHAT we need and WHY, in one sentence. The AI drafts the actual message.
 - `required_context` (string[], required): Variables that must be present for this step to be satisfied. If already present, the step auto-skips.
 - `on_reply_goto` (string, required): Step ID to jump to when the customer replies. Usually `"extract_1"` to re-extract with the new info.
-- `voice_hint` (string, optional): Tone guidance for the AI draft.
+- `voice_hint` (string, optional): Step-level tone override. Overrides the playbook's default `writing_style` for this step only.
+- `require_approval` (boolean, optional, default false): Set `true` when the AI's draft message needs human review before sending to the customer. Only generate when the description explicitly says "let me review", "hold for approval", or similar.
 - `message` (string, optional): Legacy - literal message text. Do NOT use in new playbooks.
 
 **Design rules:**
@@ -318,7 +319,8 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 **Fields:**
 - `goal` (string, preferred): Describes what the reply should communicate. The AI writes the actual text at runtime.
 - `reference_context` (string[], optional): Variable names whose values should naturally appear in the reply.
-- `voice_hint` (string, optional): Tone guidance.
+- `voice_hint` (string, optional): Step-level tone override. Overrides the playbook's default `writing_style` for this step only. Use when this step needs a different tone than the rest of the playbook (e.g. more formal for a refund confirmation vs. casual for a status update).
+- `require_approval` (boolean, optional, default false): Set `true` when the reply needs human review before sending. The run pauses as `waiting_for_human` with the AI-drafted body available for editing. The reviewer reads, optionally edits, and approves. Only generate this when the description explicitly says "let me review", "hold for review", "needs approval", or similar.
 - `message` (string, legacy): Literal text. Only for very simple fixed replies.
 
 ### complete
@@ -394,6 +396,26 @@ Use separate escalate steps with specific reasons for different failure paths.
 ### Principle 6: Messages are AI-drafted, not templates
 
 `ask_customer` takes a `goal`, not a literal message. `send_reply` takes a `goal` + `reference_context`, not a literal message. The AI writes the actual text at runtime based on thread history, context variables, and voice settings.
+
+### Principle 7: Voice and tone live at the playbook level
+
+The playbook has a `writing_style` field (set by the client in the editor) that controls the default tone for all AI-generated messages in the flow. You do NOT need to invent `voice_hint` values for every step — leave `voice_hint` unset unless a specific step genuinely needs a different tone from the rest of the playbook. Examples:
+- A refund confirmation might need `voice_hint: "empathetic and reassuring"` even if the playbook default is more neutral.
+- A status update reply in an otherwise formal playbook might use `voice_hint: "brief and direct"`.
+
+If no description-level or step-level tone cue is provided, omit `voice_hint` entirely. The playbook `writing_style` will be used automatically.
+
+### Principle 8: require_approval is explicit, not assumed
+
+Do NOT add `require_approval: true` to steps unless the description clearly says the human wants to review before sending. Signs to look for:
+- "let me review the reply before it sends"
+- "hold for my approval"
+- "I want to check it first"
+- "don't send automatically"
+
+If the description says the system should just reply, omit `require_approval`. The client can always enable it later in the step editor.
+
+Note: the playbook has a global `reply_mode` setting. If it is `draft_only`, ALL send steps automatically require approval regardless of step-level settings. The parser should still set `require_approval: true` at the step level when the description asks for it, for clarity.
 
 ## Rules for step generation
 

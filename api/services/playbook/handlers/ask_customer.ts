@@ -5,7 +5,7 @@
 import type { StepHandler, StepResult, RunContext, PlaybookStep, AskCustomerStep } from "../types.ts";
 import { sendReply } from "../../gmail.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
-import { query, queryOne } from "../../../db/client.ts";
+import { query } from "../../../db/client.ts";
 
 export const askCustomerHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -22,6 +22,21 @@ export const askCustomerHandler: StepHandler = {
     // Backward compat: if no goal, send the literal message
     if (!askStep.goal) {
       const message = askStep.message ?? "";
+      const requireApprovalLegacy = askStep.require_approval === true || ctx.playbook.reply_mode === "draft_only";
+
+      if (requireApprovalLegacy) {
+        console.log(`[playbook] ask_customer (legacy): reply held for approval for run ${ctx.run.id}`);
+        return {
+          decision: { action: "pause", status: "waiting_for_human" },
+          output: {
+            action: "pending_approval",
+            pending_send: message,
+            on_reply_goto: askStep.on_reply_goto,
+            step_type: "ask_customer",
+          },
+        };
+      }
+
       await sendReply(
         ctx.email,
         ctx.gmailThreadId,
@@ -62,14 +77,8 @@ export const askCustomerHandler: StepHandler = {
       };
     }
 
-    // 2. Load category writing_style
-    const category = ctx.playbook.category_id
-      ? await queryOne<{ writing_style: string | null }>(
-          "SELECT writing_style FROM categories WHERE id = $1",
-          [ctx.playbook.category_id],
-        )
-      : null;
-    const voice = askStep.voice_hint ?? category?.writing_style ?? "friendly and professional";
+    // 2. Resolve writing voice: step-level override → playbook default → fallback
+    const voice = askStep.voice_hint ?? (ctx.playbook.writing_style || "friendly and professional");
 
     // 3. Load previous ask_customer messages sent on this run
     const prevExecutions = await query<{ output: { message_sent?: string } | null }>(
@@ -173,6 +182,22 @@ RULES:
     }
 
     if (parsed.action === "ask" && parsed.message) {
+      const requireApproval = askStep.require_approval === true || ctx.playbook.reply_mode === "draft_only";
+
+      if (requireApproval) {
+        console.log(`[playbook] ask_customer: reply held for approval for run ${ctx.run.id}`);
+        return {
+          decision: { action: "pause", status: "waiting_for_human" },
+          output: {
+            action: "pending_approval",
+            pending_send: parsed.message,
+            on_reply_goto: askStep.on_reply_goto,
+            step_type: "ask_customer",
+          },
+          aiCalls,
+        };
+      }
+
       await sendReply(
         ctx.email,
         ctx.gmailThreadId,

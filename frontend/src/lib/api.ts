@@ -164,9 +164,7 @@ export interface Category {
 	name: string;
 	description: string;
 	instructions: string;
-	allow_auto_reply: boolean;
-	confidence_threshold: number;
-	writing_style: string;
+	gmail_label_id: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -175,9 +173,6 @@ export interface CategoryPayload {
 	name: string;
 	description: string;
 	instructions: string;
-	allow_auto_reply: boolean;
-	confidence_threshold: number;
-	writing_style: string;
 }
 
 export const categoriesApi = {
@@ -464,6 +459,9 @@ export interface Playbook {
         version: number;
         is_active: boolean;
         customer_silence_hours: number;
+        writing_style: string;
+        reply_mode: 'auto_reply' | 'draft_only';
+        confidence_threshold: number;
         created_at: string;
         updated_at: string;
 }
@@ -484,6 +482,10 @@ export interface PlaybookRun {
         step_capture_input?: boolean | null;
         step_input_prompt?: string | null;
         step_reference_context?: string[] | null;
+        // Step type the run is currently paused at (e.g. 'send_reply', 'ask_customer', 'manual_approval')
+        step_type?: string | null;
+        // AI-drafted body waiting for human approval (set when step_type is send_reply or ask_customer)
+        step_pending_send?: string | null;
 }
 
 export interface StepExecution {
@@ -526,14 +528,14 @@ export const playbooksApi = {
                 return request<{ playbook: Playbook }>(`/playbooks/${id}`);
         },
 
-        create(payload: { name: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[] }) {
+        create(payload: { name: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; writing_style?: string; reply_mode?: 'auto_reply' | 'draft_only'; confidence_threshold?: number }) {
                 return request<{ playbook: Playbook }>('/playbooks', {
                         method: 'POST',
                         body: JSON.stringify(payload)
                 });
         },
 
-        update(id: number, payload: { name?: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; is_active?: boolean; customer_silence_hours?: number }) {
+        update(id: number, payload: { name?: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; is_active?: boolean; customer_silence_hours?: number; writing_style?: string; reply_mode?: 'auto_reply' | 'draft_only'; confidence_threshold?: number }) {
                 return request<{ playbook: Playbook }>(`/playbooks/${id}`, {
                         method: 'PUT',
                         body: JSON.stringify(payload)
@@ -546,6 +548,13 @@ export const playbooksApi = {
 
         parse(payload: { description: string; workspace_id?: number }) {
                 return request<{ steps: PlaybookStep[]; warnings: string[] }>('/playbooks/parse', {
+                        method: 'POST',
+                        body: JSON.stringify(payload)
+                });
+        },
+
+        parseStep(payload: { description: string; previous_steps?: PlaybookStep[]; next_steps?: PlaybookStep[]; playbook_context?: string; workspace_id?: number }) {
+                return request<{ step: PlaybookStep }>('/playbooks/parse-step', {
                         method: 'POST',
                         body: JSON.stringify(payload)
                 });
@@ -579,10 +588,13 @@ export const playbooksApi = {
                 return request<{ run: PlaybookRun; executions: StepExecution[] }>(`/playbooks/runs/${runId}`);
         },
 
-        approveRun(runId: number, input?: string) {
+        approveRun(runId: number, input?: string, body?: string) {
+                const payload: { input?: string; body?: string } = {};
+                if (input !== undefined) payload.input = input;
+                if (body !== undefined) payload.body = body;
                 return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/approve`, {
                         method: 'POST',
-                        body: input !== undefined ? JSON.stringify({ input }) : undefined
+                        body: Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined
                 });
         },
 

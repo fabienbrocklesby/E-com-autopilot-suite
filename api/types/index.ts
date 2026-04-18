@@ -18,9 +18,6 @@ export interface Category {
   name: string;
   description: string;
   instructions: string;
-  allow_auto_reply: boolean;
-  confidence_threshold: number;
-  writing_style: string;
   gmail_label_id: string | null;
   created_at: Date;
   updated_at: Date;
@@ -149,9 +146,6 @@ export interface CreateCategoryPayload {
   name: string;
   description: string;
   instructions: string;
-  allow_auto_reply: boolean;
-  confidence_threshold: number;
-  writing_style: string;
 }
 
 export type UpdateCategoryPayload = Partial<CreateCategoryPayload>;
@@ -194,10 +188,6 @@ export interface CategorisationResult {
   categoryId: number | null;
   confidence: number;
   reasoning: string;
-}
-
-export interface DraftReplyResult {
-  body: string;
 }
 
 // ─── Gmail API types ─────────────────────────────────────────────────────────

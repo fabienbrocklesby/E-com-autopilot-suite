@@ -162,14 +162,6 @@
             {#if row.category.description}
               <p class="cat-desc">{row.category.description}</p>
             {/if}
-            <div class="cat-chips">
-              <span class="chip" class:enabled={row.category.allow_auto_reply}>
-                Auto-reply {row.category.allow_auto_reply ? "on" : "off"}
-              </span>
-              <span class="chip">
-                Threshold {Math.round(row.category.confidence_threshold * 100)}%
-              </span>
-            </div>
           </div>
 
           <div class="playbook-col">
@@ -178,6 +170,8 @@
                 <a href="/playbooks/{row.playbook.id}" class="pb-name">{row.playbook.name}</a>
                 <div class="pb-meta">
                   v{row.playbook.version} · {row.playbook.steps.length} step{row.playbook.steps.length !== 1 ? "s" : ""}
+                  · {row.playbook.reply_mode === 'auto_reply' ? 'Auto-reply' : 'Draft only'}
+                  · min {Math.round((row.playbook.confidence_threshold ?? 0.8) * 100)}% confidence
                 </div>
               </div>
               <div class="pb-actions">

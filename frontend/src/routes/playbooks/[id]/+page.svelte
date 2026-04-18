@@ -11,7 +11,7 @@
   import { goto } from "$app/navigation";
   import { playbooksApi, categoriesApi } from "$lib/api";
   import type { Playbook, PlaybookStep, Category, DryRunResult } from "$lib/api";
-  import { PlusCircle, TableProperties, Pencil, MessageCircleQuestion, GitBranch, Hand, Send, CheckCircle, AlertTriangle, ChevronUp, ChevronDown, X } from '@lucide/svelte';
+  import { PlusCircle, TableProperties, Pencil, MessageCircleQuestion, GitBranch, Hand, Send, CheckCircle, AlertTriangle, ChevronUp, ChevronDown, X, Scale } from '@lucide/svelte';
 
   const playbookId = parseInt($page.params.id ?? "0");
 
@@ -35,11 +35,20 @@
   let description = $state("");
   let steps = $state<PlaybookStep[]>([]);
   let customerSilenceHours = $state(168);
+  let writingStyle = $state("");
+  let replyMode = $state<'auto_reply' | 'draft_only'>('draft_only');
+  let confidenceThreshold = $state(0.8);
 
   // Per-step edit modal
   let editingStep = $state<PlaybookStep | null>(null);
   let editingIndex = $state(-1);
   let editDraft = $state<Record<string, unknown>>({});
+
+  // Add step inline input
+  let showAddStep = $state(false);
+  let addStepDesc = $state("");
+  let addStepAtIndex = $state(-1); // -1 = append at end
+  let addingStep = $state(false);
 
   // Dry-run modal
   let showDryRun = $state(false);
@@ -54,6 +63,7 @@
     find_sheet_row:  { icon: TableProperties,      label: "Find Sheet Row",  color: "#0ea5e9" },
     update_sheet:    { icon: Pencil,                label: "Update Sheet",    color: "#0ea5e9" },
     ask_customer:    { icon: MessageCircleQuestion, label: "Ask Customer",    color: "#f59e0b" },
+    evaluate:        { icon: Scale,                 label: "Evaluate",        color: "#8b5cf6" },
     branch:          { icon: GitBranch,             label: "Branch",          color: "#a78bfa" },
     manual_approval: { icon: Hand,                  label: "Manual Approval", color: "#f97316" },
     send_reply:      { icon: Send,                  label: "Send Reply",      color: "#10b981" },
@@ -72,10 +82,19 @@
       case "extract": return `Extract: ${(step.variables as string[] | undefined)?.join(", ") ?? "–"}`;
       case "find_sheet_row": return `Search sheet by ${((step.match_attempts as {column:string}[] | undefined)?.[0]?.column) ?? "…"}`;
       case "update_sheet": return `Update ${((step.updates as {column:string}[] | undefined)?.length ?? 0)} column(s) in row`;
-      case "ask_customer": return `Ask: "${(step.message as string | undefined)?.slice(0, 60) ?? "–"}"`;
+      case "ask_customer": {
+        const text = (step.goal as string | undefined) ?? (step.message as string | undefined) ?? "–";
+        return `Ask: "${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`;
+      }
+      case "evaluate": {
+        const goal = (step.goal as string | undefined) ?? "–";
+        return `Evaluate: ${goal.slice(0, 70)}${goal.length > 70 ? "…" : ""}`;
+      }
       case "branch": return `If ${step.condition} → ${step.if_true} / ${step.if_false}`;
       case "manual_approval": return `Hold for approval: "${(step.reason as string | undefined)?.slice(0, 50) ?? "–"}"`;
       case "send_reply": {
+        const goal = step.goal as string | undefined;
+        if (goal) return `Reply (AI): "${goal.slice(0, 60)}${goal.length > 60 ? "…" : ""}"`;
         const msg = step.message;
         if (typeof msg === "string") return `Reply: "${msg.slice(0, 60)}"`;
         if (typeof msg === "object" && msg !== null && "ai_generate_using_category_voice" in (msg as object)) return "Reply: [AI generated]";
@@ -101,6 +120,9 @@
       categoryId = playbook.category_id;
       description = playbook.plain_language_description ?? "";
       customerSilenceHours = playbook.customer_silence_hours ?? 168;
+      writingStyle = playbook.writing_style ?? "";
+      replyMode = playbook.reply_mode ?? 'draft_only';
+      confidenceThreshold = playbook.confidence_threshold ?? 0.8;
       steps = Array.isArray(playbook.steps)
         ? playbook.steps
         : typeof playbook.steps === "string"
@@ -145,6 +167,9 @@
         steps,
         is_active: andActivate ? true : playbook?.is_active,
         customer_silence_hours: customerSilenceHours,
+        writing_style: writingStyle,
+        reply_mode: replyMode,
+        confidence_threshold: confidenceThreshold,
       });
       if (andActivate) {
         await playbooksApi.activate(playbookId);
@@ -193,6 +218,31 @@
     const next = [...steps];
     [next[index], next[target]] = [next[target], next[index]];
     steps = next;
+  }
+
+  async function addStep() {
+    if (!addStepDesc.trim()) return;
+    addingStep = true;
+    try {
+      const prevSteps = addStepAtIndex === -1 ? steps : steps.slice(0, addStepAtIndex);
+      const nextSteps = addStepAtIndex === -1 ? [] : steps.slice(addStepAtIndex);
+      const res = await playbooksApi.parseStep({
+        description: addStepDesc.trim(),
+        previous_steps: prevSteps,
+        next_steps: nextSteps,
+        playbook_context: description,
+      });
+      const insertAt = addStepAtIndex === -1 ? steps.length : addStepAtIndex;
+      const arr = [...steps];
+      arr.splice(insertAt, 0, res.step);
+      steps = arr;
+      addStepDesc = "";
+      showAddStep = false;
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to generate step";
+    } finally {
+      addingStep = false;
+    }
   }
 
   // ─── Dry run ─────────────────────────────────────────────────────────────────
@@ -308,7 +358,7 @@
 {:else if playbook}
   <div class="editor-layout">
 
-    <!-- ── Top bar: name + category ─────────────────────────────────────────── -->
+    <!-- ── Top bar: name + category + reply settings ──────────────────────────── -->
     <div class="top-bar card">
       <div class="field">
         <label>Name</label>
@@ -326,6 +376,21 @@
       <div class="field">
         <label title="Escalate the run if the customer hasn't replied after this many hours">Customer silence timeout (hours)</label>
         <input type="number" bind:value={customerSilenceHours} min="0" step="1" style="width:100px" />
+      </div>
+      <div class="field">
+        <label title="How the AI should write emails - e.g. 'Professional and concise. Use the customer's first name.'">Writing style</label>
+        <input type="text" bind:value={writingStyle} placeholder="e.g. Professional and concise. Use the customer's first name." style="min-width:220px" />
+      </div>
+      <div class="field">
+        <label title="draft_only: always queue for review. auto_reply: send automatically if step allows.">Reply mode</label>
+        <select bind:value={replyMode}>
+          <option value="draft_only">Draft only (always queue for review)</option>
+          <option value="auto_reply">Auto-reply (send immediately)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label title="Minimum AI confidence (0–1) required to start this playbook automatically. Below threshold: thread goes to review.">Min confidence</label>
+        <input type="number" bind:value={confidenceThreshold} min="0" max="1" step="0.05" style="width:80px" />
       </div>
     </div>
 
@@ -391,9 +456,38 @@
                   <button class="step-btn danger" onclick={() => deleteStep(i)} title="Delete"><X size={14} /></button>
                 </div>
               </div>
+              <!-- Insert step below this one -->
+              <div class="insert-step-row">
+                <button class="insert-btn" title="Insert step here" onclick={() => { addStepAtIndex = i + 1; showAddStep = true; addStepDesc = ''; }}>
+                  + insert step
+                </button>
+              </div>
             {/each}
           </div>
         {/if}
+
+        <!-- Add step to end -->
+        <div class="add-step-area">
+          {#if showAddStep}
+            <div class="add-step-form">
+              <input
+                type="text"
+                bind:value={addStepDesc}
+                placeholder="Describe what this step should do…"
+                onkeydown={(e) => { if (e.key === 'Enter') addStep(); if (e.key === 'Escape') { showAddStep = false; } }}
+                autofocus
+              />
+              <button class="btn btn-primary btn-sm" onclick={addStep} disabled={addingStep}>
+                {addingStep ? 'Generating…' : 'Add'}
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick={() => { showAddStep = false; addStepDesc = ''; }}>Cancel</button>
+            </div>
+          {:else}
+            <button class="btn btn-ghost" onclick={() => { addStepAtIndex = -1; showAddStep = true; addStepDesc = ''; }}>
+              + Add step
+            </button>
+          {/if}
+        </div>
       </div>
     </div>
 
@@ -457,12 +551,50 @@
         <!-- ask_customer -->
         {:else if editingStep.type === "ask_customer"}
           <div class="field">
-            <label>Message <span class="hint">(use {'{variable}'} for interpolation)</span></label>
-            <textarea rows={4} value={draftStr("message")} oninput={(e) => setDraft("message", (e.target as HTMLTextAreaElement).value)}></textarea>
+            <label>Goal <span class="hint">What information are you trying to get? AI drafts the question.</span></label>
+            <input type="text" value={draftStr("goal")} oninput={(e) => setDraft("goal", (e.target as HTMLInputElement).value)} placeholder="Ask the customer for their order number" />
+          </div>
+          <div class="field">
+            <label>Required context <span class="hint">(comma-separated; step is skipped when all are already known)</span></label>
+            <input type="text" value={((editDraft.required_context as string[] | undefined) ?? []).join(", ")} oninput={(e) => setDraft("required_context", (e.target as HTMLInputElement).value.split(",").map((v) => v.trim()).filter(Boolean))} placeholder="order_number, customer_email" />
           </div>
           <div class="field">
             <label>On reply - go to step ID</label>
             <input type="text" value={draftStr("on_reply_goto")} oninput={(e) => setDraft("on_reply_goto", (e.target as HTMLInputElement).value)} placeholder="extract_1" />
+          </div>
+          <div class="field">
+            <label>Voice hint <span class="hint">(override playbook writing style for this step)</span></label>
+            <input type="text" value={draftStr("voice_hint")} oninput={(e) => setDraft("voice_hint", (e.target as HTMLInputElement).value)} placeholder="Empathetic and brief" />
+          </div>
+          <label class="field toggle-field">
+            <span class="label">Require human approval before sending</span>
+            <label class="toggle">
+              <input type="checkbox" checked={!!editDraft.require_approval} onchange={(e) => setDraft("require_approval", (e.target as HTMLInputElement).checked)} />
+              <span class="toggle-slider"></span>
+            </label>
+          </label>
+
+        <!-- evaluate -->
+        {:else if editingStep.type === "evaluate"}
+          <div class="field">
+            <label>Goal <span class="hint">What decision is this step making?</span></label>
+            <input type="text" value={draftStr("goal")} oninput={(e) => setDraft("goal", (e.target as HTMLInputElement).value)} placeholder="Do we have the order number to proceed?" />
+          </div>
+          <div class="field">
+            <label>Required context <span class="hint">(comma-separated; all must be non-null to be satisfied)</span></label>
+            <input type="text" value={((editDraft.required_context as string[] | undefined) ?? []).join(", ")} oninput={(e) => setDraft("required_context", (e.target as HTMLInputElement).value.split(",").map((v) => v.trim()).filter(Boolean))} placeholder="order_number, customer_email" />
+          </div>
+          <div class="field">
+            <label>If satisfied - go to step ID</label>
+            <input type="text" value={draftStr("if_satisfied_goto")} oninput={(e) => setDraft("if_satisfied_goto", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="field">
+            <label>If missing - go to step ID</label>
+            <input type="text" value={draftStr("if_missing_goto")} oninput={(e) => setDraft("if_missing_goto", (e.target as HTMLInputElement).value)} />
+          </div>
+          <div class="field">
+            <label>If escalate - go to step ID</label>
+            <input type="text" value={draftStr("if_escalate_goto")} oninput={(e) => setDraft("if_escalate_goto", (e.target as HTMLInputElement).value)} />
           </div>
 
         <!-- branch -->
@@ -502,21 +634,20 @@
         <!-- send_reply -->
         {:else if editingStep.type === "send_reply"}
           <div class="field">
-            <label>Message mode</label>
-            <select value={draftSendMessage() === "__ai__" ? "__ai__" : "text"} onchange={(e) => {
-              if ((e.target as HTMLSelectElement).value === "__ai__") setDraftSendMessage("__ai__");
-              else setDraftSendMessage("");
-            }}>
-              <option value="text">Custom text</option>
-              <option value="__ai__">AI generates using category voice</option>
-            </select>
+            <label>Goal <span class="hint">What should this reply achieve? AI drafts the message from this.</span></label>
+            <input type="text" value={draftStr("goal")} oninput={(e) => setDraft("goal", (e.target as HTMLInputElement).value)} placeholder="Confirm the refund has been processed for the approved amount" />
           </div>
-          {#if draftSendMessage() !== "__ai__"}
-            <div class="field">
-              <label>Reply text <span class="hint">(use {'{variable}'} for interpolation)</span></label>
-              <textarea rows={5} value={draftSendMessage()} oninput={(e) => setDraftSendMessage((e.target as HTMLTextAreaElement).value)}></textarea>
-            </div>
-          {/if}
+          <div class="field">
+            <label>Voice hint <span class="hint">(override playbook writing style for this step)</span></label>
+            <input type="text" value={draftStr("voice_hint")} oninput={(e) => setDraft("voice_hint", (e.target as HTMLInputElement).value)} placeholder="Empathetic and brief" />
+          </div>
+          <label class="field toggle-field">
+            <span class="label">Require human approval before sending</span>
+            <label class="toggle">
+              <input type="checkbox" checked={!!editDraft.require_approval} onchange={(e) => setDraft("require_approval", (e.target as HTMLInputElement).checked)} />
+              <span class="toggle-slider"></span>
+            </label>
+          </label>
 
         <!-- escalate -->
         {:else if editingStep.type === "escalate"}
@@ -818,6 +949,87 @@
   .step-btn:hover { background: var(--color-surface); color: var(--color-text); }
   .step-btn:disabled { opacity: 0.3; cursor: default; }
   .step-btn.danger:hover { background: rgba(239 68 68 / 0.15); border-color: rgba(239 68 68 / 0.4); color: var(--color-danger); }
+
+  .insert-step-row {
+    display: flex;
+    justify-content: center;
+  }
+
+  .insert-btn {
+    background: none;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    opacity: 0.5;
+  }
+
+  .insert-btn:hover {
+    opacity: 1;
+    background: var(--color-surface-2);
+    color: var(--color-text);
+  }
+
+  .add-step-area {
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .add-step-form {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+    align-items: center;
+  }
+
+  .add-step-form input {
+    flex: 1;
+  }
+
+  .toggle-field {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .toggle {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  .toggle input { opacity: 0; width: 0; height: 0; }
+
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: 20px;
+    transition: 0.2s;
+  }
+
+  .toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 2px;
+    bottom: 2px;
+    background: var(--color-text-muted);
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+
+  .toggle input:checked + .toggle-slider { background: var(--color-primary); border-color: var(--color-primary); }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(16px); background: white; }
 
   .bottom-bar {
     display: flex;

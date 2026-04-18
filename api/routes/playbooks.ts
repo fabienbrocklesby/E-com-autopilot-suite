@@ -6,10 +6,11 @@ import { Hono } from "hono";
 import { query, queryOne, execute } from "../db/client.ts";
 import { AppError } from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
-import { parsePlaybook } from "../services/playbook/parser.ts";
+import { parsePlaybook, parsePlaybookStep } from "../services/playbook/parser.ts";
 import { dryRunPlaybook } from "../services/playbook/dry-run.ts";
 import { advanceRun } from "../services/playbook/mod.ts";
-import type { Playbook, PlaybookRun, StepExecution, ManualApprovalStep, PlaybookStep } from "../services/playbook/types.ts";
+import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
+import type { Playbook, PlaybookRun, StepExecution, ManualApprovalStep, PlaybookStep, AskCustomerStep, SendReplyStep } from "../services/playbook/types.ts";
 
 export const playbooksRouter = new Hono();
 
@@ -26,6 +27,29 @@ playbooksRouter.post("/parse", async (c) => {
   const workspaceId = body.workspace_id ?? 1;
   const result = await parsePlaybook(body.description.trim(), workspaceId);
   return c.json(result);
+});
+
+// POST /playbooks/parse-step
+playbooksRouter.post("/parse-step", async (c) => {
+  const body = await c.req.json<{
+    description: string;
+    previous_steps?: PlaybookStep[];
+    next_steps?: PlaybookStep[];
+    playbook_context?: string;
+    workspace_id?: number;
+  }>();
+  if (!body.description || typeof body.description !== "string") {
+    throw new AppError(422, "description is required");
+  }
+  const workspaceId = body.workspace_id ?? 1;
+  const step = await parsePlaybookStep(
+    body.description.trim(),
+    body.previous_steps ?? [],
+    body.next_steps ?? [],
+    body.playbook_context ?? "",
+    workspaceId,
+  );
+  return c.json({ step });
 });
 
 // ─── Run management (must be before /:id routes) ─────────────────────────────
@@ -55,8 +79,16 @@ playbooksRouter.get("/runs", async (c) => {
 
   const where = conditions.join(" AND ");
 
-  const runs = await query<PlaybookRun & { playbook_name: string; step_reason: string | null; step_capture_input: boolean; step_input_prompt: string | null }>(
+  const runs = await query<PlaybookRun & {
+    playbook_name: string;
+    step_reason: string | null;
+    step_capture_input: boolean;
+    step_input_prompt: string | null;
+    step_type: string | null;
+    step_pending_send: string | null;
+  }>(
     `SELECT pr.*, p.name AS playbook_name,
+      -- manual_approval: reason, capture_input, input_prompt, reference_context
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
           SELECT (step->>'reason')
@@ -96,7 +128,27 @@ playbooksRouter.get("/runs", async (c) => {
           LIMIT 1
         )
         ELSE NULL
-      END AS step_reference_context
+      END AS step_reference_context,
+      -- current step type (for frontend to know if it's a pending send vs manual approval)
+      (
+        SELECT step->>'type'
+        FROM jsonb_array_elements(p.steps) AS step
+        WHERE step->>'id' = pr.current_step_id
+        LIMIT 1
+      ) AS step_type,
+      -- pending send body from last step execution (for send_reply/ask_customer require_approval)
+      CASE WHEN pr.status = 'waiting_for_human'
+        THEN (
+          SELECT pse.output->>'pending_send'
+          FROM playbook_step_executions pse
+          WHERE pse.run_id = pr.id
+            AND pse.step_id = pr.current_step_id
+            AND pse.output->>'action' = 'pending_approval'
+          ORDER BY pse.created_at DESC
+          LIMIT 1
+        )
+        ELSE NULL
+      END AS step_pending_send
      FROM playbook_runs pr
      JOIN playbooks p ON p.id = pr.playbook_id
      WHERE ${where}
@@ -154,19 +206,78 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
     typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
 
   const currentStep = steps.find((s) => s.id === run.current_step_id);
-  if (!currentStep || currentStep.type !== "manual_approval") {
-    throw new AppError(409, "Current step is not a manual_approval step");
-  }
+  if (!currentStep) throw new AppError(409, "Current step not found in playbook");
 
-  const approvalStep = currentStep as ManualApprovalStep;
-
-  // Accept optional human input and merge into context
-  let body: { input?: string } = {};
+  // Accept optional human input / edited reply body
+  let body: { input?: string; body?: string } = {};
   try {
     body = await c.req.json();
   } catch {
     // no body - that's fine
   }
+
+  // Handle send_reply / ask_customer steps paused for require_approval
+  if (currentStep.type === "send_reply" || currentStep.type === "ask_customer") {
+    const lastExec = await queryOne<StepExecution>(
+      `SELECT * FROM playbook_step_executions
+       WHERE run_id = $1 AND step_id = $2
+       ORDER BY created_at DESC LIMIT 1`,
+      [runId, currentStep.id],
+    );
+
+    const output = typeof lastExec?.output === "string"
+      ? JSON.parse(lastExec.output as string)
+      : (lastExec?.output as Record<string, unknown> | null);
+
+    if (output?.action === "pending_approval" && typeof output.pending_send === "string") {
+      // Use human-edited body if provided, otherwise use the AI-drafted body
+      const sendBody = (typeof body.body === "string" && body.body.trim()) ? body.body.trim() : output.pending_send as string;
+      await sendApprovedReply(run, sendBody);
+
+      const stepType = currentStep.type;
+      const currentIndex = steps.findIndex((s) => s.id === currentStep.id);
+
+      let nextStepId: string | null = null;
+      if (stepType === "ask_customer") {
+        nextStepId = (currentStep as AskCustomerStep).on_reply_goto ?? null;
+      } else {
+        nextStepId = currentIndex < steps.length - 1 ? steps[currentIndex + 1].id : null;
+      }
+
+      const newStatus = stepType === "ask_customer" ? "waiting_for_customer" : "running";
+
+      if (nextStepId && newStatus === "running") {
+        await execute(
+          "UPDATE playbook_runs SET status = 'running', current_step_id = $1 WHERE id = $2",
+          [nextStepId, runId],
+        );
+        const result = await advanceRun(runId);
+        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+        return c.json({ run: updated, result, sent: true });
+      } else if (nextStepId && newStatus === "waiting_for_customer") {
+        await execute(
+          "UPDATE playbook_runs SET status = 'waiting_for_customer', current_step_id = $1 WHERE id = $2",
+          [nextStepId, runId],
+        );
+        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+        return c.json({ run: updated, sent: true });
+      } else {
+        await execute(
+          "UPDATE playbook_runs SET status = 'complete', current_step_id = NULL WHERE id = $1",
+          [runId],
+        );
+        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+        return c.json({ run: updated, sent: true });
+      }
+    }
+  }
+
+  // Standard manual_approval step flow
+  if (currentStep.type !== "manual_approval") {
+    throw new AppError(409, "Current step is not a manual_approval step and has no pending send");
+  }
+
+  const approvalStep = currentStep as ManualApprovalStep;
 
   if (body.input !== undefined && body.input !== null) {
     const contextKey = approvalStep.input_context_key ?? "human_notes";
@@ -215,7 +326,22 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
     typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
 
   const currentStep = steps.find((s) => s.id === run.current_step_id);
-  if (!currentStep || currentStep.type !== "manual_approval") {
+  if (!currentStep) {
+    throw new AppError(409, "Current step not found in playbook");
+  }
+
+  // For pending_send approvals (ask_customer/send_reply with require_approval),
+  // rejection means "don't send this" — escalate the run.
+  if (currentStep.type === "ask_customer" || currentStep.type === "send_reply") {
+    await execute(
+      "UPDATE playbook_runs SET status = 'escalated', updated_at = NOW() WHERE id = $1",
+      [runId],
+    );
+    const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+    return c.json({ run: updated, result: { action: "escalated" } });
+  }
+
+  if (currentStep.type !== "manual_approval") {
     throw new AppError(409, "Current step is not a manual_approval step");
   }
 
@@ -266,6 +392,9 @@ playbooksRouter.post("/", async (c) => {
     plain_language_description?: string;
     steps?: PlaybookStep[];
     customer_silence_hours?: number;
+    writing_style?: string;
+    reply_mode?: "auto_reply" | "draft_only";
+    confidence_threshold?: number;
   }>();
 
   if (!body.name || typeof body.name !== "string") {
@@ -273,8 +402,8 @@ playbooksRouter.post("/", async (c) => {
   }
 
   const row = await queryOne<Playbook>(
-    `INSERT INTO playbooks (workspace_id, category_id, name, plain_language_description, steps, version, is_active, customer_silence_hours)
-     VALUES ($1, $2, $3, $4, $5::jsonb, 1, false, $6)
+    `INSERT INTO playbooks (workspace_id, category_id, name, plain_language_description, steps, version, is_active, customer_silence_hours, writing_style, reply_mode, confidence_threshold)
+     VALUES ($1, $2, $3, $4, $5::jsonb, 1, false, $6, $7, $8, $9)
      RETURNING *`,
     [
       workspaceId,
@@ -283,6 +412,9 @@ playbooksRouter.post("/", async (c) => {
       body.plain_language_description ?? null,
       JSON.stringify(body.steps ?? []),
       body.customer_silence_hours ?? 168,
+      body.writing_style ?? "",
+      body.reply_mode ?? "draft_only",
+      body.confidence_threshold ?? 0.8,
     ],
   );
 
@@ -318,6 +450,9 @@ playbooksRouter.put("/:id", async (c) => {
     steps?: PlaybookStep[];
     is_active?: boolean;
     customer_silence_hours?: number;
+    writing_style?: string;
+    reply_mode?: "auto_reply" | "draft_only";
+    confidence_threshold?: number;
   }>();
 
   const existing = await queryOne<Playbook>(
@@ -342,8 +477,11 @@ playbooksRouter.put("/:id", async (c) => {
        steps = $4::jsonb,
        version = $5,
        is_active = $6,
-       customer_silence_hours = $7
-     WHERE id = $8
+       customer_silence_hours = $7,
+       writing_style = $8,
+       reply_mode = $9,
+       confidence_threshold = $10
+     WHERE id = $11
      RETURNING *`,
     [
       body.name ?? existing.name,
@@ -355,6 +493,9 @@ playbooksRouter.put("/:id", async (c) => {
       newVersion,
       body.is_active !== undefined ? body.is_active : existing.is_active,
       body.customer_silence_hours !== undefined ? body.customer_silence_hours : existing.customer_silence_hours,
+      body.writing_style !== undefined ? body.writing_style : existing.writing_style,
+      body.reply_mode !== undefined ? body.reply_mode : existing.reply_mode,
+      body.confidence_threshold !== undefined ? body.confidence_threshold : existing.confidence_threshold,
       id,
     ],
   );

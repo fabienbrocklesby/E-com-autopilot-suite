@@ -41,17 +41,14 @@ categoriesRouter.post("/", async (c) => {
 
   const category = await queryOne<Category>(
     `INSERT INTO categories
-       (workspace_id, name, description, instructions, allow_auto_reply, confidence_threshold, writing_style)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (workspace_id, name, description, instructions)
+     VALUES ($1, $2, $3, $4)
      RETURNING *`,
     [
       workspaceId,
       body.name,
       body.description,
       body.instructions,
-      body.allow_auto_reply,
-      body.confidence_threshold,
-      body.writing_style,
     ],
   );
   return c.json({ category }, 201);
@@ -67,17 +64,13 @@ categoriesRouter.put("/:id", async (c) => {
 
   const category = await queryOne<Category>(
     `UPDATE categories
-     SET name = $1, description = $2, instructions = $3,
-         allow_auto_reply = $4, confidence_threshold = $5, writing_style = $6
-     WHERE id = $7
+     SET name = $1, description = $2, instructions = $3
+     WHERE id = $4
      RETURNING *`,
     [
       body.name,
       body.description,
       body.instructions,
-      body.allow_auto_reply,
-      body.confidence_threshold,
-      body.writing_style,
       id,
     ],
   );
@@ -98,8 +91,7 @@ categoriesRouter.patch("/:id", async (c) => {
   let paramIndex = 1;
 
   const allowed: (keyof UpdateCategoryPayload)[] = [
-    "name", "description", "instructions", "allow_auto_reply",
-    "confidence_threshold", "writing_style",
+    "name", "description", "instructions",
   ];
 
   for (const key of allowed) {
@@ -135,11 +127,4 @@ categoriesRouter.delete("/:id", async (c) => {
 
 function validateCategoryPayload(body: CreateCategoryPayload): void {
   if (!body.name?.trim()) throw new AppError(422, "name is required");
-  if (
-    typeof body.confidence_threshold !== "number" ||
-    body.confidence_threshold < 0 ||
-    body.confidence_threshold > 1
-  ) {
-    throw new AppError(422, "confidence_threshold must be a number between 0 and 1");
-  }
 }

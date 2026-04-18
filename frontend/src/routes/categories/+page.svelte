@@ -29,20 +29,9 @@
     name: "",
     description: "",
     instructions: "",
-    allow_auto_reply: false,
-    confidence_threshold: 0.8,
-    writing_style: "",
   });
 
   let form = $state<CategoryPayload>(emptyForm());
-
-  let confidenceWarning = $derived(
-    form.confidence_threshold < 0.5
-      ? `Very low - almost every email will match this category (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
-      : form.confidence_threshold > 0.95
-        ? `Very strict - the AI must be extremely confident before matching (${Math.round(form.confidence_threshold * 100)}%). Consider using 0.7–0.85.`
-        : null
-  );
 
   async function load() {
     loading = true;
@@ -69,9 +58,6 @@
       name: cat.name,
       description: cat.description,
       instructions: cat.instructions,
-      allow_auto_reply: cat.allow_auto_reply,
-      confidence_threshold: cat.confidence_threshold,
-      writing_style: cat.writing_style,
     };
     showForm = true;
   }
@@ -183,21 +169,6 @@
           <p class="cat-description">{cat.description}</p>
         {/if}
 
-        <div class="cat-meta">
-          <div class="meta-item">
-            <span class="meta-label">Auto-reply</span>
-            <span class="meta-value" class:enabled={cat.allow_auto_reply}>
-              {cat.allow_auto_reply ? "Enabled" : "Disabled"}
-            </span>
-          </div>
-          <div class="meta-item">
-            <span class="meta-label">Confidence threshold</span>
-            <span class="meta-value"
-              >{Math.round(cat.confidence_threshold * 100)}%</span
-            >
-          </div>
-        </div>
-
         {#if cat.instructions}
           <details class="instructions-details">
             <summary>Instructions</summary>
@@ -243,7 +214,6 @@
           <span class="label">Instructions (for AI)</span>
           <p class="field-hint">
             Describe this category to the AI - when to match it, tone, and any special handling.
-            These instructions are also used when generating replies.
           </p>
           <textarea
             class="input textarea"
@@ -253,42 +223,9 @@
           ></textarea>
         </div>
 
-        <div class="field">
-          <span class="label">Writing style</span>
-          <p class="field-hint">Style guidelines for the AI when drafting replies in this category.</p>
-          <input
-            class="input"
-            type="text"
-            bind:value={form.writing_style}
-            placeholder="e.g. Professional and concise. Use the customer's first name if known. Avoid jargon."
-          />
-        </div>
-
-        <div class="field-row">
-          <div class="field field-half">
-            <span class="label">Confidence threshold - {Math.round(form.confidence_threshold * 100)}%</span>
-            <p class="field-hint">How certain the AI must be before assigning this category. 70–85% works well for most cases.</p>
-            <input
-              class="input"
-              type="number"
-              min="0"
-              max="1"
-              step="0.01"
-              bind:value={form.confidence_threshold}
-            />
-            {#if confidenceWarning}
-              <div class="field-warning">⚠ {confidenceWarning}</div>
-            {/if}
-          </div>
-
-          <label class="field field-half toggle-field">
-            <span class="label">Allow auto-reply</span>
-            <label class="toggle">
-              <input type="checkbox" bind:checked={form.allow_auto_reply} />
-              <span class="toggle-slider"></span>
-            </label>
-          </label>
-        </div>
+        <p class="field-hint" style="margin-top: 4px; margin-bottom: 8px;">
+          Reply behaviour (writing style, auto-reply vs draft, confidence threshold) is now configured on the playbook linked to this category.
+        </p>
 
         <div class="form-actions">
           <button type="button" class="btn btn-ghost" onclick={closeForm}

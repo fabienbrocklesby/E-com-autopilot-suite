@@ -3,7 +3,7 @@
  * Uses raw fetch against the /v1/chat/completions endpoint.
  * Reference: https://platform.openai.com/docs/api-reference/chat/create
  */
-import { AppError, CategorisationResult, Category, DraftReplyResult, Thread, Message } from "../types/index.ts";
+import { AppError, CategorisationResult, Category, Thread, Message } from "../types/index.ts";
 import { queryOne, query } from "../db/client.ts";
 import { Setting, Interaction } from "../types/index.ts";
 import { logger } from "./logger.ts";
@@ -287,58 +287,4 @@ ${messageHistory}`;
   const categoryId = categories.find((c) => c.id === parsed.categoryId)?.id ?? null;
 
   return { categoryId, confidence, reasoning: parsed.reasoning ?? "" };
-}
-
-/**
- * Generate a draft reply for an email thread based on category instructions and
- * global settings.
- *
- * @returns An object with the draft body text.
- */
-export async function draftReply(
-  thread: Thread,
-  messages: Message[],
-  category: Category,
-  globalSettings: Record<string, string>,
-  workspaceId = 1,
-): Promise<DraftReplyResult> {
-  const model = await getModel(workspaceId);
-  const examples = await getFewShotExamples(workspaceId);
-
-  const messageHistory = messages
-    .map((m) => `From: ${m.from_address}\n${m.body_plain}`)
-    .join("\n\n---\n\n");
-
-  const exampleMessages: ChatMessage[] = examples
-    .filter((ex) => ex.category_id === category.id && ex.original_body && ex.final_body)
-    .flatMap((ex) => [
-      { role: "user" as const, content: `Draft a reply to:\n${ex.original_body ?? ""}` },
-      { role: "assistant" as const, content: ex.final_body ?? "" },
-    ]);
-
-  const systemPrompt = `You are an email assistant drafting a reply on behalf of a business.
-
-Category instructions: ${category.instructions}
-Writing style: ${category.writing_style}
-${globalSettings["reply_signature"] ? `Signature: ${globalSettings["reply_signature"]}` : ""}
-
-Return only the plain-text body of the email reply. Do not include subject lines, greetings framing, or JSON. Write the reply directly.`;
-
-  const userPrompt = `Thread subject: ${thread.subject}
-
-Full email conversation:
-${messageHistory}
-
-Draft a reply.`;
-
-  const body = await chatCompletion(
-    [
-      { role: "system", content: systemPrompt },
-      ...exampleMessages,
-      { role: "user", content: userPrompt },
-    ],
-    model,
-  );
-
-  return { body };
 }

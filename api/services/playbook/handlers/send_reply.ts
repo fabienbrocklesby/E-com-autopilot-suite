@@ -6,7 +6,6 @@
 import type { StepHandler, StepResult, RunContext, PlaybookStep, SendReplyStep } from "../types.ts";
 import { sendReply } from "../../gmail.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
-import { queryOne } from "../../../db/client.ts";
 
 export const sendReplyHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -31,13 +30,8 @@ export const sendReplyHandler: StepHandler = {
       body = interpolateTemplate(sendStep.message as string, ctx.variables);
     } else if (hasGoal || (sendStep.message && typeof sendStep.message === "object" && "ai_generate_using_category_voice" in (sendStep.message as object))) {
       // AI-drafted path
-      const category = ctx.playbook.category_id
-        ? await queryOne<{ writing_style: string | null }>(
-            "SELECT writing_style FROM categories WHERE id = $1",
-            [ctx.playbook.category_id],
-          )
-        : null;
-      const voice = sendStep.voice_hint ?? category?.writing_style ?? "friendly and professional";
+      // Resolve writing voice: step-level override → playbook default → fallback
+      const voice = sendStep.voice_hint ?? (ctx.playbook.writing_style || "friendly and professional");
       const goal = sendStep.goal ?? "Write a helpful and contextual reply to close out this interaction";
 
       // Build reference context values
@@ -90,6 +84,21 @@ RULES:
     } else {
       return {
         decision: { action: "fail", error: "send_reply: no message or goal provided" },
+      };
+    }
+
+    const requireApproval = sendStep.require_approval === true || ctx.playbook.reply_mode === "draft_only";
+
+    if (requireApproval) {
+      console.log(`[playbook] send_reply: reply held for approval for run ${ctx.run.id}`);
+      return {
+        decision: { action: "pause", status: "waiting_for_human" },
+        output: {
+          action: "pending_approval",
+          pending_send: body,
+          step_type: "send_reply",
+        },
+        aiCalls,
       };
     }
 

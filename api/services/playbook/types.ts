@@ -34,6 +34,8 @@ export interface AskCustomerStep {
   on_reply_goto: string;
   /** Legacy literal message - used when goal is absent */
   message?: string;
+  /** When true, the drafted message is held for human approval before sending */
+  require_approval?: boolean;
 }
 
 export interface BranchStep {
@@ -86,6 +88,8 @@ export interface SendReplyStep {
   /** Context variable names whose values should appear in the reply */
   reference_context?: string[];
   voice_hint?: string;
+  /** When true, the drafted message is held for human approval before sending */
+  require_approval?: boolean;
 }
 
 export interface CompleteStep {
@@ -125,6 +129,9 @@ export interface Playbook {
   version: number;
   is_active: boolean;
   customer_silence_hours: number;
+  writing_style: string;
+  reply_mode: "auto_reply" | "draft_only";
+  confidence_threshold: number;
   created_at: Date;
   updated_at: Date;
 }
