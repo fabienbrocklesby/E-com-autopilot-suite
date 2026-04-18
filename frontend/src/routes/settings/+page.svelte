@@ -24,14 +24,6 @@
 
   const SETTING_DEFS: SettingDef[] = [
     {
-      key: "default_confidence_threshold",
-      label: "Manual review threshold",
-      description:
-        "AI confidence (0–1) below which an email goes to manual review. Per-category thresholds override this.",
-      hint: "Recommended: 0.75–0.85. Lower values send more emails to review; higher values trust the AI more.",
-      type: "number",
-    },
-    {
       key: "openai_model",
       label: "OpenAI model",
       description: "Model used for categorisation and draft generation.",
@@ -58,6 +50,7 @@
   let savingKey = $state<string | null>(null);
   let settingsError = $state<string | null>(null);
   let success = $state<string | null>(null);
+  let openaiModels = $state<string[]>([]);
 
   let oauthStatus = $state<{
     connected: boolean;
@@ -216,10 +209,20 @@
     }
   }
 
+  async function loadOpenAIModels() {
+    try {
+      const res = await settingsApi.getOpenAIModels();
+      openaiModels = res.models;
+    } catch {
+      openaiModels = [];
+    }
+  }
+
   onMount(() => {
     loadSettings();
     loadOauthStatus();
     loadWorkspaces();
+    loadOpenAIModels();
   });
 </script>
 
@@ -423,6 +426,22 @@
                 />
                 <span class="toggle-slider"></span>
               </label>
+            {:else if def.key === 'openai_model' && openaiModels.length > 0}
+              <div class="input-with-save">
+                <select
+                  class="input"
+                  bind:value={settings[def.key]}
+                  onchange={() => saveSetting(def.key, settings[def.key])}
+                  disabled={savingKey === def.key}
+                >
+                  {#each openaiModels as model (model)}
+                    <option value={model}>{model}</option>
+                  {/each}
+                </select>
+                {#if savingKey === def.key}
+                  <span class="saving-indicator">…</span>
+                {/if}
+              </div>
             {:else}
               <div class="input-with-save">
                 <input
@@ -646,6 +665,11 @@
     display: flex;
     gap: 8px;
     align-items: center;
+  }
+
+  .saving-indicator {
+    color: var(--color-text-muted);
+    font-size: 13px;
   }
 
   .input {

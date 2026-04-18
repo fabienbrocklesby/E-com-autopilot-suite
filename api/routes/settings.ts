@@ -21,6 +21,28 @@ settingsRouter.get("/", async (c) => {
   return c.json({ settings: map, rows });
 });
 
+// GET /settings/openai-models - fetches available chat models live from OpenAI
+// Must be registered before /:key to prevent the param route from matching first.
+settingsRouter.get("/openai-models", async (_c) => {
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!apiKey) throw new AppError(500, "OPENAI_API_KEY is not configured");
+
+  const res = await fetch("https://api.openai.com/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+
+  if (!res.ok) throw new AppError(502, "Failed to fetch models from OpenAI");
+
+  const data = await res.json() as { data: Array<{ id: string; created: number }> };
+
+  const models = data.data
+    .filter((m) => /^gpt-|^o\d/.test(m.id))
+    .sort((a, b) => b.created - a.created)
+    .map((m) => m.id);
+
+  return _c.json({ models });
+});
+
 // GET /settings/:key
 settingsRouter.get("/:key", async (c) => {
   const key = c.req.param("key");

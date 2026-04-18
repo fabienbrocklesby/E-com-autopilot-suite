@@ -210,6 +210,10 @@ export const settingsApi = {
 		return request<{ settings: Record<string, string> }>('/settings');
 	},
 
+	getOpenAIModels() {
+		return request<{ models: string[] }>('/settings/openai-models');
+	},
+
 	set(key: string, value: string) {
 		return request<{ setting: { key: string; value: string } }>(`/settings/${key}`, {
 			method: 'PUT',
