@@ -11,7 +11,8 @@
 	},
 	"imports": {
 		"hono": "npm:hono",
-		"hono/cors": "npm:hono/cors"
+		"hono/cors": "npm:hono/cors",
+		"hono/streaming": "npm:hono/streaming"
 	},
 	"compilerOptions": {
 		"strict": true

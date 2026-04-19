@@ -11,6 +11,142 @@ Each entry:
 
 ---
 
+## 2026-04-18 - Live updates via SSE
+
+**Phase**: live-updates
+**Status**: complete
+
+### What was done
+
+Real-time push from backend to frontend for all meaningful state changes — new threads, status updates, playbook step progress — using Server-Sent Events.
+
+**New files:**
+- `api/db/queries.ts` — `fetchThreadListItem(threadId, workspaceId)` shared denormalized thread fetch used by all publishers
+- `api/services/event-bus.ts` — in-memory pub/sub singleton (`publish`, `subscribe`). 6 event types: `thread_created`, `thread_updated`, `message_created`, `run_updated`, `step_execution_created`, `step_execution_updated`
+- `api/routes/events.ts` — `GET /events/workspace` and `GET /events/thread/:threadId` SSE endpoints with auth via `?token=` query param (Bearer header fallback). 30s ping heartbeat to keep proxies alive
+- `frontend/src/lib/sse.ts` — `openSSE(path, params)` factory that builds the URL with token from localStorage
+
+**Modified files:**
+- `api/deno.json` — added `hono/streaming` to import map
+- `api/main.ts` — registered `eventsRouter` at `/events`
+- `api/services/gmail.ts` — publishes `thread_created`/`thread_updated` on ingest, `message_created` on inbound and outbound messages
+- `api/services/playbook/executor.ts` — publishes `step_execution_created` on step start, `step_execution_updated` on step completion, `run_updated` on every state change (paused, retrying, failed, per-step), `thread_updated` at run completion. Also fixed hardcoded `sendAlert(1, ...)` → `sendAlert(workspaceId, ...)`
+- `api/routes/threads.ts` — publishes `thread_updated` after `PATCH /:id/status` and `PATCH /:id/drafts/:draftId`
+- `frontend/src/routes/+page.svelte` — `$effect` opens workspace SSE, handles `thread_created`/`thread_updated` live, reconnect triggers full reload
+- `frontend/src/routes/threads/[id]/+page.svelte` — `$effect` opens thread SSE, handles all 5 event types for live playbook step visualization
+
+**Verified:** API logs show `GET /events/workspace 200`, browser confirms SSE request fires to `http://localhost:8000/events/workspace?token=...&workspace_id=1`
+
+---
+
+## 2026-04-18 - Simplify playbooks: one per category, no versioned UX
+
+**Phase**: simplification
+**Status**: complete
+
+### Problem
+
+Playbooks looked versioned (`v2`, `v5`) and the system still allowed flows that implied multiple playbooks per category or orphan playbooks. This created confusion versus the intended product model: one playbook per category, with the current editable definition as the source of truth.
+
+### What was done
+
+**Migration** (`api/db/migrations/024_playbook_unique_per_category.sql`):
+- Added a partial unique index on `playbooks(category_id)` where `category_id IS NOT NULL`.
+- Enforces max one playbook per category at the database layer.
+
+**Backend categories route** (`api/routes/categories.ts`):
+- Updated `POST /categories` to create category + blank inactive playbook in one `transaction()`.
+- New category now always starts with an associated playbook (`steps=[]`, `is_active=false`).
+
+**Backend playbooks route** (`api/routes/playbooks.ts`):
+- `POST /playbooks` now requires `category_id`, validates category belongs to workspace, and returns `409` if category already has a playbook.
+- `PUT /playbooks/:id` no longer bumps `version` when steps change.
+- `PUT /playbooks/:id` now prevents category collisions (same `409`) and validates target category belongs to workspace.
+
+**Frontend list page** (`frontend/src/routes/playbooks/+page.svelte`):
+- Removed version display from playbook rows.
+- Removed global `+ New Playbook` action and unlinked-playbooks section.
+- Category row now resolves directly to its single associated playbook.
+
+**Frontend editor page** (`frontend/src/routes/playbooks/[id]/+page.svelte`):
+- Removed version badge from the header.
+
+**Frontend API + new page**:
+- `frontend/src/lib/api.ts`: `playbooksApi.create` now requires `category_id`.
+- `frontend/src/routes/playbooks/new/+page.svelte`: now errors when `category_id` is missing, preventing orphan playbook creation.
+
+### Verification
+
+- API test: creating a category auto-created a blank inactive playbook in the same workspace.
+- API test: creating a second playbook for the same category returns `409 Category already has a playbook`.
+- API test: creating playbook without `category_id` returns `422 category_id is required`.
+- API test: updating a playbook no longer increments `version`.
+- UI check: `/playbooks` no longer shows `vN`; `/playbooks/:id` no longer shows version badge.
+
+
+## 2026-04-18 - Thread status sync with playbook completion + cancel on manual close
+
+**Phase**: bugfix
+**Status**: complete
+
+### Problem
+
+When a playbook run completed, the thread status was set to `replied` in the executor. On the main threads page, those threads appeared in the "Other / Noise" group (which the user called "the completed bit"). On the individual thread page, the status pill showed `replied` — creating an inconsistency. The user expected `closed` to represent "fully done", and wanted manual status changes to cancel active playbook runs with a confirmation step.
+
+### Root causes
+
+1. `executor.ts` mapped `run.status = 'complete'` → `thread.status = 'replied'`. Should be `closed`.
+2. The approve route in `playbooks.ts` had one code path that set `playbook_runs.status = 'complete'` directly without also updating `threads.status`.
+3. No cancel endpoint existed for playbook runs.
+4. The thread detail page had no guard against changing status while a run was active.
+
+### What was done
+
+**Migration** (`api/db/migrations/023_run_cancelled_status.sql`): drops and re-adds the `playbook_runs` status CHECK constraint to include `'cancelled'` alongside the existing values.
+
+**Backend executor** (`api/services/playbook/executor.ts`): changed `'replied'` to `'closed'` in the thread status update when run status is `complete`.
+
+**Backend playbooks route** (`api/routes/playbooks.ts`):
+- In the approve handler's `else` branch (no next step after a pending_send approval), added `UPDATE threads SET status = 'closed'` after marking the run complete.
+- Added `POST /playbooks/runs/:runId/cancel` endpoint. Accepts runs in `running`, `waiting_for_customer`, `waiting_for_human`, or `retrying` status; sets them to `cancelled`. Returns 409 for non-cancellable statuses.
+
+**Frontend API client** (`frontend/src/lib/api.ts`):
+- Added `'retrying' | 'cancelled'` to the `PlaybookRun.status` union type.
+- Added `cancelRun(runId)` method to `playbooksApi`.
+
+**Frontend thread detail page** (`frontend/src/routes/threads/[id]/+page.svelte`):
+- Added `ACTIVE_RUN_STATUSES` constant and `activeRuns` `$derived` that filters runs to only those in an active state.
+- Added `pendingStatus` `$state` to track a status change awaiting confirmation.
+- Replaced `handleStatusUpdate` with three functions: `requestStatusUpdate` (checks for active runs and either proceeds directly or sets `pendingStatus`), `applyStatusUpdate` (performs the API call), and `confirmStatusUpdate` (cancels active runs then applies the status update).
+- Added a confirmation banner (`confirm-banner`) that appears when `pendingStatus` is set, showing the run count and offering "Cancel run(s) and continue" or "Keep running".
+- Added CSS for `.confirm-banner`, `.confirm-text`, `.confirm-actions`, `.btn-danger`, `.btn-sm`.
+
+
+
+---
+
+## 2026-04-18 - Remove template library
+
+**Phase**: cleanup
+**Status**: complete
+
+Removed the template library feature entirely — it was never wired into real user flows and added dead surface area.
+
+**Migration** (`api/db/migrations/022_drop_playbook_templates.sql`): drops the `playbook_templates` table and its indexes.
+
+**Backend removed**:
+- `api/routes/playbook-templates.ts` — deleted
+- `api/main.ts` — removed import and `app.route("/playbook-templates", ...)` registration
+- `api/db/seeds/playbook_templates.sql` — deleted
+
+**Frontend removed**:
+- `frontend/src/lib/api.ts` — removed `PlaybookTemplate` interface and `playbookTemplatesApi` export
+- `frontend/src/routes/playbooks/+page.svelte` — removed the "Template Library" card HTML and its associated CSS rules (`.template-library`, `.template-header`, `.template-desc`, `.template-btn`)
+
+
+
+---
+
 ## 2026-04-18 - Bug fix: require_approval on ask_customer steps
 
 **Phase**: bugfix
@@ -546,7 +682,7 @@ triggering the loop safety-net escalation.
 ### Next
 
 - Phase 7 Task 2: Playbook testing harness (when clients need confident iteration).
-- Phase 7 Task 3–5: Learning loop, richer step types, playbook routing (per client demand).
+- Phase 7 Task 3-5: Learning loop, richer step types, playbook routing (per client demand).
 
 ---
 
@@ -969,8 +1105,8 @@ frontend/src/routes/playbooks/[id]/+page.svelte  (modified - silence timeout inp
 
 ### Decisions made
 
-- DB was already ahead of codebase: plaintext token columns were already dropped, and migrations 006–010 (match_strategy_confidence, sheet_rule_feedback, flows, flow_links, unified_pipeline) already applied. Removed all transition/fallback code entirely rather than adding compatibility shims.
-- Migration numbering collision: our new 006–009 files coexist with pre-existing 006_match_strategy_confidence through 010_unified_pipeline. No conflict because `schema_migrations` tracks by full filename, not number prefix.
+- DB was already ahead of codebase: plaintext token columns were already dropped, and migrations 006-010 (match_strategy_confidence, sheet_rule_feedback, flows, flow_links, unified_pipeline) already applied. Removed all transition/fallback code entirely rather than adding compatibility shims.
+- Migration numbering collision: our new 006-009 files coexist with pre-existing 006_match_strategy_confidence through 010_unified_pipeline. No conflict because `schema_migrations` tracks by full filename, not number prefix.
 - `ENCRYPTION_KEY` generated with `openssl rand -base64 32` and written to `.env`. Must be added to Dokploy env before deploying.
 
 ### Open questions / blockers

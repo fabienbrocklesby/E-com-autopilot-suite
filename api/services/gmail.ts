@@ -4,7 +4,7 @@
  * Reference: https://developers.google.com/gmail/api/reference/rest
  */
 import { queryOne, execute, query } from "../db/client.ts";
-import { AppError, GmailMessage, GmailThread, Category } from "../types/index.ts";
+import { AppError, GmailMessage, GmailThread, Category, Message } from "../types/index.ts";
 import { categoriseAndDraft } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
 import { resumeRun } from "./playbook/executor.ts";
@@ -12,6 +12,8 @@ import type { PlaybookRun } from "./playbook/types.ts";
 import { logger } from "./logger.ts";
 import { rateLimitedCall } from "./rate_limit.ts";
 import { sendAlert } from "./alerts.ts";
+import { publish } from "./event-bus.ts";
+import { fetchThreadListItem } from "../db/queries.ts";
 
 const GMAIL_BASE = "https://www.googleapis.com/gmail/v1/users";
 
@@ -218,27 +220,41 @@ async function ingestMessage(
   // Upsert the thread record, now with workspace_id, thread_summary, and account_email.
   // account_email ties the thread to the specific Google account that ingested it so that
   // switching accounts hides threads from the old inbox.
-  const threadRow = await queryOne<{ id: number }>(
+  const threadRow = await queryOne<{ id: number; is_new_row: boolean }>(
     `INSERT INTO threads (workspace_id, gmail_thread_id, subject, snippet, thread_summary, account_email)
      VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (gmail_thread_id) DO UPDATE
        SET snippet = EXCLUDED.snippet,
            thread_summary = EXCLUDED.thread_summary,
            account_email = EXCLUDED.account_email
-     RETURNING id`,
+     RETURNING id, (xmax = 0) AS is_new_row`,
     [workspaceId, gmailThreadId, subject, gmailMsg.snippet, threadSummary, email],
   );
 
   if (!threadRow) return;
 
+  const threadListItem = await fetchThreadListItem(threadRow.id, workspaceId);
+  if (threadListItem) {
+    publish({
+      type: threadRow.is_new_row ? "thread_created" : "thread_updated",
+      workspaceId,
+      thread: threadListItem as unknown as Record<string, unknown>,
+    });
+  }
+
   // Insert the message, storing the RFC 2822 Message-ID for reply threading.
-  await execute(
+  const insertedMsg = await queryOne<Message>(
     `INSERT INTO messages
        (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (gmail_message_id) DO NOTHING`,
+     ON CONFLICT (gmail_message_id) DO NOTHING
+     RETURNING *`,
     [threadRow.id, gmailMessageId, from, plain, html, receivedAt, direction, messageIdHeader],
   );
+
+  if (insertedMsg) {
+    publish({ type: "message_created", workspaceId, threadId: threadRow.id, message: insertedMsg });
+  }
 
   // Only run categorisation for inbound messages. Outbound messages (sent by this
   // app or by the user) must not trigger another draft or auto-reply loop.
@@ -378,13 +394,17 @@ export async function sendReply(
   // without waiting for the Pub/Sub webhook (which can take minutes).
   // The webhook will hit ON CONFLICT DO NOTHING when it eventually fires.
   if (dbThreadId) {
-    await execute(
+    const sentMsg = await queryOne<Message>(
       `INSERT INTO messages
          (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
        VALUES ($1, $2, $3, $4, $5, $6, 'outbound', NULL)
-       ON CONFLICT (gmail_message_id) DO NOTHING`,
+       ON CONFLICT (gmail_message_id) DO NOTHING
+       RETURNING *`,
       [dbThreadId, sent.id, email, body, "", new Date().toISOString()],
     );
+    if (sentMsg) {
+      publish({ type: "message_created", workspaceId, threadId: dbThreadId, message: sentMsg });
+    }
   }
 }
 

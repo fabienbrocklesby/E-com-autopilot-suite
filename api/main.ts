@@ -20,8 +20,8 @@ import { labelsRouter } from "./routes/labels.ts";
 import { sheetsRouter } from "./routes/sheets.ts";
 import { sheetRulesRouter } from "./routes/sheet-rules.ts";
 import { playbooksRouter } from "./routes/playbooks.ts";
-import { playbookTemplatesRouter } from "./routes/playbook-templates.ts";
 import { systemRouter } from "./routes/system.ts";
+import { eventsRouter } from "./routes/events.ts";
 
 import { runMigrations } from "./db/migrate.ts";
 import { startWatchRenewalLoop, startFallbackPoller } from "./services/watch.ts";
@@ -73,7 +73,7 @@ app.route("/labels", labelsRouter);
 app.route("/sheets", sheetsRouter);
 app.route("/sheet-rules", sheetRulesRouter);
 app.route("/playbooks", playbooksRouter);
-app.route("/playbook-templates", playbookTemplatesRouter);
+app.route("/events", eventsRouter);
 app.route("/system", systemRouter);
 
 // ─── 404 fallback ─────────────────────────────────────────────────────────────

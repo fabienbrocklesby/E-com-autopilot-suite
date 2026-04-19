@@ -9,7 +9,7 @@
   import { playbooksApi, categoriesApi } from "$lib/api";
   import { workspaceStore } from "$lib/stores";
   import type { Playbook, Category } from "$lib/api";
-  import { ClipboardList, Plus, Trash2 } from '@lucide/svelte';
+  import { ClipboardList, Trash2 } from '@lucide/svelte';
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -53,18 +53,12 @@
     }
   }
 
-  // Merge: each category gets its active playbook (or latest)
+  // Merge: each category gets its playbook.
   let rows = $derived.by<CategoryRow[]>(() => {
     return categories.map((cat) => {
-      const active = playbooks.find((p) => p.category_id === cat.id && p.is_active);
-      const latest = active ?? playbooks.find((p) => p.category_id === cat.id) ?? null;
-      return { category: cat, playbook: latest };
+      const playbook = playbooks.find((p) => p.category_id === cat.id) ?? null;
+      return { category: cat, playbook };
     });
-  });
-
-  // Orphan playbooks (no category)
-  let orphanPlaybooks = $derived.by<Playbook[]>(() => {
-    return playbooks.filter((p) => p.category_id === null);
   });
 
   async function toggleActive(pb: Playbook) {
@@ -100,6 +94,16 @@
     setTimeout(() => { success = null; }, 3000);
   }
 
+  // Deterministic color per category based on id
+  const CAT_PALETTE = [
+    "#f97316", "#3b82f6", "#a855f7", "#10b981",
+    "#64748b", "#f59e0b", "#ec4899", "#22d3ee",
+  ];
+
+  function catColor(id: number): string {
+    return CAT_PALETTE[(id - 1) % CAT_PALETTE.length];
+  }
+
   onMount(() => {
     load();
     mounted = true;
@@ -114,7 +118,6 @@
   <h1>Playbooks</h1>
   <div class="header-actions">
     <a href="/categories" class="btn btn-ghost">Manage Categories</a>
-    <a href="/playbooks/new" class="btn btn-primary">+ New Playbook</a>
   </div>
 </div>
 
@@ -127,7 +130,7 @@
 
 {#if loading}
   <div class="skeleton-list">
-    {#each Array.from({ length: 4 }) as _, i}
+    {#each Array.from({ length: 4 }) as _, i (i)}
       <div class="skeleton-row card" style="animation-delay: {i * 0.06}s">
         <div class="skeleton-col">
           <div class="skeleton skeleton-cat-name"></div>
@@ -158,7 +161,10 @@
       >
         <div class="cat-main">
           <div class="cat-info">
-            <h2>{row.category.name}</h2>
+            <h2>
+              <span class="cat-color-dot" style="background: {catColor(row.category.id)}"></span>
+              {row.category.name}
+            </h2>
             {#if row.category.description}
               <p class="cat-desc">{row.category.description}</p>
             {/if}
@@ -169,7 +175,7 @@
               <div class="pb-info">
                 <a href="/playbooks/{row.playbook.id}" class="pb-name">{row.playbook.name}</a>
                 <div class="pb-meta">
-                  v{row.playbook.version} · {row.playbook.steps.length} step{row.playbook.steps.length !== 1 ? "s" : ""}
+                  {row.playbook.steps.length} step{row.playbook.steps.length !== 1 ? "s" : ""}
                   · {row.playbook.reply_mode === 'auto_reply' ? 'Auto-reply' : 'Draft only'}
                   · min {Math.round((row.playbook.confidence_threshold ?? 0.8) * 100)}% confidence
                 </div>
@@ -187,7 +193,6 @@
             {:else}
               <div class="no-playbook">
                 <span class="text-muted">No playbook</span>
-                <a href="/playbooks/new?category_id={row.category.id}" class="btn-action"><Plus size={13} /> Create</a>
               </div>
             {/if}
           </div>
@@ -196,21 +201,6 @@
     {/each}
   </div>
 
-  {#if orphanPlaybooks.length > 0}
-    <div class="orphan-section">
-      <h3>Unlinked Playbooks</h3>
-      <p class="text-muted">These playbooks aren't attached to a category.</p>
-      <div class="orphan-list">
-        {#each orphanPlaybooks as pb (pb.id)}
-          <div class="orphan-row card">
-            <a href="/playbooks/{pb.id}" class="pb-name">{pb.name}</a>
-            <span class="pb-meta">v{pb.version} · {pb.steps.length} steps</span>
-            <span class="status-dot" class:active={pb.is_active} class:inactive={!pb.is_active}></span>
-          </div>
-        {/each}
-      </div>
-    </div>
-  {/if}
 {/if}
 
 <style>
@@ -221,7 +211,7 @@
     margin-bottom: 24px;
   }
 
-  h1 { font-size: 22px; font-weight: 700; }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
 
   .header-actions {
     display: flex;
@@ -263,6 +253,18 @@
 
   @media (max-width: 700px) {
     .cat-main { flex-direction: column; }
+    .playbook-col {
+      min-width: unset;
+      width: 100%;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+    }
+    .no-playbook {
+      justify-content: flex-start;
+    }
+    .skeleton-pb-col {
+      width: 100%;
+    }
   }
 
   .cat-info {
@@ -270,24 +272,17 @@
     min-width: 0;
   }
 
-  h2 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
-  .cat-desc { font-size: 13px; color: var(--color-text-muted); margin-bottom: 8px; }
+  h2 { font-size: 14px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
 
-  .cat-chips {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
+  .cat-color-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
   }
 
-  .chip {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    background: var(--color-surface-2);
-    color: var(--color-text-muted);
-    font-weight: 500;
-  }
-  .chip.enabled { background: rgba(16 185 129 / 0.12); color: var(--color-success); }
+  .cat-desc { font-size: 12.5px; color: var(--color-text-muted); margin-bottom: 8px; padding-left: 18px; }
 
   .playbook-col {
     flex-shrink: 0;
@@ -352,33 +347,12 @@
 
   .text-muted { color: var(--color-text-muted); font-size: 13px; }
 
-  .orphan-section {
-    margin-top: 32px;
-  }
-  .orphan-section h3 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-
-  .orphan-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 10px;
-  }
-
-  .orphan-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* Loading skeleton                                                     */
-  /* ------------------------------------------------------------------ */
   .skeleton-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
   }
+
   .skeleton-row {
     display: flex;
     align-items: flex-start;

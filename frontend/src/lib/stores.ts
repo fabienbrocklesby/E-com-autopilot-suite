@@ -98,3 +98,10 @@ export const reviewQueueStore = derived(threadsStore, ($threads) =>
 		(t) => t.status === 'in_review' || (t.draft_count > 0 && t.status !== 'replied')
 	)
 );
+
+/** Count of threads that need immediate human attention (drives inbox sidebar badge). */
+export const attentionCountStore = derived(threadsStore, ($threads) =>
+	$threads.items.filter(
+		(t) => t.has_pending_action || t.status === 'in_review' || (t.draft_count > 0 && t.status === 'new')
+	).length
+);

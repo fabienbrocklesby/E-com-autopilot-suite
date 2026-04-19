@@ -175,8 +175,8 @@
 
 <style>
   .banner {
-    background: rgba(245 158 11 / 0.08);
-    border: 1px solid var(--color-warning, #f59e0b);
+    background: var(--color-orange-dim, rgba(249 115 22 / 0.08));
+    border: 1px solid var(--color-orange, #f97316);
     border-left-width: 4px;
     padding: 1.25rem 1.5rem;
     margin-bottom: 1.5rem;
@@ -210,7 +210,7 @@
     font-size: 1rem;
     font-weight: 700;
     margin: 0;
-    color: var(--color-warning, #f59e0b);
+    color: var(--color-orange, #f97316);
   }
 
   .banner-reason {

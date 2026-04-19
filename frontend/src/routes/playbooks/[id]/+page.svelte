@@ -79,19 +79,19 @@
 
   function stepSummary(step: PlaybookStep): string {
     switch (step.type) {
-      case "extract": return `Extract: ${(step.variables as string[] | undefined)?.join(", ") ?? "–"}`;
+      case "extract": return `Extract: ${(step.variables as string[] | undefined)?.join(", ") ?? "-"}`;
       case "find_sheet_row": return `Search sheet by ${((step.match_attempts as {column:string}[] | undefined)?.[0]?.column) ?? "…"}`;
       case "update_sheet": return `Update ${((step.updates as {column:string}[] | undefined)?.length ?? 0)} column(s) in row`;
       case "ask_customer": {
-        const text = (step.goal as string | undefined) ?? (step.message as string | undefined) ?? "–";
+        const text = (step.goal as string | undefined) ?? (step.message as string | undefined) ?? "-";
         return `Ask: "${text.slice(0, 60)}${text.length > 60 ? "…" : ""}"`;
       }
       case "evaluate": {
-        const goal = (step.goal as string | undefined) ?? "–";
+        const goal = (step.goal as string | undefined) ?? "-";
         return `Evaluate: ${goal.slice(0, 70)}${goal.length > 70 ? "…" : ""}`;
       }
       case "branch": return `If ${step.condition} → ${step.if_true} / ${step.if_false}`;
-      case "manual_approval": return `Hold for approval: "${(step.reason as string | undefined)?.slice(0, 50) ?? "–"}"`;
+      case "manual_approval": return `Hold for approval: "${(step.reason as string | undefined)?.slice(0, 50) ?? "-"}"`;
       case "send_reply": {
         const goal = step.goal as string | undefined;
         if (goal) return `Reply (AI): "${goal.slice(0, 60)}${goal.length > 60 ? "…" : ""}"`;
@@ -101,7 +101,7 @@
         return `Reply: [template]`;
       }
       case "complete": return "End run successfully";
-      case "escalate": return `Escalate: "${(step.reason as string | undefined)?.slice(0, 60) ?? "–"}"`;
+      case "escalate": return `Escalate: "${(step.reason as string | undefined)?.slice(0, 60) ?? "-"}"`;
       default: return step.type;
     }
   }
@@ -335,7 +335,6 @@
   <button class="back-btn" onclick={() => goto("/playbooks")}>← Playbooks</button>
   <div class="header-right">
     {#if playbook}
-      <span class="version-badge">v{playbook.version}</span>
       <span class="status-badge" class:active={playbook.is_active}>
         {playbook.is_active ? "Active" : "Inactive"}
       </span>
@@ -374,23 +373,23 @@
         </select>
       </div>
       <div class="field">
-        <label title="Escalate the run if the customer hasn't replied after this many hours">Customer silence timeout (hours)</label>
-        <input type="number" bind:value={customerSilenceHours} min="0" step="1" style="width:100px" />
+        <label title="Escalate the run if the customer hasn't replied after this many hours" for="customer-silence-hours">Customer silence timeout (hours)</label>
+        <input id="customer-silence-hours" type="number" bind:value={customerSilenceHours} min="0" step="1" />
       </div>
       <div class="field">
-        <label title="How the AI should write emails - e.g. 'Professional and concise. Use the customer's first name.'">Writing style</label>
-        <input type="text" bind:value={writingStyle} placeholder="e.g. Professional and concise. Use the customer's first name." style="min-width:220px" />
+        <label title="How the AI should write emails - e.g. 'Professional and concise. Use the customer's first name.'" for="writing-style">Writing style</label>
+        <input id="writing-style" type="text" bind:value={writingStyle} placeholder="e.g. Professional and concise. Use the customer's first name." />
       </div>
       <div class="field">
-        <label title="draft_only: always queue for review. auto_reply: send automatically if step allows.">Reply mode</label>
-        <select bind:value={replyMode}>
+        <label title="draft_only: always queue for review. auto_reply: send automatically if step allows." for="reply-mode">Reply mode</label>
+        <select id="reply-mode" bind:value={replyMode}>
           <option value="draft_only">Draft only (always queue for review)</option>
           <option value="auto_reply">Auto-reply (send immediately)</option>
         </select>
       </div>
       <div class="field">
-        <label title="Minimum AI confidence (0–1) required to start this playbook automatically. Below threshold: thread goes to review.">Min confidence</label>
-        <input type="number" bind:value={confidenceThreshold} min="0" max="1" step="0.05" style="width:80px" />
+        <label title="Minimum AI confidence (0-1) required to start this playbook automatically. Below threshold: thread goes to review." for="min-confidence">Min confidence</label>
+        <input id="min-confidence" type="number" bind:value={confidenceThreshold} min="0" max="1" step="0.05" />
       </div>
     </div>
 
@@ -763,14 +762,6 @@
     gap: 10px;
   }
 
-  .version-badge {
-    font-size: 12px;
-    color: var(--color-text-muted);
-    background: var(--color-surface-2);
-    padding: 2px 8px;
-    border-radius: 4px;
-  }
-
   .status-badge {
     font-size: 12px;
     font-weight: 600;
@@ -795,20 +786,25 @@
   }
 
   .top-bar {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
   }
 
   .top-bar .field {
-    flex: 1;
-    min-width: 200px;
+    min-width: 0;
   }
 
   .main-cols {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 16px;
+  }
+
+  .col-left,
+  .col-right {
+    min-width: 0; /* prevent grid blowout: allow 1fr to shrink below content size */
+    overflow: hidden;
   }
 
   @media (max-width: 900px) {
@@ -1060,20 +1056,32 @@
     color: var(--color-text-muted);
   }
 
-  input[type="text"], select {
+  input[type="text"],
+  input[type="number"],
+  select {
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius);
     color: var(--color-text);
     padding: 8px 12px;
+    height: 38px;
+    box-sizing: border-box;
     font-size: 13px;
     font-family: var(--font);
     width: 100%;
   }
 
-  input[type="text"]:focus, select:focus, textarea:focus {
+  input[type="text"]:focus,
+  input[type="number"]:focus,
+  select:focus,
+  textarea:focus {
     outline: none;
     border-color: var(--color-primary);
+  }
+
+  input[type="number"]::-webkit-outer-spin-button,
+  input[type="number"]::-webkit-inner-spin-button {
+    margin: 0;
   }
 
   /* ─── Modal ──────────────────────────────────────────────────────────────── */
@@ -1229,5 +1237,39 @@
     color: #6ee7b7;
     padding: 12px 16px;
     margin-bottom: 16px;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Mobile responsive                                                    */
+  /* ------------------------------------------------------------------ */
+  @media (max-width: 900px) {
+    .top-bar {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 767px) {
+    .top-bar {
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .main-cols {
+      grid-template-columns: 1fr;
+    }
+
+    .bottom-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+    }
+
+    .save-group {
+      width: 100%;
+    }
+
+    .save-group .btn {
+      flex: 1;
+    }
   }
 </style>

@@ -14,9 +14,12 @@
     try {
       const params = new URLSearchParams($page.url.search);
       const categoryId = params.get("category_id");
+      if (!categoryId) {
+        throw new Error("category_id is required to create a playbook");
+      }
       const res = await playbooksApi.create({
         name: "New Playbook",
-        category_id: categoryId ? parseInt(categoryId, 10) : undefined,
+        category_id: parseInt(categoryId, 10),
       });
       goto(`/playbooks/${res.playbook.id}`, { replaceState: true });
     } catch (e) {

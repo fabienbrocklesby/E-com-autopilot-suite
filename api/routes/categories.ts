@@ -2,7 +2,7 @@
  * Categories route - /categories
  */
 import { Hono } from "hono";
-import { query, queryOne, execute } from "../db/client.ts";
+import { query, queryOne, execute, transaction } from "../db/client.ts";
 import { AppError, Category, CreateCategoryPayload, UpdateCategoryPayload } from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 
@@ -39,18 +39,25 @@ categoriesRouter.post("/", async (c) => {
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
   validateCategoryPayload(body);
 
-  const category = await queryOne<Category>(
-    `INSERT INTO categories
-       (workspace_id, name, description, instructions)
-     VALUES ($1, $2, $3, $4)
-     RETURNING *`,
-    [
-      workspaceId,
-      body.name,
-      body.description,
-      body.instructions,
-    ],
-  );
+  const category = await transaction(async (tx) => {
+    const rows = await tx.queryObject<Category>({
+      text: `INSERT INTO categories (workspace_id, name, description, instructions)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+      args: [workspaceId, body.name, body.description, body.instructions],
+    });
+    const created = rows.rows[0];
+    if (!created) throw new AppError(500, "Failed to create category");
+
+    await tx.queryObject({
+      text: `INSERT INTO playbooks (workspace_id, category_id, name, steps, version, is_active)
+             VALUES ($1, $2, $3, '[]'::jsonb, 1, false)`,
+      args: [workspaceId, created.id, body.name],
+    });
+
+    return created;
+  });
+
   return c.json({ category }, 201);
 });
 

@@ -213,19 +213,15 @@
         <div class="field">
           <span class="label">Instructions (for AI)</span>
           <p class="field-hint">
-            Describe this category to the AI - when to match it, tone, and any special handling.
+            Describe this category to the AI and when to match a thread to it. Be as specific as possible to get the best results.
           </p>
           <textarea
             class="input textarea"
             bind:value={form.instructions}
             rows={5}
-            placeholder="e.g. This category is for customer refund or return requests. Be empathetic and professional. Confirm receipt and state that the team will review within 1–2 business days."
+            placeholder="e.g. This category is for customer refund or return requests."
           ></textarea>
         </div>
-
-        <p class="field-hint" style="margin-top: 4px; margin-bottom: 8px;">
-          Reply behaviour (writing style, auto-reply vs draft, confidence threshold) is now configured on the playbook linked to this category.
-        </p>
 
         <div class="form-actions">
           <button type="button" class="btn btn-ghost" onclick={closeForm}
@@ -271,7 +267,7 @@
 
   .categories-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
     gap: 16px;
   }
 
@@ -507,5 +503,18 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 6px;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 767px) {
+    .cat-meta {
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .field-row {
+      flex-direction: column;
+      gap: 10px;
+    }
   }
 </style>

@@ -11,6 +11,7 @@
   import { threadsStore, workspaceStore } from "$lib/stores";
   import type { ThreadListItem } from "$lib/api";
   import { Inbox, RefreshCw } from '@lucide/svelte';
+  import { openSSE } from "$lib/sse";
 
   // Detect reduced-motion preference once at init so stagger can respect it.
   // Svelte transitions are JS-driven, so CSS media queries alone can't suppress them.
@@ -63,9 +64,9 @@
       buckets[classifyThread(t)].push(t);
     }
     return [
-      { key: "attention", label: "Needs attention", threads: buckets.attention, defaultOpen: true },
+      { key: "attention", label: "Needs your attention", threads: buckets.attention, defaultOpen: true },
       { key: "progress", label: "In progress", threads: buckets.progress, defaultOpen: true },
-      { key: "other", label: "Other", threads: buckets.other, defaultOpen: false },
+      { key: "other", label: "Other / Noise", threads: buckets.other, defaultOpen: false },
     ];
   });
 
@@ -148,12 +149,47 @@
   function urgencyColor(key: UrgencyGroup): string {
     if (key === "attention") return "var(--color-danger)";
     if (key === "progress") return "var(--color-warning)";
-    return "var(--color-text-muted)";
+    return "var(--color-text-3, var(--color-text-muted))";
+  }
+
+  function threadDotColor(t: ThreadListItem, groupKey: UrgencyGroup): string {
+    if (t.latest_run_status === "waiting_for_human") return "var(--color-orange)";
+    if (t.latest_run_status === "failed" || t.latest_run_status === "escalated") return "var(--color-danger)";
+    if (t.latest_run_status === "running") return "var(--color-primary)";
+    if (t.latest_run_status === "waiting_for_customer") return "var(--color-info)";
+    if (groupKey === "attention") return "var(--color-danger)";
+    if (groupKey === "progress") return "var(--color-warning)";
+    return "var(--color-text-3, var(--color-text-muted))";
   }
 
   onMount(() => {
     loadThreads();
     mounted = true;
+  });
+
+  $effect(() => {
+    // Open a workspace-level SSE stream for live inbox updates.
+    // Reading currentWorkspaceId here makes Svelte re-run this effect when it changes.
+    const wsId = currentWorkspaceId;
+    let connectionCount = 0;
+    const es = openSSE('workspace', { workspace_id: wsId });
+
+    es.addEventListener('open', () => {
+      connectionCount++;
+      if (connectionCount > 1) loadThreads();
+    });
+
+    es.addEventListener('thread_created', (e: Event) => {
+      const { thread } = JSON.parse((e as MessageEvent).data) as { thread: ThreadListItem };
+      if (!threads.find((t) => t.id === thread.id)) threads = [thread, ...threads];
+    });
+
+    es.addEventListener('thread_updated', (e: Event) => {
+      const { thread } = JSON.parse((e as MessageEvent).data) as { thread: ThreadListItem };
+      threads = threads.map((t) => (t.id === thread.id ? thread : t));
+    });
+
+    return () => es.close();
   });
 </script>
 
@@ -164,9 +200,16 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="page-header">
-  <h1>Inbox</h1>
+  <div class="header-title">
+    <h1>Inbox</h1>
+    {#if !loading}
+      {@const attentionThreads = grouped.find(g => g.key === "attention")?.threads.length ?? 0}
+      {#if attentionThreads > 0}
+        <span class="attention-subtitle">{attentionThreads} thread{attentionThreads !== 1 ? "s" : ""} need your attention</span>
+      {/if}
+    {/if}
+  </div>
   <div class="header-actions">
-    <span class="thread-count">{threads.length} thread{threads.length !== 1 ? "s" : ""}</span>
     <button class="btn btn-ghost" onclick={loadThreads}><RefreshCw size={14} /> Refresh</button>
   </div>
 </div>
@@ -214,6 +257,8 @@
                 }
                 return -1;
               })()}
+              {@const dotColor = threadDotColor(thread, group.key)}
+              {@const isPulse = group.key === "attention"}
               <li
                 in:fly={{
                   y: prefersReducedMotion ? 0 : 6,
@@ -228,13 +273,23 @@
                   class:selected={selectedIdx === flatIdx}
                   class:unread={thread.status === "new"}
                 >
+                  <span class="thread-dot" class:pulse={isPulse} style="color: {dotColor}">
+                    {#if isPulse}<span class="dot-ring"></span>{/if}
+                    <span class="dot-fill"></span>
+                  </span>
                   <div class="thread-main">
                     <div class="thread-top">
                       <span class="thread-subject">{thread.subject || "(no subject)"}</span>
-                      {#if thread.has_pending_action}
-                        <span class="action-badge" title="Action required">Action required</span>
+                      {#if thread.latest_run_status === "waiting_for_human" || thread.has_pending_action}
+                        <span class="action-badge">Action needed</span>
                       {/if}
-                      {#if thread.draft_count > 0}
+                      {#if thread.latest_run_status === "failed"}
+                        <span class="failed-badge">Failed</span>
+                      {/if}
+                      {#if thread.status === "in_review" && !thread.has_pending_action && thread.latest_run_status !== "failed"}
+                        <span class="review-badge">Review</span>
+                      {/if}
+                      {#if thread.draft_count > 0 && thread.latest_run_status !== "waiting_for_human" && !thread.has_pending_action}
                         <span class="draft-badge" title="Draft ready">Draft</span>
                       {/if}
                     </div>
@@ -249,8 +304,9 @@
                             <span class="run-step">· {runProgressLabel(thread)}</span>
                           {/if}
                         </span>
+                      {:else}
+                        <span class="thread-snippet">{thread.snippet}</span>
                       {/if}
-                      <span class="thread-snippet">{thread.snippet}</span>
                     </div>
                   </div>
                   <div class="thread-side">
@@ -276,8 +332,9 @@
   }
 
   h1 {
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 700;
+    letter-spacing: -0.02em;
   }
 
   .header-actions {
@@ -286,9 +343,16 @@
     gap: 12px;
   }
 
-  .thread-count {
-    font-size: 13px;
-    color: var(--color-text-muted);
+  .header-title {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .attention-subtitle {
+    font-size: 12px;
+    color: var(--color-danger);
+    font-weight: 500;
   }
 
   .loading,
@@ -326,7 +390,7 @@
   }
 
   .group-header:hover {
-    background: var(--color-surface);
+    background: var(--color-surface-2);
   }
 
   .group-indicator {
@@ -355,6 +419,7 @@
   }
 
   .thread-list {
+	margin-top: 2vh;
     list-style: none;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
@@ -369,15 +434,49 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 16px;
-    padding: 12px 16px;
+    gap: 14px;
+    padding: 13px 18px;
     color: var(--color-text);
     transition: background 0.1s;
     text-decoration: none;
   }
 
+  /* Status dot */
+  .thread-dot {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    margin-top: 5px;
+  }
+
+  .dot-fill {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentColor;
+    display: block;
+  }
+
+  .dot-ring {
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.25;
+  }
+
+  @keyframes dot-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 0.5; } }
+
+  .thread-dot.pulse .dot-ring {
+    animation: dot-pulse 2s infinite;
+  }
+
   .thread-row:hover {
-    background: var(--color-surface);
+    background: var(--color-surface-2);
   }
 
   .thread-row.selected {
@@ -404,26 +503,55 @@
   }
 
   .thread-subject {
-    font-size: 14px;
-    font-weight: 500;
+    font-size: 13.5px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .action-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
     border-radius: 4px;
-    background: rgba(245 158 11 / 0.2);
+    background: var(--color-orange-dim);
+    color: var(--color-orange);
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+  }
+
+  .failed-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: var(--color-danger-dim);
+    color: var(--color-danger);
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
+  }
+
+  .review-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: var(--color-warning-dim);
     color: var(--color-warning);
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
   }
 
   .draft-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
     border-radius: 4px;
-    background: rgba(99 102 241 / 0.15);
+    background: var(--color-primary-dim);
     color: var(--color-primary);
+    letter-spacing: 0.03em;
+    flex-shrink: 0;
   }
 
   .thread-meta {
@@ -523,5 +651,39 @@
     width: 48px;
     flex-shrink: 0;
     opacity: 0.5;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Mobile responsive                                                    */
+  /* ------------------------------------------------------------------ */
+  @media (max-width: 767px) {
+    .page-header {
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      font-size: 18px;
+    }
+
+    .thread-row {
+      padding: 12px 14px;
+      gap: 10px;
+    }
+
+    /* Stack time/badge below subject on very small screens */
+    .thread-side {
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .thread-subject {
+      font-size: 13px;
+    }
+
+    .group-header {
+      padding: 6px 10px;
+      font-size: 11px;
+    }
   }
 </style>

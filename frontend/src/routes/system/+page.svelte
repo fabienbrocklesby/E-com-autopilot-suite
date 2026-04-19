@@ -192,7 +192,7 @@
 </div>
 
 <style>
-  .page { padding: 2rem; max-width: 1200px; margin: 0 auto; }
+  .page { padding: 0; max-width: 1200px; margin: 0 auto; }
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
   .header h1 { margin: 0; font-size: 1.5rem; }
   .header-right { display: flex; align-items: center; gap: 1rem; }
@@ -232,4 +232,13 @@
   .empty { color: var(--color-text-muted); font-size: 0.9rem; margin: 0; }
   .loading { color: var(--color-text-muted); }
   .error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 0.75rem; border-radius: 6px; }
+
+  @media (max-width: 767px) {
+    .page { padding: 0; }
+    .header { flex-wrap: wrap; gap: 0.75rem; }
+    .header-right { flex-wrap: wrap; gap: 0.5rem; }
+    .card-wide { grid-column: span 1; }
+    .rl-table { font-size: 0.78rem; }
+    .rl-table th, .rl-table td { padding: 0.35rem 0.5rem; }
+  }
 </style>

@@ -266,6 +266,7 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
           "UPDATE playbook_runs SET status = 'complete', current_step_id = NULL WHERE id = $1",
           [runId],
         );
+        await execute("UPDATE threads SET status = 'closed' WHERE id = $1", [run.thread_id]);
         const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
         return c.json({ run: updated, sent: true });
       }
@@ -365,6 +366,31 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   return c.json({ run: updated, result });
 });
 
+// POST /playbooks/runs/:runId/cancel
+playbooksRouter.post("/runs/:runId/cancel", async (c) => {
+  const runId = parseInt(c.req.param("runId"));
+  if (isNaN(runId)) throw new AppError(400, "Invalid run ID");
+
+  const run = await queryOne<PlaybookRun>(
+    "SELECT * FROM playbook_runs WHERE id = $1",
+    [runId],
+  );
+  if (!run) throw new AppError(404, "Run not found");
+
+  const cancellableStatuses = ["running", "waiting_for_customer", "waiting_for_human", "retrying"];
+  if (!cancellableStatuses.includes(run.status)) {
+    throw new AppError(409, `Run cannot be cancelled (status: ${run.status})`);
+  }
+
+  await execute(
+    "UPDATE playbook_runs SET status = 'cancelled', updated_at = NOW() WHERE id = $1",
+    [runId],
+  );
+
+  const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+  return c.json({ run: updated });
+});
+
 // ─── Playbook CRUD ────────────────────────────────────────────────────────────
 
 // GET /playbooks
@@ -399,6 +425,25 @@ playbooksRouter.post("/", async (c) => {
 
   if (!body.name || typeof body.name !== "string") {
     throw new AppError(422, "name is required");
+  }
+  if (body.category_id === undefined || body.category_id === null) {
+    throw new AppError(422, "category_id is required");
+  }
+
+  const category = await queryOne<{ id: number }>(
+    "SELECT id FROM categories WHERE id = $1 AND workspace_id = $2",
+    [body.category_id, workspaceId],
+  );
+  if (!category) {
+    throw new AppError(404, "Category not found");
+  }
+
+  const existingForCategory = await queryOne<Pick<Playbook, "id">>(
+    "SELECT id FROM playbooks WHERE workspace_id = $1 AND category_id = $2 LIMIT 1",
+    [workspaceId, body.category_id],
+  );
+  if (existingForCategory) {
+    throw new AppError(409, "Category already has a playbook");
   }
 
   const row = await queryOne<Playbook>(
@@ -461,13 +506,28 @@ playbooksRouter.put("/:id", async (c) => {
   );
   if (!existing) throw new AppError(404, "Playbook not found");
 
-  // Bump version if steps changed
-  const existingSteps = JSON.stringify(
-    typeof existing.steps === "string" ? JSON.parse(existing.steps) : existing.steps,
-  );
-  const newSteps = body.steps !== undefined ? JSON.stringify(body.steps) : existingSteps;
-  const stepsChanged = newSteps !== existingSteps;
-  const newVersion = stepsChanged ? existing.version + 1 : existing.version;
+  const newSteps = body.steps !== undefined
+    ? JSON.stringify(body.steps)
+    : JSON.stringify(typeof existing.steps === "string" ? JSON.parse(existing.steps) : existing.steps);
+  const targetCategoryId = body.category_id !== undefined ? body.category_id : existing.category_id;
+
+  if (targetCategoryId !== null) {
+    const category = await queryOne<{ id: number }>(
+      "SELECT id FROM categories WHERE id = $1 AND workspace_id = $2",
+      [targetCategoryId, existing.workspace_id],
+    );
+    if (!category) {
+      throw new AppError(404, "Category not found");
+    }
+
+    const existingForCategory = await queryOne<Pick<Playbook, "id">>(
+      "SELECT id FROM playbooks WHERE workspace_id = $1 AND category_id = $2 AND id <> $3 LIMIT 1",
+      [existing.workspace_id, targetCategoryId, id],
+    );
+    if (existingForCategory) {
+      throw new AppError(409, "Category already has a playbook");
+    }
+  }
 
   const updated = await queryOne<Playbook>(
     `UPDATE playbooks SET
@@ -475,22 +535,20 @@ playbooksRouter.put("/:id", async (c) => {
        category_id = $2,
        plain_language_description = $3,
        steps = $4::jsonb,
-       version = $5,
-       is_active = $6,
-       customer_silence_hours = $7,
-       writing_style = $8,
-       reply_mode = $9,
-       confidence_threshold = $10
-     WHERE id = $11
+       is_active = $5,
+       customer_silence_hours = $6,
+       writing_style = $7,
+       reply_mode = $8,
+       confidence_threshold = $9
+     WHERE id = $10
      RETURNING *`,
     [
       body.name ?? existing.name,
-      body.category_id !== undefined ? body.category_id : existing.category_id,
+      targetCategoryId,
       body.plain_language_description !== undefined
         ? body.plain_language_description
         : existing.plain_language_description,
       newSteps,
-      newVersion,
       body.is_active !== undefined ? body.is_active : existing.is_active,
       body.customer_silence_hours !== undefined ? body.customer_silence_hours : existing.customer_silence_hours,
       body.writing_style !== undefined ? body.writing_style : existing.writing_style,

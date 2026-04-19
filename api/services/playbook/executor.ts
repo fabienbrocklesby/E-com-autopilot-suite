@@ -6,6 +6,8 @@ import { getHandler } from "./registry.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
 import { AppError } from "../../types/index.ts";
+import { publish } from "../event-bus.ts";
+import { fetchThreadListItem } from "../../db/queries.ts";
 import type {
   Playbook,
   PlaybookRun,
@@ -55,6 +57,7 @@ export interface RunResult {
 async function escalateRunDueToLoop(
   runId: number,
   threadId: number,
+  workspaceId: number,
   variables: Record<string, unknown>,
   currentStepId: string | null,
   reason: string,
@@ -70,7 +73,11 @@ async function escalateRunDueToLoop(
   );
   await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
   logger.error("playbook.run_escalated", { run_id: runId, reason });
-  await sendAlert(1, "run_escalated", { run_id: runId, thread_id: threadId, reason }).catch(() => {});
+  await sendAlert(workspaceId, "run_escalated", { run_id: runId, thread_id: threadId, reason }).catch(() => {});
+  const threadItem = await fetchThreadListItem(threadId, workspaceId);
+  if (threadItem) {
+    publish({ type: "thread_updated", workspaceId, thread: threadItem as unknown as Record<string, unknown> });
+  }
   return { runId, status: "escalated", currentStepId, context: variables };
 }
 
@@ -159,6 +166,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       return await escalateRunDueToLoop(
         runId,
         run.thread_id,
+        run.workspace_id,
         variables,
         currentStepId,
         `Loop detected: step ${currentStepId} fired ${sameStepCount} times without progress`,
@@ -174,6 +182,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         return await escalateRunDueToLoop(
           runId,
           run.thread_id,
+          run.workspace_id,
           variables,
           currentStepId,
           "Exceeded 50 step executions, likely stuck in a loop",
@@ -216,6 +225,26 @@ export async function advanceRun(runId: number): Promise<RunResult> {
     );
     const execId = execRow!.id;
 
+    publish({
+      type: "step_execution_created",
+      workspaceId: run.workspace_id,
+      runId,
+      threadId: run.thread_id,
+      execution: {
+        id: execId,
+        run_id: runId,
+        step_id: step.id,
+        step_type: step.type,
+        status: "running",
+        input: step,
+        output: null,
+        error: null,
+        ai_calls: null,
+        created_at: new Date(),
+        completed_at: null,
+      },
+    });
+
     let result: StepResult;
     try {
       result = await handler.execute(step, ctx);
@@ -226,6 +255,18 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         [String(err), execId],
       );
 
+      publish({
+        type: "step_execution_updated",
+        workspaceId: run.workspace_id,
+        runId,
+        threadId: run.thread_id,
+        execution: {
+          id: execId, run_id: runId, step_id: step.id, step_type: step.type,
+          status: "failed", input: step, output: null, error: String(err),
+          ai_calls: null, created_at: new Date(), completed_at: new Date(),
+        },
+      });
+
       // Check if this is a retriable transient error
       if (isRetriableError(err) && run.retry_count < MAX_RETRIES) {
         const delaySec = RETRY_DELAYS_SEC[Math.min(run.retry_count, RETRY_DELAYS_SEC.length - 1)];
@@ -234,6 +275,12 @@ export async function advanceRun(runId: number): Promise<RunResult> {
             next_retry_at = NOW() + ($1 || ' seconds')::interval WHERE id = $2`,
           [delaySec, runId],
         );
+        publish({
+          type: "run_updated",
+          workspaceId: run.workspace_id,
+          threadId: run.thread_id,
+          run: { ...run, status: "retrying", current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+        });
         logger.warn("playbook.step_retry_scheduled", {
           run_id: runId,
           step_id: step.id,
@@ -251,6 +298,12 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         "UPDATE playbook_runs SET status = 'failed', current_step_id = $1, context = $2 WHERE id = $3",
         [currentStepId, JSON.stringify(variables), runId],
       );
+      publish({
+        type: "run_updated",
+        workspaceId: run.workspace_id,
+        threadId: run.thread_id,
+        run: { ...run, status: "failed", current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+      });
       logger.error("playbook.step_threw", { run_id: runId, step_id: step.id, error: String(err) });
       break;
     }
@@ -272,6 +325,19 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         execId,
       ],
     );
+
+    publish({
+      type: "step_execution_updated",
+      workspaceId: run.workspace_id,
+      runId,
+      threadId: run.thread_id,
+      execution: {
+        id: execId, run_id: runId, step_id: step.id, step_type: step.type,
+        status: result.decision.action === "fail" ? "failed" : "success",
+        input: step, output: result.output ?? null, error: null,
+        ai_calls: result.aiCalls ?? null, created_at: new Date(), completed_at: new Date(),
+      },
+    });
 
     // Apply the decision
     switch (result.decision.action) {
@@ -300,6 +366,12 @@ export async function advanceRun(runId: number): Promise<RunResult> {
           "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3 WHERE id = $4",
           [status, currentStepId, JSON.stringify(variables), runId],
         );
+        publish({
+          type: "run_updated",
+          workspaceId: run.workspace_id,
+          threadId: run.thread_id,
+          run: { ...run, status, current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+        });
         logger.info("playbook.run_paused", { run_id: runId, step_id: currentStepId, status });
         return { runId, status, currentStepId, context: variables };
       }
@@ -319,6 +391,12 @@ export async function advanceRun(runId: number): Promise<RunResult> {
               next_retry_at = NOW() + ($1 || ' seconds')::interval WHERE id = $2`,
             [delaySec, runId],
           );
+          publish({
+            type: "run_updated",
+            workspaceId: run.workspace_id,
+            threadId: run.thread_id,
+            run: { ...run, status: "retrying", current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+          });
           logger.warn("playbook.step_retry_scheduled", {
             run_id: runId,
             step_id: step.id,
@@ -344,6 +422,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       [status, currentStepId, JSON.stringify(variables), runId],
     );
 
+    publish({
+      type: "run_updated",
+      workspaceId: run.workspace_id,
+      threadId: run.thread_id,
+      run: { ...run, status, current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+    });
+
     // If run is no longer running, stop
     if (status !== "running") break;
   }
@@ -359,7 +444,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
   // Mark thread status based on run outcome
   if (status === "complete") {
-    await execute("UPDATE threads SET status = 'replied' WHERE id = $1", [run.thread_id]);
+    await execute("UPDATE threads SET status = 'closed' WHERE id = $1", [run.thread_id]);
   } else if (status === "waiting_for_customer" || status === "waiting_for_human") {
     await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
   } else if (status === "escalated" || status === "failed") {
@@ -369,6 +454,11 @@ export async function advanceRun(runId: number): Promise<RunResult> {
     }
   }
   // retrying: don't change thread status - the run will resume automatically
+
+  const threadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+  if (threadItem) {
+    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: threadItem as unknown as Record<string, unknown> });
+  }
 
   logger.info("playbook.run_finished", { run_id: runId, status });
   return { runId, status, currentStepId, context: variables };

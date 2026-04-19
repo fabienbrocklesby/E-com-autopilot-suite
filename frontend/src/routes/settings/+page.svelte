@@ -238,7 +238,9 @@
   <title>Settings - Autopilot</title>
 </svelte:head>
 
-<h1>Settings</h1>
+<div class="page-header">
+  <h1>Settings</h1>
+</div>
 
 {#if oauthSuccess}
   <div class="success-banner" transition:fade={{ duration: 150 }}>Google account connected successfully.</div>
@@ -524,20 +526,24 @@
 </section>
 
 <style>
-  h1 {
-    font-size: 22px;
-    font-weight: 700;
+  .page-header {
     margin-bottom: 24px;
   }
 
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
   h2 {
-    font-size: 16px;
+    font-size: 13.5px;
     font-weight: 700;
     margin-bottom: 6px;
   }
 
   .section {
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   .section-description {
@@ -776,19 +782,7 @@
   }
 
   .input {
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    color: var(--color-text);
-    font-size: 13px;
-    font-family: inherit;
-    padding: 6px 10px;
     width: 200px;
-  }
-
-  .input:focus {
-    outline: none;
-    border-color: var(--color-primary);
   }
 
   /* Toggle */
@@ -852,5 +846,62 @@
     color: var(--color-danger);
     padding: 12px 16px;
     margin-bottom: 16px;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Mobile responsive                                                    */
+  /* ------------------------------------------------------------------ */
+  @media (max-width: 767px) {
+    .setting-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .setting-control {
+      width: 100%;
+      flex-shrink: unset;
+    }
+
+    .input-with-save {
+      width: 100%;
+    }
+
+    .input {
+      width: 100%;
+      flex: 1;
+    }
+
+    .signature-input-row {
+      flex-wrap: wrap;
+    }
+
+    .signature-input {
+      width: 100%;
+    }
+
+    .workspace-row {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .workspace-actions {
+      width: 100%;
+    }
+
+    .field-row {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .field-label {
+      min-width: unset;
+    }
+
+    .field-row input,
+    .field-row select {
+      width: 100%;
+    }
   }
 </style>

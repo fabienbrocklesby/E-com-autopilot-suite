@@ -11,6 +11,8 @@ import { categoriseAndDraft } from "../services/categorisation.ts";
 import { sendReply } from "../services/gmail.ts";
 import { recordInteraction } from "../services/learning.ts";
 import { sendHumanReply } from "../services/human-reply.ts";
+import { fetchThreadListItem } from "../db/queries.ts";
+import { publish } from "../services/event-bus.ts";
 
 export const threadsRouter = new Hono();
 
@@ -114,6 +116,10 @@ threadsRouter.patch("/:id/status", async (c) => {
   if (affected === 0) throw new AppError(404, "Thread not found");
 
   const updated = await queryOne<Thread>("SELECT * FROM threads WHERE id = $1", [id]);
+  if (updated) {
+    const threadItem = await fetchThreadListItem(id, updated.workspace_id);
+    if (threadItem) publish({ type: "thread_updated", workspaceId: updated.workspace_id, thread: threadItem as unknown as Record<string, unknown> });
+  }
   return c.json({ thread: updated });
 });
 
@@ -231,6 +237,8 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
   }
 
   const draft = await queryOne("SELECT * FROM drafts WHERE id = $1", [draftId]);
+  const threadItem = await fetchThreadListItem(threadId, thread.workspace_id);
+  if (threadItem) publish({ type: "thread_updated", workspaceId: thread.workspace_id, thread: threadItem as unknown as Record<string, unknown> });
   return c.json({ draft });
 });
 

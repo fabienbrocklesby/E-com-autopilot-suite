@@ -8,10 +8,11 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { threadsApi, playbooksApi } from "$lib/api";
-  import type { ThreadDetail, Draft, PlaybookRun, StepExecution } from "$lib/api";
+  import type { ThreadDetail, Draft, Message, PlaybookRun, StepExecution } from "$lib/api";
   import ManualActionBanner from "$lib/components/ManualActionBanner.svelte";
   import ManualReplyPanel from "$lib/components/ManualReplyPanel.svelte";
-  import { Zap } from '@lucide/svelte';
+  import { Zap, PlusCircle, TableProperties, Pencil, MessageCircleQuestion, Scale, GitBranch, Hand, Send, CheckCircle, AlertTriangle } from '@lucide/svelte';
+  import { openSSE } from "$lib/sse";
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -27,29 +28,10 @@
 
   // Playbook run observability
   let runs = $state<PlaybookRun[]>([]);
-  let expandedRunId = $state<number | null>(null);
-  let runDetail = $state<{ run: PlaybookRun; executions: StepExecution[] } | null>(null);
-  let runDetailLoading = $state(false);
+  let runDetails = $state<Record<number, { run: PlaybookRun; executions: StepExecution[] }>>({});
 
   // Active run waiting for human action - drives the banner.
   let waitingRun = $derived(runs.find((r) => r.status === "waiting_for_human") ?? null);
-
-  async function loadRunDetail(runId: number) {
-    if (expandedRunId === runId) {
-      expandedRunId = null;
-      runDetail = null;
-      return;
-    }
-    expandedRunId = runId;
-    runDetailLoading = true;
-    try {
-      runDetail = await playbooksApi.getRun(runId);
-    } catch {
-      runDetail = null;
-    } finally {
-      runDetailLoading = false;
-    }
-  }
 
   function runStatusColor(status: string): string {
     const map: Record<string, string> = {
@@ -68,6 +50,74 @@
     return map[status] ?? "#64748b";
   }
 
+  const execStepMeta: Record<string, { icon: typeof PlusCircle; label: string; color: string }> = {
+    extract:         { icon: PlusCircle,           label: "Extract",         color: "#6366f1" },
+    find_sheet_row:  { icon: TableProperties,      label: "Find Sheet Row",  color: "#0ea5e9" },
+    update_sheet:    { icon: Pencil,                label: "Update Sheet",    color: "#0ea5e9" },
+    ask_customer:    { icon: MessageCircleQuestion, label: "Ask Customer",    color: "#f59e0b" },
+    evaluate:        { icon: Scale,                 label: "Evaluate",        color: "#8b5cf6" },
+    branch:          { icon: GitBranch,             label: "Branch",          color: "#a78bfa" },
+    manual_approval: { icon: Hand,                  label: "Manual Approval", color: "#f97316" },
+    send_reply:      { icon: Send,                  label: "Send Reply",      color: "#10b981" },
+    complete:        { icon: CheckCircle,           label: "Complete",        color: "#10b981" },
+    escalate:        { icon: AlertTriangle,         label: "Escalate",        color: "#ef4444" },
+  };
+
+  const defaultExecMeta = { icon: PlusCircle, label: "Step", color: "#64748b" };
+
+  function execMeta(type: string) {
+    return execStepMeta[type] ?? defaultExecMeta;
+  }
+
+  function execSummary(stepType: string, output: Record<string, unknown> | null): string {
+    if (!output) return "";
+    switch (stepType) {
+      case "find_sheet_row": {
+        if (output.found) return `Found row ${output.row_number} · ${output.column} = "${output.matched_value}"`;
+        return "No matching row found";
+      }
+      case "update_sheet": {
+        const written = output.written as Record<string, unknown> | undefined;
+        if (!written) return "";
+        const pairs = Object.entries(written).map(([col, val]) => `${col} → ${String(val)}`).join(", ");
+        return `Updated: ${pairs}`;
+      }
+      case "ask_customer": {
+        if (output.action === "skipped") return "Skipped — all required context already present";
+        const msg = (output.pending_send ?? output.message_sent) as string | undefined;
+        if (msg) return `"${msg.slice(0, 80)}${msg.length > 80 ? "…" : ""}"`;
+        return "";
+      }
+      case "evaluate": {
+        const action = output.action as string | undefined;
+        if (action === "satisfied") return `Satisfied${output.skipped_ai ? " (deterministic)" : ""}`;
+        if (action === "missing") {
+          const missing = (output.missing as string[] | undefined)?.join(", ");
+          return `Missing: ${missing ?? "unknown"}`;
+        }
+        if (action === "escalate") return `Escalated: ${(output.reasoning as string | undefined) ?? ""}`;
+        return String(action ?? "");
+      }
+      case "send_reply": {
+        const msg = output.message_sent as string | undefined;
+        if (msg) return `"${msg.slice(0, 80)}${msg.length > 80 ? "…" : ""}"`;
+        return "";
+      }
+      case "manual_approval": {
+        const reason = output.reason as string | undefined;
+        return reason ? `Reason: "${reason}"` : "";
+      }
+      case "extract":
+        return "";
+      case "complete":
+        return "Run completed successfully";
+      case "escalate":
+        return (output.reason as string | undefined) ?? "";
+      default:
+        return "";
+    }
+  }
+
   async function load() {
     loading = true;
     error = null;
@@ -78,6 +128,12 @@
       ]);
       thread = threadRes.thread;
       runs = runsRes.runs;
+      const detailResults = await Promise.all(
+        runsRes.runs.map((r) => playbooksApi.getRun(r.id).catch(() => null))
+      );
+      runDetails = Object.fromEntries(
+        detailResults.flatMap((d) => (d ? [[d.run.id, d]] : []))
+      );
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load thread";
     } finally {
@@ -115,7 +171,23 @@
     }
   }
 
-  async function handleStatusUpdate(newStatus: string) {
+  const ACTIVE_RUN_STATUSES = ["running", "waiting_for_customer", "waiting_for_human", "retrying"];
+
+  let activeRuns = $derived(runs.filter((r) => ACTIVE_RUN_STATUSES.includes(r.status)));
+
+  let pendingStatus = $state<string | null>(null);
+
+  function requestStatusUpdate(newStatus: string) {
+    if (thread?.status === newStatus) return;
+    if (activeRuns.length > 0) {
+      pendingStatus = newStatus;
+    } else {
+      applyStatusUpdate(newStatus);
+    }
+  }
+
+  async function applyStatusUpdate(newStatus: string) {
+    pendingStatus = null;
     try {
       await threadsApi.updateStatus(threadId, newStatus);
       if (thread) thread = { ...thread, status: newStatus };
@@ -124,8 +196,89 @@
     }
   }
 
+  async function confirmStatusUpdate() {
+    if (!pendingStatus) return;
+    const targetStatus = pendingStatus;
+    pendingStatus = null;
+    try {
+      await Promise.all(activeRuns.map((r) => playbooksApi.cancelRun(r.id)));
+      await threadsApi.updateStatus(threadId, targetStatus);
+      if (thread) thread = { ...thread, status: targetStatus };
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to cancel runs and update status";
+    }
+  }
+
   onMount(() => {
     load();
+  });
+
+  $effect(() => {
+    // Thread-scoped SSE stream for live step-by-step playbook progress.
+    let connectionCount = 0;
+    const es = openSSE(`thread/${threadId}`, { workspace_id: 1 });
+
+    es.addEventListener('open', () => {
+      connectionCount++;
+      if (connectionCount > 1) load();
+    });
+
+    es.addEventListener('thread_updated', (e: Event) => {
+      const { thread: updated } = JSON.parse((e as MessageEvent).data) as { thread: Record<string, unknown> };
+      if (thread) thread = { ...thread, ...updated } as ThreadDetail;
+    });
+
+    es.addEventListener('message_created', (e: Event) => {
+      const { message } = JSON.parse((e as MessageEvent).data) as { message: Message };
+      if (thread && !thread.messages.find((m) => m.id === message.id)) {
+        thread = { ...thread, messages: [...thread.messages, message] };
+      }
+    });
+
+    es.addEventListener('run_updated', async (e: Event) => {
+      const { run } = JSON.parse((e as MessageEvent).data) as { run: PlaybookRun & { playbook_name?: string } };
+      const idx = runs.findIndex((r) => r.id === run.id);
+      if (idx >= 0) {
+        runs = runs.map((r, i) => (i === idx ? { ...r, ...run } : r));
+        if (runDetails[run.id]) {
+          runDetails = { ...runDetails, [run.id]: { ...runDetails[run.id], run } };
+        }
+      } else {
+        runs = [...runs, run];
+        try {
+          const detail = await playbooksApi.getRun(run.id);
+          runDetails = { ...runDetails, [run.id]: detail };
+        } catch { /* ignore */ }
+      }
+    });
+
+    es.addEventListener('step_execution_created', (e: Event) => {
+      const { runId, execution } = JSON.parse((e as MessageEvent).data) as { runId: number; execution: StepExecution };
+      if (runDetails[runId] && !runDetails[runId].executions.find((ex) => ex.id === execution.id)) {
+        runDetails = {
+          ...runDetails,
+          [runId]: { ...runDetails[runId], executions: [...runDetails[runId].executions, execution] },
+        };
+      }
+    });
+
+    es.addEventListener('step_execution_updated', (e: Event) => {
+      const { runId, execution } = JSON.parse((e as MessageEvent).data) as { runId: number; execution: StepExecution };
+      if (runDetails[runId]) {
+        runDetails = {
+          ...runDetails,
+          [runId]: {
+            ...runDetails[runId],
+            executions: runDetails[runId].executions.map((ex) =>
+              ex.id === execution.id ? { ...ex, ...execution } : ex,
+            ),
+          },
+        };
+      }
+    });
+
+    return () => es.close();
   });
 </script>
 
@@ -141,7 +294,7 @@
         <button
           class="status-btn"
           class:active={thread?.status === s}
-          onclick={() => handleStatusUpdate(s)}
+          onclick={() => requestStatusUpdate(s)}
         >
           {s.replace("_", " ")}
         </button>
@@ -167,6 +320,18 @@
 
 {#if success}
   <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
+{/if}
+
+{#if pendingStatus}
+  <div class="confirm-banner" transition:fade={{ duration: 150 }}>
+    <div class="confirm-text">
+      This thread has {activeRuns.length} active playbook {activeRuns.length === 1 ? "run" : "runs"}. Changing status to <strong>{pendingStatus.replace("_", " ")}</strong> will cancel {activeRuns.length === 1 ? "it" : "them"}.
+    </div>
+    <div class="confirm-actions">
+      <button class="btn btn-danger btn-sm" onclick={confirmStatusUpdate}>Cancel {activeRuns.length === 1 ? "run" : "runs"} and continue</button>
+      <button class="btn btn-ghost btn-sm" onclick={() => pendingStatus = null}>Keep running</button>
+    </div>
+  </div>
 {/if}
 
 {#if waitingRun}
@@ -211,7 +376,7 @@
       <div class="messages-list">
         {#each thread.messages as message, i (message.id)}
           <div
-            class="message card"
+            class="bubble-wrapper"
             class:outbound={message.direction === "outbound"}
             in:fly={{
               y: prefersReducedMotion ? 0 : 8,
@@ -220,12 +385,13 @@
               easing: cubicOut,
             }}
           >
-            <div class="message-header">
-              <span class="from">{message.from_address}</span>
-              <span class="direction-badge">{message.direction}</span>
-              <span class="date">{new Date(message.received_at).toLocaleString()}</span>
+            <div class="bubble">
+              <div class="bubble-meta">
+                <span class="bubble-from">{message.from_address}</span>
+                <span class="bubble-date">{new Date(message.received_at).toLocaleString()}</span>
+              </div>
+              <div class="bubble-body">{message.body_plain}</div>
             </div>
-            <div class="message-body">{message.body_plain}</div>
           </div>
         {/each}
       </div>
@@ -260,8 +426,8 @@
         <div class="sidebar-section">
           <h3>Playbook Runs</h3>
           {#each runs as run (run.id)}
-            <div class="run-card card" class:run-expanded={expandedRunId === run.id}>
-              <button class="run-header" onclick={() => loadRunDetail(run.id)}>
+            <div class="run-card card">
+              <div class="run-header">
                 <div class="run-title">
                   <span class="run-status-dot" style="background: {runStatusColor(run.status)}"></span>
                   <span class="run-name">{run.playbook_name ?? `Playbook #${run.playbook_id}`}</span>
@@ -272,50 +438,58 @@
                     <span class="run-current-step">· {run.current_step_id}</span>
                   {/if}
                 </div>
-              </button>
+              </div>
 
-              {#if expandedRunId === run.id}
-                <div class="run-detail">
-                  {#if runDetailLoading}
-                    <div class="run-loading">Loading…</div>
-                  {:else if runDetail}
-                    {#if Object.keys(runDetail.run.context ?? {}).length > 0}
-                      <div class="ctx-section">
-                        <h4>Context</h4>
-                        <dl class="ctx-grid">
-                          {#each Object.entries(runDetail.run.context) as [k, v]}
-                            <dt>{k}</dt>
-                            <dd>{String(v)}</dd>
-                          {/each}
-                        </dl>
-                      </div>
-                    {/if}
-
-                    <div class="exec-section">
-                      <h4>Steps ({runDetail.executions.length})</h4>
-                      {#each runDetail.executions as exec (exec.id)}
-                        <div class="exec-entry">
-                          <div class="exec-header">
-                            <span class="exec-dot" style="background: {stepStatusColor(exec.status)}"></span>
-                            <span class="exec-type">{exec.step_type}</span>
-                            <code class="exec-step-id">{exec.step_id}</code>
-                            <span class="exec-status">{exec.status}</span>
-                          </div>
-                          {#if exec.error}
-                            <div class="exec-error">{exec.error}</div>
-                          {/if}
-                          {#if exec.output && Object.keys(exec.output).length > 0}
-                            <details class="exec-details">
-                              <summary>Output</summary>
-                              <pre class="exec-json">{JSON.stringify(exec.output, null, 2)}</pre>
-                            </details>
-                          {/if}
-                        </div>
-                      {/each}
+              <div class="run-detail">
+                {#if runDetails[run.id]}
+                  {@const detail = runDetails[run.id]}
+                  {#if Object.keys(detail.run.context ?? {}).length > 0}
+                    <div class="ctx-section">
+                      <h4>Context</h4>
+                      <dl class="ctx-grid">
+                        {#each Object.entries(detail.run.context) as [k, v]}
+                          <dt>{k}</dt>
+                          <dd>{String(v)}</dd>
+                        {/each}
+                      </dl>
                     </div>
                   {/if}
-                </div>
-              {/if}
+
+                  <div class="exec-section">
+                    <h4>Steps ({detail.executions.length})</h4>
+                    {#each detail.executions as exec (exec.id)}
+                      <div class="exec-entry">
+                        <div class="exec-header">
+                          <span class="exec-dot" style="background: {stepStatusColor(exec.status)}"></span>
+                          <span class="exec-icon" style="color: {execMeta(exec.step_type).color}">
+                            {#if execMeta(exec.step_type).icon}
+                              {@const ExecIcon = execMeta(exec.step_type).icon}
+                              <ExecIcon size={13} />
+                            {/if}
+                          </span>
+                          <span class="exec-type">{execMeta(exec.step_type).label}</span>
+                          <code class="exec-step-id">{exec.step_id}</code>
+                          <span class="exec-status">{exec.status}</span>
+                        </div>
+                        {#if execSummary(exec.step_type, exec.output)}
+                          <div class="exec-summary">{execSummary(exec.step_type, exec.output)}</div>
+                        {/if}
+                        {#if exec.error}
+                          <div class="exec-error">{exec.error}</div>
+                        {/if}
+                        {#if exec.output && Object.keys(exec.output).length > 0}
+                          <details class="exec-details">
+                            <summary>Output</summary>
+                            <pre class="exec-json">{JSON.stringify(exec.output, null, 2)}</pre>
+                          </details>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="run-loading">Loading…</div>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
@@ -392,6 +566,52 @@
     animation: flash-success 600ms ease forwards;
   }
 
+  .confirm-banner {
+    background: rgba(245 158 11 / 0.08);
+    border: 1px solid rgba(245 158 11 / 0.35);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .confirm-text {
+    font-size: 13px;
+    color: var(--color-text);
+    line-height: 1.5;
+  }
+
+  .confirm-text strong {
+    color: var(--color-warning, #f59e0b);
+    text-transform: capitalize;
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .btn-danger {
+    background: rgba(239 68 68 / 0.15);
+    border-color: rgba(239 68 68 / 0.4);
+    color: var(--color-danger, #ef4444);
+  }
+
+  .btn-danger:hover {
+    background: rgba(239 68 68 / 0.25);
+    border-color: rgba(239 68 68 / 0.6);
+  }
+
+  .btn-sm {
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+
   /* ─── Two-column layout ─── */
   .thread-layout {
     display: grid;
@@ -448,39 +668,67 @@
   .messages-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 14px;
   }
 
-  .message.outbound {
-    border-color: rgba(99 102 241 / 0.3);
-    background: rgba(99 102 241 / 0.05);
+  /* Chat bubble wrapper — inbound left, outbound right */
+  .bubble-wrapper {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-end;
   }
 
-  .message-header {
+  .bubble-wrapper.outbound {
+    flex-direction: row-reverse;
+  }
+
+  .bubble {
+    max-width: 72%;
+    padding: 12px 16px;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-radius: 16px 16px 16px 4px;
+  }
+
+  .bubble-wrapper.outbound .bubble {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.25);
+    border-radius: 16px 16px 4px 16px;
+  }
+
+  .bubble-meta {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 10px;
-    font-size: 12px;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 11px;
   }
 
-  .from { font-weight: 600; }
-
-  .direction-badge {
-    background: var(--color-surface-2);
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    text-transform: uppercase;
+  .bubble-from {
+    font-weight: 600;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
   }
 
-  .date { color: var(--color-text-muted); margin-left: auto; }
+  .bubble-wrapper.outbound .bubble-from {
+    color: var(--color-primary);
+  }
 
-  .message-body {
-    font-size: 13px;
-    line-height: 1.6;
+  .bubble-date {
+    color: var(--color-text-3, var(--color-text-muted));
+    font-size: 10.5px;
+    white-space: nowrap;
+  }
+
+  .bubble-body {
+    font-size: 13.5px;
+    line-height: 1.65;
     white-space: pre-wrap;
     word-break: break-word;
+    color: var(--color-text);
   }
 
   /* ─── Drafts ─── */
@@ -523,6 +771,23 @@
   .context-col {
     position: sticky;
     top: 28px;
+    height: calc(100vh - 56px);
+    display: flex;
+    flex-direction: column;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .sidebar-section {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 16px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
   }
 
   .sidebar-section h3 {
@@ -534,23 +799,15 @@
     margin-bottom: 10px;
   }
 
-  .run-card { margin-bottom: 8px; overflow: hidden; }
-  .run-card.run-expanded { border-color: var(--color-primary); }
+  .run-card { margin-bottom: 8px; overflow: hidden; border-color: var(--color-primary); }
 
   .run-header {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    width: 100%;
     padding: 10px 14px;
-    background: transparent;
-    border: none;
     color: var(--color-text);
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.12s ease;
   }
-  .run-header:hover { background: var(--color-surface-2); }
 
   .run-title {
     display: flex;
@@ -601,9 +858,11 @@
 
   .exec-header { display: flex; align-items: center; gap: 6px; }
   .exec-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .exec-icon { display: flex; align-items: center; flex-shrink: 0; }
   .exec-type { font-weight: 600; }
   .exec-step-id { color: var(--color-text-muted); font-size: 10px; }
   .exec-status { color: var(--color-text-muted); margin-left: auto; text-transform: capitalize; }
+  .exec-summary { color: var(--color-text-muted); font-size: 11px; margin-top: 3px; padding-left: 18px; word-break: break-word; }
 
   .exec-error { color: var(--color-danger); margin-top: 4px; font-family: monospace; font-size: 10px; }
 
@@ -656,5 +915,38 @@
     height: 12px;
     width: 70%;
     opacity: 0.5;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Mobile responsive                                                    */
+  /* ------------------------------------------------------------------ */
+  @media (max-width: 767px) {
+    .page-header {
+      margin-bottom: 14px;
+    }
+
+    .thread-layout {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    /* On mobile the context sidebar isn't sticky - just stacks below */
+    .context-col {
+      position: static;
+      height: auto;
+      max-height: 500px;
+    }
+
+    .bubble {
+      max-width: 88%;
+    }
+
+    .header-actions {
+      gap: 8px;
+    }
+
+    .status-pills {
+      flex-wrap: wrap;
+    }
   }
 </style>

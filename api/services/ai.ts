@@ -211,7 +211,7 @@ async function getFewShotExamples(
 /**
  * Categorise an email thread by matching it against the available categories.
  *
- * @returns categoryId (null if no category meets the threshold), confidence 0–1,
+ * @returns categoryId (null if no category meets the threshold), confidence 0-1,
  *          and a short reasoning string.
  */
 export async function categoriseEmail(

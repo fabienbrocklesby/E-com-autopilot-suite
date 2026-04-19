@@ -598,4 +598,31 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  @media (max-width: 767px) {
+    .review-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .exec-detail,
+    .select-prompt {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .detail-header {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .updates-table {
+      display: block;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .action-row {
+      flex-wrap: wrap;
+    }
+  }
 </style>

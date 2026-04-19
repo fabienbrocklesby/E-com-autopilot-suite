@@ -477,7 +477,7 @@ export interface PlaybookRun {
         playbook_id: number;
         playbook_version: number;
         current_step_id: string | null;
-        status: 'running' | 'waiting_for_customer' | 'waiting_for_human' | 'complete' | 'failed' | 'escalated';
+        status: 'running' | 'waiting_for_customer' | 'waiting_for_human' | 'complete' | 'failed' | 'escalated' | 'retrying' | 'cancelled';
         context: Record<string, unknown>;
         created_at: string;
         updated_at: string;
@@ -532,7 +532,7 @@ export const playbooksApi = {
                 return request<{ playbook: Playbook }>(`/playbooks/${id}`);
         },
 
-        create(payload: { name: string; category_id?: number | null; plain_language_description?: string; steps?: PlaybookStep[]; writing_style?: string; reply_mode?: 'auto_reply' | 'draft_only'; confidence_threshold?: number }) {
+		create(payload: { name: string; category_id: number; plain_language_description?: string; steps?: PlaybookStep[]; writing_style?: string; reply_mode?: 'auto_reply' | 'draft_only'; confidence_threshold?: number }) {
                 return request<{ playbook: Playbook }>('/playbooks', {
                         method: 'POST',
                         body: JSON.stringify(payload)
@@ -604,47 +604,13 @@ export const playbooksApi = {
 
         rejectRun(runId: number) {
                 return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/reject`, { method: 'POST' });
+        },
+
+        cancelRun(runId: number) {
+                return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/cancel`, { method: 'POST' });
         }
 };
 
-// ─── Playbook Templates ──────────────────────────────────────────────────────
-
-export interface PlaybookTemplate {
-        id: number;
-        slug: string;
-        name: string;
-        category: string;
-        industry: string | null;
-        description: string;
-        plain_language: string;
-        steps: PlaybookStep[];
-        voice_examples: string | null;
-        required_sheet_columns: string[] | null;
-        is_official: boolean;
-        created_at: string;
-}
-
-export const playbookTemplatesApi = {
-        list(params?: { category?: string; industry?: string; search?: string }) {
-                const qs = new URLSearchParams();
-                if (params?.category) qs.set('category', params.category);
-                if (params?.industry) qs.set('industry', params.industry);
-                if (params?.search) qs.set('search', params.search);
-                const q = qs.toString();
-                return request<{ templates: PlaybookTemplate[] }>(`/playbook-templates${q ? `?${q}` : ''}`);
-        },
-
-        get(slug: string) {
-                return request<{ template: PlaybookTemplate }>(`/playbook-templates/${encodeURIComponent(slug)}`);
-        },
-
-        createFrom(payload: { template_slug: string; category_id: number; customizations?: { name?: string } }, workspaceId = 1) {
-                return request<{ playbook: Playbook; template_slug: string }>(`/playbook-templates/create-from?workspace_id=${workspaceId}`, {
-                        method: 'POST',
-                        body: JSON.stringify(payload)
-                });
-        }
-};
 
 // ─── System API ───────────────────────────────────────────────────────────────
 

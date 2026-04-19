@@ -852,4 +852,33 @@
     padding: 12px 16px;
     margin-bottom: 16px;
   }
+
+  @media (max-width: 767px) {
+    .review-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .thread-detail,
+    .select-prompt {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .detail-header {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    h2 {
+      font-size: 15px;
+    }
+
+    .draft-actions {
+      flex-direction: column;
+    }
+
+    .draft-actions .btn {
+      width: 100%;
+    }
+  }
 </style>
