@@ -4,13 +4,15 @@
  */
 import { Hono } from "hono";
 import { query, queryOne } from "../db/client.ts";
-import { AppError, Workspace, SheetColumn, SheetUpdate } from "../types/index.ts";
+import { AppError, SheetColumn, SheetUpdate, Workspace } from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 import { readColumnHeaders, syncColumns } from "../services/sheets.ts";
 
 export const sheetsRouter = new Hono();
 
 sheetsRouter.use("*", authMiddleware);
+
+const SPREADSHEET_ID_PATTERN = /^[A-Za-z0-9_-]{30,}$/;
 
 // GET /sheets/columns?workspace_id=1 - list synced column headers
 sheetsRouter.get("/columns", async (c) => {
@@ -35,6 +37,14 @@ sheetsRouter.post("/sync-columns", async (c) => {
   );
   if (!workspace) throw new AppError(404, "Workspace not found");
   if (!workspace.sheet_id) throw new AppError(422, "Workspace has no sheet_id configured");
+  if (
+    workspace.sheet_name === workspace.sheet_id || SPREADSHEET_ID_PATTERN.test(workspace.sheet_name)
+  ) {
+    throw new AppError(
+      422,
+      "Workspace sheet_name is set to a spreadsheet ID. Edit the workspace and set Sheet name to the tab name, for example Sheet1.",
+    );
+  }
 
   // Get the Gmail email for OAuth token lookup.
   const tokenRow = await queryOne<{ email: string }>(

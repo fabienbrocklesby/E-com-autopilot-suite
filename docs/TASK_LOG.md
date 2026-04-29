@@ -11,6 +11,27 @@ Each entry:
 
 ---
 
+## 2026-04-29 - Sync Columns range parsing fix
+
+**Problem:** Production Sync Columns returned Google Sheets `400 INVALID_ARGUMENT`: `Unable to parse range: 1WvR96hg85cSudlWtfJrjhitzntkGDXvu0TldNA20hEo!1:1`.
+
+**Root cause:** The app builds the header range as `{workspace.sheet_name}!1:1`. That error proves production has `workspace.sheet_name` set to the spreadsheet ID, not the tab name. The spreadsheet ID belongs only in `workspace.sheet_id`; `workspace.sheet_name` must be the tab label at the bottom of the spreadsheet, e.g. `Sheet1`.
+
+**Changes made:**
+- `api/services/sheets.ts`: quotes sheet names in A1 notation (`'Sheet1'!1:1`) so names with spaces, punctuation, or names that look like cell/range tokens parse correctly.
+- `api/routes/workspaces.ts`: normalises pasted Google Sheets URLs into raw spreadsheet IDs and rejects sheet names that are equal to, or look like, spreadsheet IDs.
+- `api/routes/sheets.ts`: returns a clear `422` if an existing workspace has `sheet_name` set to a spreadsheet ID before calling Google.
+
+**Validation:**
+- `deno check main.ts` passes.
+- `deno fmt` applied to changed backend files.
+- API rejects `PATCH /workspaces/1` when `sheet_name` is a spreadsheet ID.
+- API accepts a pasted Google Sheets URL in `sheet_id` and normalises it to the raw ID when `sheet_name` is `Sheet1`.
+
+**Production action:** After deploy, edit the workspace and set **Sheet name** to the actual tab name (for example `Sheet1`), then run Sync Columns again.
+
+---
+
 ## 2026-04-29 - Dashboard auth persistence and OAuth status fix
 
 **Problem:** Live dashboard repeatedly showed the password gate and Google OAuth appeared to complete, but Settings still showed the account as not connected.

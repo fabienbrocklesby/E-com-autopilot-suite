@@ -40,7 +40,7 @@ export async function readColumnHeaders(
   spreadsheetId: string,
   sheetName: string,
 ): Promise<Map<string, string>> {
-  const range = `${sheetName}!1:1`;
+  const range = `${quoteSheetName(sheetName)}!1:1`;
   const data = await sheetsGet<{ values?: string[][] }>(
     email,
     `/${spreadsheetId}/values/${encodeURIComponent(range)}`,
@@ -76,6 +76,14 @@ export async function syncColumns(
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
+/**
+ * Quote sheet names in A1 notation so names with spaces, punctuation, or names
+ * that resemble cell/range tokens are parsed as sheet titles.
+ */
+function quoteSheetName(sheetName: string): string {
+  return `'${sheetName.replaceAll("'", "''")}'`;
+}
+
 /** Convert a 0-based column index to a spreadsheet column letter (A, B, … Z, AA, …). */
 function columnIndexToLetter(index: number): string {
   let letter = "";
@@ -86,4 +94,3 @@ function columnIndexToLetter(index: number): string {
   }
   return letter;
 }
-

@@ -3,12 +3,12 @@
  * CRUD for workspaces plus label-sync trigger.
  */
 import { Hono } from "hono";
-import { query, queryOne, execute } from "../db/client.ts";
+import { execute, query, queryOne } from "../db/client.ts";
 import {
   AppError,
-  Workspace,
   CreateWorkspacePayload,
   UpdateWorkspacePayload,
+  Workspace,
 } from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 import { syncLabels } from "../services/gmail.ts";
@@ -16,6 +16,40 @@ import { syncLabels } from "../services/gmail.ts";
 export const workspacesRouter = new Hono();
 
 workspacesRouter.use("*", authMiddleware);
+
+const SPREADSHEET_ID_PATTERN = /^[A-Za-z0-9_-]{30,}$/;
+
+function normaliseSheetId(value: string | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
+  return match?.[1] ?? trimmed;
+}
+
+function normaliseSheetName(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return value.trim() || "Sheet1";
+}
+
+function validateSheetConfig(
+  sheetId: string | null | undefined,
+  sheetName: string | undefined,
+): void {
+  if (!sheetName || sheetId === null) return;
+
+  if (sheetId && sheetName === sheetId) {
+    throw new AppError(422, "Sheet name must be the tab name, not the spreadsheet ID");
+  }
+
+  if (SPREADSHEET_ID_PATTERN.test(sheetName)) {
+    throw new AppError(
+      422,
+      "Sheet name looks like a spreadsheet ID. Use the tab name at the bottom of the Google Sheet, for example Sheet1.",
+    );
+  }
+}
 
 // GET /workspaces
 workspacesRouter.get("/", async (c) => {
@@ -42,6 +76,9 @@ workspacesRouter.get("/:id", async (c) => {
 workspacesRouter.post("/", async (c) => {
   const body = await c.req.json<CreateWorkspacePayload>();
   if (!body.name?.trim()) throw new AppError(422, "name is required");
+  const sheetId = normaliseSheetId(body.sheet_id);
+  const sheetName = normaliseSheetName(body.sheet_name);
+  validateSheetConfig(sheetId, sheetName);
 
   const workspace = await queryOne<Workspace>(
     `INSERT INTO workspaces (name, gmail_address, sheet_id, sheet_name, store_name, store_description, store_url)
@@ -50,8 +87,8 @@ workspacesRouter.post("/", async (c) => {
     [
       body.name.trim(),
       body.gmail_address ?? null,
-      body.sheet_id ?? null,
-      body.sheet_name ?? "Sheet1",
+      sheetId ?? null,
+      sheetName ?? "Sheet1",
       body.store_name ?? null,
       body.store_description ?? null,
       body.store_url ?? null,
@@ -66,18 +103,28 @@ workspacesRouter.patch("/:id", async (c) => {
   if (isNaN(id)) throw new AppError(400, "Invalid workspace ID");
 
   const body = await c.req.json<UpdateWorkspacePayload>();
+  const sheetId = normaliseSheetId(body.sheet_id);
+  const sheetName = normaliseSheetName(body.sheet_name);
+  validateSheetConfig(sheetId, sheetName);
   const fields: string[] = [];
   const values: unknown[] = [];
   let idx = 1;
 
   const allowed: (keyof UpdateWorkspacePayload)[] = [
-    "name", "gmail_address", "sheet_id", "sheet_name",
-    "store_name", "store_description", "store_url",
+    "name",
+    "gmail_address",
+    "sheet_id",
+    "sheet_name",
+    "store_name",
+    "store_description",
+    "store_url",
   ];
   for (const key of allowed) {
     if (body[key] !== undefined) {
       fields.push(`${key} = $${idx++}`);
-      values.push(body[key]);
+      if (key === "sheet_id") values.push(sheetId);
+      else if (key === "sheet_name") values.push(sheetName);
+      else values.push(body[key]);
     }
   }
   if (fields.length === 0) throw new AppError(422, "No fields to update");
