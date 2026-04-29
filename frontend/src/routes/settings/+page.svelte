@@ -58,6 +58,9 @@
     gmail_address: "",
     sheet_id: "",
     sheet_name: "Sheet1",
+    store_name: "",
+    store_description: "",
+    store_url: "",
   });
   let savingWorkspace = $state(false);
   let workspaceSuccess = $state<string | null>(null);
@@ -152,6 +155,9 @@
       gmail_address: ws.gmail_address ?? "",
       sheet_id: ws.sheet_id ?? "",
       sheet_name: ws.sheet_name,
+      store_name: ws.store_name ?? "",
+      store_description: ws.store_description ?? "",
+      store_url: ws.store_url ?? "",
     };
   }
 
@@ -169,6 +175,9 @@
         gmail_address: workspaceForm.gmail_address || undefined,
         sheet_id: workspaceForm.sheet_id || undefined,
         sheet_name: workspaceForm.sheet_name || "Sheet1",
+        store_name: workspaceForm.store_name || undefined,
+        store_description: workspaceForm.store_description || undefined,
+        store_url: workspaceForm.store_url || undefined,
       });
       workspaceSuccess = "Workspace saved.";
       setTimeout(() => {
@@ -314,91 +323,112 @@
     <div class="loading-text">Loading workspaces…</div>
   {:else}
     {#each workspaces as ws (ws.id)}
-      {#if editingWorkspace?.id === ws.id}
-        <div class="workspace-edit">
-          <div class="field-row">
-            <label class="field-label" for="ws-name">Name</label>
-            <input id="ws-name" class="input" bind:value={workspaceForm.name} />
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="ws-gmail">Gmail address</label>
-            <input
-              id="ws-gmail"
-              class="input"
-              type="email"
-              bind:value={workspaceForm.gmail_address}
-              placeholder="you@gmail.com"
-            />
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="ws-sheet-id">Google Sheet ID</label>
-            <input
-              id="ws-sheet-id"
-              class="input"
-              bind:value={workspaceForm.sheet_id}
-              placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-            />
-            <p class="field-hint">Find this in your Google Sheets URL: <code>docs.google.com/spreadsheets/d/<strong>[THIS PART]</strong>/edit</code></p>
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="ws-sheet-name">Sheet name</label>
-            <input
-              id="ws-sheet-name"
-              class="input"
-              bind:value={workspaceForm.sheet_name}
-              placeholder="Sheet1"
-            />
-            <p class="field-hint">Must match exactly (case-sensitive). Check the tab name at the bottom of your spreadsheet. Default is <code>Sheet1</code>.</p>
-          </div>
-          <div class="workspace-actions">
-            <button
-              class="btn btn-primary"
-              onclick={saveWorkspace}
-              disabled={savingWorkspace}
-            >
-              {savingWorkspace ? "Saving…" : "Save"}
-            </button>
-            <button class="btn btn-ghost" onclick={cancelEditWorkspace}
-              >Cancel</button
-            >
+      <div class="workspace-card">
+
+        <!-- Header: name + actions -->
+        <div class="wc-header">
+          {#if editingWorkspace?.id === ws.id}
+            <input id="ws-name" class="input wc-name-input" bind:value={workspaceForm.name} />
+          {:else}
+            <span class="wc-name">{ws.name}</span>
+          {/if}
+          <div class="wc-actions">
+            {#if editingWorkspace?.id === ws.id}
+              <button class="btn btn-primary btn-sm" onclick={saveWorkspace} disabled={savingWorkspace}>
+                {savingWorkspace ? "Saving…" : "Save"}
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick={cancelEditWorkspace}>Cancel</button>
+            {:else}
+              <button class="btn btn-ghost btn-sm" onclick={() => startEditWorkspace(ws)}>Edit</button>
+              {#if ws.gmail_address}
+                <button class="btn btn-ghost btn-sm" onclick={() => syncLabels(ws)} disabled={syncingLabels}>
+                  {syncingLabels ? "…" : "Sync Labels"}
+                </button>
+              {/if}
+              {#if ws.sheet_id}
+                <button class="btn btn-ghost btn-sm" onclick={() => syncColumns(ws)} disabled={syncingColumns}>
+                  {syncingColumns ? "…" : "Sync Columns"}
+                </button>
+              {/if}
+            {/if}
           </div>
         </div>
-      {:else}
-        <div class="workspace-row">
-          <div class="workspace-info">
-            <span class="workspace-name">{ws.name}</span>
-            <span class="workspace-meta">
-              {ws.gmail_address ?? "No Gmail"} · {ws.sheet_id
-                ? `Sheet: ${ws.sheet_id.slice(0, 12)}…`
-                : "No Sheet"}
+
+        <!-- Gmail -->
+        <div class="wc-section">
+          <span class="wc-label">Gmail</span>
+          {#if editingWorkspace?.id === ws.id}
+            <input id="ws-gmail" class="input" type="email" bind:value={workspaceForm.gmail_address} placeholder="you@gmail.com" />
+          {:else}
+            <span class="wc-value">{ws.gmail_address ?? "—"}</span>
+          {/if}
+        </div>
+
+        <!-- Store Profile -->
+        <div class="wc-section">
+          <span class="wc-label">Store Profile</span>
+          {#if editingWorkspace?.id === ws.id}
+            <div class="field">
+              <label class="field-label" for="ws-store-name">Store name</label>
+              <input id="ws-store-name" class="input" bind:value={workspaceForm.store_name} placeholder="e.g. Acme Widgets" />
+            </div>
+            <div class="field">
+              <label class="field-label" for="ws-store-description">About your store</label>
+              <textarea id="ws-store-description" class="input textarea" bind:value={workspaceForm.store_description} placeholder="Describe what your store sells, your niche, tone, and anything the AI should know when writing replies." rows={4}></textarea>
+            </div>
+            <div class="field">
+              <label class="field-label" for="ws-store-url">Store URL</label>
+              <input id="ws-store-url" class="input" type="url" bind:value={workspaceForm.store_url} placeholder="https://yourstore.com" />
+            </div>
+          {:else if ws.store_name || ws.store_description || ws.store_url}
+            <div class="wc-store-preview">
+              {#if ws.store_name}<span class="wc-store-name">{ws.store_name}</span>{/if}
+              {#if ws.store_description}<span class="wc-store-desc">{ws.store_description}</span>{/if}
+              {#if ws.store_url}<a href={ws.store_url} class="wc-store-url" target="_blank" rel="noopener noreferrer">{ws.store_url}</a>{/if}
+            </div>
+          {:else}
+            <span class="wc-empty">Not set — click Edit to add store context for the AI.</span>
+          {/if}
+        </div>
+
+        <!-- Google Sheet — collapsible -->
+        <details class="wc-integration" open={editingWorkspace?.id === ws.id ? true : undefined}>
+          <summary class="wc-integration-summary">
+            <span class="wc-label">Google Sheet</span>
+            <span class="wc-integration-preview">
+              {#if ws.sheet_id}
+                {ws.sheet_name} · <code>{ws.sheet_id.slice(0, 16)}…</code>
+              {:else}
+                <span class="wc-empty">Not connected</span>
+              {/if}
             </span>
-          </div>
-          <div class="workspace-actions">
-            <button
-              class="btn btn-ghost btn-sm"
-              onclick={() => startEditWorkspace(ws)}>Edit</button
-            >
-            {#if ws.gmail_address}
-              <button
-                class="btn btn-ghost btn-sm"
-                onclick={() => syncLabels(ws)}
-                disabled={syncingLabels}
-              >
-                {syncingLabels ? "…" : "Sync Labels"}
-              </button>
+          </summary>
+          <div class="wc-integration-body">
+            {#if editingWorkspace?.id === ws.id}
+              <div class="field">
+                <label class="field-label" for="ws-sheet-id">Sheet ID</label>
+                <input id="ws-sheet-id" class="input" bind:value={workspaceForm.sheet_id} placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" />
+                <p class="field-hint">Find this in your Google Sheets URL: <code>docs.google.com/spreadsheets/d/<strong>[THIS PART]</strong>/edit</code></p>
+              </div>
+              <div class="field">
+                <label class="field-label" for="ws-sheet-name">Sheet name</label>
+                <input id="ws-sheet-name" class="input" bind:value={workspaceForm.sheet_name} placeholder="Sheet1" />
+                <p class="field-hint">Must match the tab name exactly. Default is <code>Sheet1</code>.</p>
+              </div>
+            {:else}
+              <div class="wc-detail-row">
+                <span class="wc-detail-label">Sheet ID</span>
+                <code class="wc-detail-value">{ws.sheet_id ?? "—"}</code>
+              </div>
+              <div class="wc-detail-row">
+                <span class="wc-detail-label">Tab name</span>
+                <span class="wc-detail-value">{ws.sheet_name}</span>
+              </div>
             {/if}
-            {#if ws.sheet_id}
-              <button
-                class="btn btn-ghost btn-sm"
-                onclick={() => syncColumns(ws)}
-                disabled={syncingColumns}
-              >
-                {syncingColumns ? "…" : "Sync Columns"}
-              </button>
-            {/if}
           </div>
-        </div>
-      {/if}
+        </details>
+
+      </div>
     {/each}
   {/if}
 </section>
@@ -598,64 +628,176 @@
     margin-left: auto;
   }
 
-  /* Workspace rows */
-  .workspace-row {
+  /* Workspace cards */
+  .workspace-card {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  .workspace-card:last-child {
+    margin-bottom: 0;
+  }
+
+  .wc-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 0;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--color-surface-2);
     border-bottom: 1px solid var(--color-border);
-    gap: 16px;
   }
 
-  .workspace-row:last-child {
-    border-bottom: none;
-  }
-
-  .workspace-info {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .workspace-name {
+  .wc-name {
     font-size: 13px;
     font-weight: 600;
   }
 
-  .workspace-meta {
-    font-size: 12px;
-    color: var(--color-text-muted);
+  .wc-name-input {
+    width: 200px;
   }
 
-  .workspace-actions {
+  .wc-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    flex-shrink: 0;
   }
 
-  .workspace-edit {
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    padding: 16px;
-    margin-bottom: 12px;
+  .wc-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .wc-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+  }
+
+  .wc-value {
+    font-size: 13px;
+    color: var(--color-text);
+  }
+
+  .wc-empty {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .wc-store-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .wc-store-name {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .wc-store-desc {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    line-height: 1.5;
+  }
+
+  .wc-store-url {
+    font-size: 12px;
+    color: var(--color-accent, #60a5fa);
+    text-decoration: none;
+  }
+
+  .wc-store-url:hover {
+    text-decoration: underline;
+  }
+
+  .wc-integration {
+    border-bottom: none;
+  }
+
+  .wc-integration-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 16px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .wc-integration-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .wc-integration-summary::before {
+    content: "▶";
+    font-size: 9px;
+    color: var(--color-text-muted);
+    order: -1;
+    transition: transform 0.15s;
+    flex-shrink: 0;
+  }
+
+  details[open] .wc-integration-summary::before {
+    transform: rotate(90deg);
+  }
+
+  .wc-integration-preview {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    flex: 1;
+  }
+
+  .wc-integration-body {
+    padding: 0 16px 14px 32px;
     display: flex;
     flex-direction: column;
     gap: 10px;
   }
 
-  .field-row {
+  .wc-detail-row {
     display: flex;
-    align-items: center;
-    flex-wrap: wrap;
     gap: 12px;
+    align-items: baseline;
+  }
+
+  .wc-detail-label {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    min-width: 64px;
+    flex-shrink: 0;
+  }
+
+  .wc-detail-value {
+    font-size: 12px;
+    color: var(--color-text);
+    word-break: break-all;
+  }
+
+  .wc-section .input,
+  .wc-integration-body .input {
+    width: 100%;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
   }
 
   .field-label {
     font-size: 12px;
-    color: var(--color-text-muted);
-    min-width: 120px;
+    font-weight: 500;
+    color: var(--color-text);
   }
 
   .settings-list {
@@ -703,8 +845,7 @@
     font-size: 12px;
     color: var(--color-text-muted);
     line-height: 1.5;
-    flex-basis: 100%;
-    margin-top: 2px;
+    margin-top: 1px;
   }
 
   code {
@@ -783,6 +924,14 @@
 
   .input {
     width: 200px;
+  }
+
+  .input.textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 80px;
+    font-family: inherit;
+    line-height: 1.5;
   }
 
   /* Toggle */

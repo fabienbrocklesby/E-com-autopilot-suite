@@ -46,13 +46,16 @@
   onDestroy(() => unsubWs());
 
   function classifyThread(t: ThreadListItem): UrgencyGroup {
-    // Needs attention: pending human action, draft waiting for review, or new uncategorised
     if (t.has_pending_action) return "attention";
+    if (t.latest_run_status === "waiting_for_human") return "attention";
+
+    const runIsActive = t.latest_run_status != null &&
+      ["running", "waiting_for_customer", "retrying"].includes(t.latest_run_status);
+    if (runIsActive) return "progress";
+
     if (t.status === "in_review") return "attention";
     if (t.draft_count > 0 && t.status === "new") return "attention";
 
-    // In progress: has an active playbook run
-    if (t.latest_run_status && ["running", "waiting_for_customer", "paused"].includes(t.latest_run_status)) return "progress";
     if (t.status === "new" && t.category_id) return "progress";
 
     return "other";
@@ -168,8 +171,6 @@
   });
 
   $effect(() => {
-    // Open a workspace-level SSE stream for live inbox updates.
-    // Reading currentWorkspaceId here makes Svelte re-run this effect when it changes.
     const wsId = currentWorkspaceId;
     let connectionCount = 0;
     const es = openSSE('workspace', { workspace_id: wsId });
@@ -186,7 +187,25 @@
 
     es.addEventListener('thread_updated', (e: Event) => {
       const { thread } = JSON.parse((e as MessageEvent).data) as { thread: ThreadListItem };
-      threads = threads.map((t) => (t.id === thread.id ? thread : t));
+      const exists = threads.some((t) => t.id === thread.id);
+      threads = exists ? threads.map((t) => (t.id === thread.id ? thread : t)) : [thread, ...threads];
+    });
+
+    es.addEventListener('run_updated', (e: Event) => {
+      const { threadId, run } = JSON.parse((e as MessageEvent).data) as {
+        threadId: number;
+        run: { id: number; status: string };
+      };
+      threads = threads.map((t) => {
+        if (t.id !== threadId) return t;
+        if (t.latest_run_id != null && t.latest_run_id !== run.id) return t;
+        return {
+          ...t,
+          latest_run_id: run.id,
+          latest_run_status: run.status,
+          has_pending_action: run.status === 'waiting_for_human',
+        };
+      });
     });
 
     return () => es.close();

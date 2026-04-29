@@ -57,6 +57,9 @@
   let dryRunResult = $state<DryRunResult | null>(null);
   let dryRunError = $state<string | null>(null);
 
+  // Delay picker local state (used in send_reply edit modal)
+  let showCustomDelay = $state(false);
+
   // Step type icons & labels
   const stepMeta: Record<string, { icon: typeof PlusCircle; label: string; color: string }> = {
     extract:         { icon: PlusCircle,           label: "Extract",         color: "#6366f1" },
@@ -77,6 +80,11 @@
     return stepMeta[type] ?? defaultMeta;
   }
 
+  function formatDelay(s: number): string {
+    if (s < 3600) return `${Math.round(s / 60)}m`;
+    return `${Math.round(s / 3600)}h`;
+  }
+
   function stepSummary(step: PlaybookStep): string {
     switch (step.type) {
       case "extract": return `Extract: ${(step.variables as string[] | undefined)?.join(", ") ?? "-"}`;
@@ -94,11 +102,13 @@
       case "manual_approval": return `Hold for approval: "${(step.reason as string | undefined)?.slice(0, 50) ?? "-"}"`;
       case "send_reply": {
         const goal = step.goal as string | undefined;
-        if (goal) return `Reply (AI): "${goal.slice(0, 60)}${goal.length > 60 ? "…" : ""}"`;
+        const delaySec = step.delay_seconds as number | undefined;
+        const delayStr = delaySec ? ` · ⏱ ${formatDelay(delaySec)}` : "";
+        if (goal) return `Reply (AI): "${goal.slice(0, 55)}${goal.length > 55 ? "\u2026" : ""}"${delayStr}`;
         const msg = step.message;
-        if (typeof msg === "string") return `Reply: "${msg.slice(0, 60)}"`;
-        if (typeof msg === "object" && msg !== null && "ai_generate_using_category_voice" in (msg as object)) return "Reply: [AI generated]";
-        return `Reply: [template]`;
+        if (typeof msg === "string") return `Reply: "${msg.slice(0, 55)}"${delayStr}`;
+        if (typeof msg === "object" && msg !== null && "ai_generate_using_category_voice" in (msg as object)) return `Reply: [AI generated]${delayStr}`;
+        return `Reply: [template]${delayStr}`;
       }
       case "complete": return "End run successfully";
       case "escalate": return `Escalate: "${(step.reason as string | undefined)?.slice(0, 60) ?? "-"}"`;
@@ -194,12 +204,19 @@
     editingStep = step;
     editingIndex = index;
     editDraft = { ...step };
+    // Reset custom delay picker visibility; show it if the current value isn't a preset
+    const PRESET_VALUES = [0, 300, 600, 900, 1800, 3600, 7200, 14400];
+    const existing = typeof (step as Record<string, unknown>).delay_seconds === "number"
+      ? (step as Record<string, unknown>).delay_seconds as number
+      : 0;
+    showCustomDelay = existing > 0 && !PRESET_VALUES.includes(existing);
   }
 
   function closeEdit() {
     editingStep = null;
     editingIndex = -1;
     editDraft = {};
+    showCustomDelay = false;
   }
 
   function saveEdit() {
@@ -647,8 +664,50 @@
               <span class="toggle-slider"></span>
             </label>
           </label>
-
-        <!-- escalate -->
+          <div class="field">
+            <label>Send delay <span class="hint">Wait before sending to feel more human</span></label>
+            <select
+              value={(() => {
+                const PRESETS = [0, 300, 600, 900, 1800, 3600, 7200, 14400];
+                const v = typeof editDraft.delay_seconds === "number" ? editDraft.delay_seconds as number : 0;
+                return PRESETS.includes(v) ? String(v) : "custom";
+              })()}
+              onchange={(e) => {
+                const val = (e.target as HTMLSelectElement).value;
+                if (val === "custom") {
+                  showCustomDelay = true;
+                } else {
+                  showCustomDelay = false;
+                  setDraft("delay_seconds", Number(val));
+                }
+              }}
+            >
+              <option value="0">No delay (send immediately)</option>
+              <option value="300">5 minutes</option>
+              <option value="600">10 minutes</option>
+              <option value="900">15 minutes</option>
+              <option value="1800">30 minutes</option>
+              <option value="3600">1 hour</option>
+              <option value="7200">2 hours</option>
+              <option value="14400">4 hours</option>
+              <option value="custom">Custom…</option>
+            </select>
+            {#if showCustomDelay}
+              <div class="delay-custom-row">
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="minutes"
+                  value={typeof editDraft.delay_seconds === "number" ? Math.round((editDraft.delay_seconds as number) / 60) : ""}
+                  oninput={(e) => {
+                    const mins = parseInt((e.target as HTMLInputElement).value);
+                    if (!isNaN(mins) && mins > 0) setDraft("delay_seconds", mins * 60);
+                  }}
+                />
+                <span class="hint">minutes</span>
+              </div>
+            {/if}
+          </div>
         {:else if editingStep.type === "escalate"}
           <div class="field">
             <label>Reason</label>
@@ -1026,6 +1085,14 @@
 
   .toggle input:checked + .toggle-slider { background: var(--color-primary); border-color: var(--color-primary); }
   .toggle input:checked + .toggle-slider:before { transform: translateX(16px); background: white; }
+
+  .delay-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .delay-custom-row input[type="number"] { width: 100px; }
 
   .bottom-bar {
     display: flex;

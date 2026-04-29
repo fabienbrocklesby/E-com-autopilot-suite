@@ -7,6 +7,7 @@ import { AppError, CategorisationResult, Category, Thread, Message } from "../ty
 import { queryOne, query } from "../db/client.ts";
 import { Setting, Interaction } from "../types/index.ts";
 import { logger } from "./logger.ts";
+import { getStoreProfile } from "./store-profile.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -225,7 +226,10 @@ export async function categoriseEmail(
   }
 
   const model = await getModel(workspaceId);
-  const examples = await getFewShotExamples(workspaceId);
+  const [examples, storeProfile] = await Promise.all([
+    getFewShotExamples(workspaceId),
+    getStoreProfile(workspaceId),
+  ]);
 
   const categoryDescriptions = categories
     .map((cat) =>
@@ -256,7 +260,10 @@ export async function categoriseEmail(
 - categoryId: number (the ID of the best matching category) or null if none fits
 - confidence: number between 0.0 and 1.0
 - reasoning: string (one sentence explaining the choice)
-
+${storeProfile ? `
+Store context (use for understanding the business domain when categorising):
+${storeProfile}
+` : ""}
 Available categories:
 ${categoryDescriptions}`;
 

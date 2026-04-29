@@ -7,11 +7,11 @@
   import { cubicOut } from "svelte/easing";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { threadsApi, playbooksApi } from "$lib/api";
-  import type { ThreadDetail, Draft, Message, PlaybookRun, StepExecution } from "$lib/api";
+  import { threadsApi, playbooksApi, workspacesApi } from "$lib/api";
+  import type { ThreadDetail, Draft, Message, PlaybookRun, StepExecution, Workspace } from "$lib/api";
   import ManualActionBanner from "$lib/components/ManualActionBanner.svelte";
   import ManualReplyPanel from "$lib/components/ManualReplyPanel.svelte";
-  import { Zap, PlusCircle, TableProperties, Pencil, MessageCircleQuestion, Scale, GitBranch, Hand, Send, CheckCircle, AlertTriangle } from '@lucide/svelte';
+  import { Zap, PlusCircle, TableProperties, Pencil, MessageCircleQuestion, Scale, GitBranch, Hand, Send, CheckCircle, AlertTriangle, ExternalLink } from '@lucide/svelte';
   import { openSSE } from "$lib/sse";
 
   const prefersReducedMotion =
@@ -26,12 +26,26 @@
   let success = $state<string | null>(null);
   let categorising = $state(false);
 
+  let workspace = $state<Workspace | null>(null);
+
   // Playbook run observability
   let runs = $state<PlaybookRun[]>([]);
   let runDetails = $state<Record<number, { run: PlaybookRun; executions: StepExecution[] }>>({});
 
   // Active run waiting for human action - drives the banner.
   let waitingRun = $derived(runs.find((r) => r.status === "waiting_for_human") ?? null);
+
+  let sheetRowUrl = $derived.by(() => {
+    const sheetId = workspace?.sheet_id;
+    if (!sheetId) return null;
+    for (const run of runs) {
+      const rowNum = run.context?.row_number;
+      if (typeof rowNum === "number" && rowNum > 0) {
+        return `https://docs.google.com/spreadsheets/d/${sheetId}/edit#range=${rowNum}:${rowNum}`;
+      }
+    }
+    return null;
+  });
 
   function runStatusColor(status: string): string {
     const map: Record<string, string> = {
@@ -122,12 +136,14 @@
     loading = true;
     error = null;
     try {
-      const [threadRes, runsRes] = await Promise.all([
+      const [threadRes, runsRes, workspaceRes] = await Promise.all([
         threadsApi.get(threadId),
         playbooksApi.listRuns({ thread_id: threadId }),
+        workspacesApi.get(1),
       ]);
       thread = threadRes.thread;
       runs = runsRes.runs;
+      workspace = workspaceRes.workspace;
       const detailResults = await Promise.all(
         runsRes.runs.map((r) => playbooksApi.getRun(r.id).catch(() => null))
       );
@@ -244,6 +260,10 @@
         if (runDetails[run.id]) {
           runDetails = { ...runDetails, [run.id]: { ...runDetails[run.id], run } };
         }
+        if (run.status === "waiting_for_human") {
+          const res = await playbooksApi.listRuns({ thread_id: threadId }).catch(() => null);
+          if (res) runs = res.runs;
+        }
       } else {
         runs = [...runs, run];
         try {
@@ -335,7 +355,7 @@
 {/if}
 
 {#if waitingRun}
-  <ManualActionBanner run={waitingRun} onComplete={load} />
+  <ManualActionBanner run={waitingRun} onComplete={load} {sheetRowUrl} />
 {/if}
 
 {#if loading}
@@ -422,6 +442,14 @@
 
     <!-- RIGHT: Playbook & Context -->
     <div class="context-col">
+      {#if sheetRowUrl}
+        <div class="sidebar-sheet-link">
+          <a href={sheetRowUrl} target="_blank" rel="noopener noreferrer" class="sheet-row-btn">
+            <ExternalLink size={13} />
+            Open sheet row
+          </a>
+        </div>
+      {/if}
       {#if runs.length > 0}
         <div class="sidebar-section">
           <h3>Playbook Runs</h3>
@@ -779,6 +807,32 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     overflow: hidden;
+  }
+
+  .sidebar-sheet-link {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .sheet-row-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+    text-decoration: none;
+    padding: 5px 10px;
+    border: 1px solid rgba(99 102 241 / 0.35);
+    border-radius: var(--radius);
+    background: rgba(99 102 241 / 0.08);
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .sheet-row-btn:hover {
+    background: rgba(99 102 241 / 0.16);
+    border-color: rgba(99 102 241 / 0.55);
   }
 
   .sidebar-section {

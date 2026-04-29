@@ -321,7 +321,13 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 - `reference_context` (string[], optional): Variable names whose values should naturally appear in the reply.
 - `voice_hint` (string, optional): Step-level tone override. Overrides the playbook's default `writing_style` for this step only. Use when this step needs a different tone than the rest of the playbook (e.g. more formal for a refund confirmation vs. casual for a status update).
 - `require_approval` (boolean, optional, default false): Set `true` when the reply needs human review before sending. The run pauses as `waiting_for_human` with the AI-drafted body available for editing. The reviewer reads, optionally edits, and approves. Only generate this when the description explicitly says "let me review", "hold for review", "needs approval", or similar.
+- `delay_seconds` (number, optional, default 0): Seconds to wait before sending this reply. The run pauses as `waiting_to_send` and a background worker fires the send when the time elapses. Use to make automated responses feel more human. Common values: 300 (5 min), 600 (10 min), 1800 (30 min), 3600 (1 hr), 7200 (2 hr). 0 or absent = send immediately. Do NOT combine with `require_approval` - if both are specified, `delay_seconds` takes precedence.
 - `message` (string, legacy): Literal text. Only for very simple fixed replies.
+
+**Delay generation rules:**
+- IF the description mentions "wait before replying", "delay the reply", "send after N minutes", "reply after N hours", "add a delay", "make it feel human", "don't reply instantly", or any similar phrasing: set `delay_seconds` on the send_reply step.
+- Convert: N minutes → N × 60, N hours → N × 3600.
+- If no specific time given but the intent is "make it feel human" or "add a natural delay", use 600 (10 min).
 
 ### complete
 

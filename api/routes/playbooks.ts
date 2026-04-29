@@ -10,6 +10,8 @@ import { parsePlaybook, parsePlaybookStep } from "../services/playbook/parser.ts
 import { dryRunPlaybook } from "../services/playbook/dry-run.ts";
 import { advanceRun } from "../services/playbook/mod.ts";
 import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
+import { publish } from "../services/event-bus.ts";
+import { fetchThreadListItem } from "../db/queries.ts";
 import type { Playbook, PlaybookRun, StepExecution, ManualApprovalStep, PlaybookStep, AskCustomerStep, SendReplyStep } from "../services/playbook/types.ts";
 
 export const playbooksRouter = new Hono();
@@ -251,6 +253,12 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
           "UPDATE playbook_runs SET status = 'running', current_step_id = $1 WHERE id = $2",
           [nextStepId, runId],
         );
+        publish({
+          type: "run_updated",
+          workspaceId: run.workspace_id,
+          threadId: run.thread_id,
+          run: { ...run, status: "running", current_step_id: nextStepId },
+        });
         const result = await advanceRun(runId);
         const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
         return c.json({ run: updated, result, sent: true });
@@ -259,6 +267,12 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
           "UPDATE playbook_runs SET status = 'waiting_for_customer', current_step_id = $1 WHERE id = $2",
           [nextStepId, runId],
         );
+        publish({
+          type: "run_updated",
+          workspaceId: run.workspace_id,
+          threadId: run.thread_id,
+          run: { ...run, status: "waiting_for_customer", current_step_id: nextStepId },
+        });
         const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
         return c.json({ run: updated, sent: true });
       } else {
@@ -267,6 +281,16 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
           [runId],
         );
         await execute("UPDATE threads SET status = 'closed' WHERE id = $1", [run.thread_id]);
+        publish({
+          type: "run_updated",
+          workspaceId: run.workspace_id,
+          threadId: run.thread_id,
+          run: { ...run, status: "complete", current_step_id: null },
+        });
+        const completedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+        if (completedThreadItem) {
+          publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: completedThreadItem as unknown as Record<string, unknown> });
+        }
         const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
         return c.json({ run: updated, sent: true });
       }
@@ -297,6 +321,17 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
     "UPDATE playbook_runs SET status = 'running', current_step_id = $1 WHERE id = $2",
     [nextStepId, runId],
   );
+
+  publish({
+    type: "run_updated",
+    workspaceId: run.workspace_id,
+    threadId: run.thread_id,
+    run: { ...run, status: "running", current_step_id: nextStepId },
+  });
+  const approvedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+  if (approvedThreadItem) {
+    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: approvedThreadItem as unknown as Record<string, unknown> });
+  }
 
   const result = await advanceRun(runId);
   const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
@@ -339,6 +374,16 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
       [runId],
     );
     const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+    publish({
+      type: "run_updated",
+      workspaceId: run.workspace_id,
+      threadId: run.thread_id,
+      run: { ...run, status: "escalated" },
+    });
+    const rejEscThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+    if (rejEscThreadItem) {
+      publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: rejEscThreadItem as unknown as Record<string, unknown> });
+    }
     return c.json({ run: updated, result: { action: "escalated" } });
   }
 
@@ -360,6 +405,17 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
     "UPDATE playbook_runs SET status = 'running', current_step_id = $1, context = $2 WHERE id = $3",
     [nextStepId, JSON.stringify(rejectionContext), runId],
   );
+
+  publish({
+    type: "run_updated",
+    workspaceId: run.workspace_id,
+    threadId: run.thread_id,
+    run: { ...run, status: "running", current_step_id: nextStepId },
+  });
+  const rejectedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+  if (rejectedThreadItem) {
+    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: rejectedThreadItem as unknown as Record<string, unknown> });
+  }
 
   const result = await advanceRun(runId);
   const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
@@ -388,6 +444,16 @@ playbooksRouter.post("/runs/:runId/cancel", async (c) => {
   );
 
   const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+  publish({
+    type: "run_updated",
+    workspaceId: run.workspace_id,
+    threadId: run.thread_id,
+    run: { ...run, status: "cancelled" },
+  });
+  const cancelledThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+  if (cancelledThreadItem) {
+    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: cancelledThreadItem as unknown as Record<string, unknown> });
+  }
   return c.json({ run: updated });
 });
 

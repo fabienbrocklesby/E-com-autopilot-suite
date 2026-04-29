@@ -53,6 +53,7 @@ GOAL: ${goal}
 
 VOICE: ${voice}
 ${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
+${ctx.storeProfile ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}` : ""}
 
 MUST REFERENCE NATURALLY (do not list robotically - weave into the message):
 ${Object.keys(refs).length > 0 ? JSON.stringify(refs, null, 2) : "no specific values required"}
@@ -84,6 +85,18 @@ RULES:
     } else {
       return {
         decision: { action: "fail", error: "send_reply: no message or goal provided" },
+      };
+    }
+
+    const delaySec = typeof sendStep.delay_seconds === "number" && sendStep.delay_seconds > 0
+      ? sendStep.delay_seconds
+      : 0;
+
+    if (delaySec > 0) {
+      return {
+        decision: { action: "pause", status: "waiting_to_send", delaySec },
+        output: { action: "delayed_send", pending_send: body, delay_seconds: delaySec },
+        aiCalls,
       };
     }
 

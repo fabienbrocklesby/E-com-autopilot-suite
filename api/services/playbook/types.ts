@@ -90,6 +90,8 @@ export interface SendReplyStep {
   voice_hint?: string;
   /** When true, the drafted message is held for human approval before sending */
   require_approval?: boolean;
+  /** Seconds to wait before sending - run pauses as waiting_to_send then a worker fires the send */
+  delay_seconds?: number;
 }
 
 export interface CompleteStep {
@@ -147,6 +149,7 @@ export interface PlaybookRun {
   context: Record<string, unknown>;
   retry_count: number;
   next_retry_at: Date | null;
+  send_after: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -155,10 +158,12 @@ export type RunStatus =
   | "running"
   | "waiting_for_customer"
   | "waiting_for_human"
+  | "waiting_to_send"
   | "complete"
   | "failed"
   | "escalated"
-  | "retrying";
+  | "retrying"
+  | "cancelled";
 
 export interface StepExecution {
   id: number;
@@ -200,12 +205,14 @@ export interface RunContext {
   subject: string;
   /** Sender name from workspace settings - used to sign replies */
   senderName: string | null;
+  /** Formatted store profile string loaded from workspace columns - injected into AI prompts */
+  storeProfile: string | null;
 }
 
 export type StepDecision =
   | { action: "advance" }
   | { action: "advance_to"; stepId: string }
-  | { action: "pause"; status: "waiting_for_customer" | "waiting_for_human" }
+  | { action: "pause"; status: "waiting_for_customer" | "waiting_for_human" | "waiting_to_send"; delaySec?: number }
   | { action: "complete" }
   | { action: "fail"; error: string; retriable?: boolean };
 

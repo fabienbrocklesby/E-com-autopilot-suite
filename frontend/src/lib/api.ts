@@ -245,6 +245,9 @@ export interface Workspace {
 	gmail_address: string | null;
 	sheet_id: string | null;
 	sheet_name: string;
+	store_name: string | null;
+	store_description: string | null;
+	store_url: string | null;
 	created_at: string;
 	updated_at: string;
 }
@@ -254,6 +257,9 @@ export interface WorkspacePayload {
 	gmail_address?: string;
 	sheet_id?: string;
 	sheet_name?: string;
+	store_name?: string;
+	store_description?: string;
+	store_url?: string;
 }
 
 export const workspacesApi = {
@@ -477,7 +483,7 @@ export interface PlaybookRun {
         playbook_id: number;
         playbook_version: number;
         current_step_id: string | null;
-        status: 'running' | 'waiting_for_customer' | 'waiting_for_human' | 'complete' | 'failed' | 'escalated' | 'retrying' | 'cancelled';
+        status: 'running' | 'waiting_for_customer' | 'waiting_for_human' | 'waiting_to_send' | 'complete' | 'failed' | 'escalated' | 'retrying' | 'cancelled';
         context: Record<string, unknown>;
         created_at: string;
         updated_at: string;

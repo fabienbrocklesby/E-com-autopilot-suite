@@ -27,6 +27,7 @@ import { runMigrations } from "./db/migrate.ts";
 import { startWatchRenewalLoop, startFallbackPoller } from "./services/watch.ts";
 import { startTimeoutWorker } from "./services/playbook/timeout_worker.ts";
 import { startRetryWorker } from "./services/playbook/retry_worker.ts";
+import { startDelayWorker } from "./services/playbook/delay_worker.ts";
 
 const PORT = parseInt(Deno.env.get("API_PORT") ?? "8000");
 const FRONTEND_ORIGIN = Deno.env.get("FRONTEND_ORIGIN") ?? "http://localhost:3000";
@@ -84,6 +85,7 @@ startWatchRenewalLoop();
 startFallbackPoller();
 startTimeoutWorker();
 startRetryWorker();
+startDelayWorker();
 logger.info("startup.workers_started");
 
 // ─── Server ───────────────────────────────────────────────────────────────────

@@ -111,6 +111,7 @@ TASK: ${askStep.goal}
 
 VOICE: ${voice}
 ${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
+${ctx.storeProfile ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}` : ""}
 
 WHAT WE KNOW:
 ${JSON.stringify(haveContext, null, 2)}

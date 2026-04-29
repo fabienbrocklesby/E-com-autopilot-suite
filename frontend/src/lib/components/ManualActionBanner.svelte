@@ -13,7 +13,7 @@
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { untrack } from "svelte";
-  import { Bell, Mail } from '@lucide/svelte';
+  import { Bell, Mail, ExternalLink } from '@lucide/svelte';
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -23,9 +23,11 @@
   let {
     run,
     onComplete,
+    sheetRowUrl = null,
   }: {
     run: PlaybookRun;
     onComplete: () => void;
+    sheetRowUrl?: string | null;
   } = $props();
 
   let humanInput = $state("");
@@ -114,6 +116,12 @@
 
   {#if isPendingSend}
     <p class="banner-reason">Edit the AI-drafted reply if needed, then send.</p>
+    {#if sheetRowUrl}
+      <a href={sheetRowUrl} target="_blank" rel="noopener noreferrer" class="sheet-link">
+        <ExternalLink size={13} />
+        Open sheet row
+      </a>
+    {/if}
     <label class="input-label" for="draft-body">Draft message</label>
     <textarea
       id="draft-body"
@@ -123,6 +131,13 @@
     ></textarea>
   {:else}
     <p class="banner-reason">{reason}</p>
+
+    {#if sheetRowUrl}
+      <a href={sheetRowUrl} target="_blank" rel="noopener noreferrer" class="sheet-link">
+        <ExternalLink size={13} />
+        Open sheet row
+      </a>
+    {/if}
 
     {#if referenceItems.length > 0}
       <dl class="reference-list">
@@ -340,5 +355,26 @@
   .btn-skip:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  .sheet-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-primary, #6366f1);
+    text-decoration: none;
+    padding: 0.3rem 0.75rem;
+    border: 1px solid rgba(99 102 241 / 0.35);
+    border-radius: calc(var(--radius, 8px) - 2px);
+    background: rgba(99 102 241 / 0.08);
+    margin-bottom: 0.875rem;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+
+  .sheet-link:hover {
+    background: rgba(99 102 241 / 0.16);
+    border-color: rgba(99 102 241 / 0.55);
   }
 </style>

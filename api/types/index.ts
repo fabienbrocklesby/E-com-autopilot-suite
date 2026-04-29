@@ -8,6 +8,9 @@ export interface Workspace {
   gmail_address: string | null;
   sheet_id: string | null;
   sheet_name: string;
+  store_name: string | null;
+  store_description: string | null;
+  store_url: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -164,6 +167,9 @@ export interface CreateWorkspacePayload {
   gmail_address?: string;
   sheet_id?: string;
   sheet_name?: string;
+  store_name?: string;
+  store_description?: string;
+  store_url?: string;
 }
 
 export type UpdateWorkspacePayload = Partial<CreateWorkspacePayload>;

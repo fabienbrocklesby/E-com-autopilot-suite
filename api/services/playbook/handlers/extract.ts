@@ -17,7 +17,7 @@ export const extractHandler: StepHandler = {
     const model = await getModel(ctx.workspaceId);
 
     const prompt = `You are extracting specific pieces of information from an email thread.
-
+${ctx.storeProfile ? `\nStore context for interpreting domain-specific terms:\n${ctx.storeProfile}\n` : ""}
 Extract the following variables from the thread: ${variables.join(", ")}
 
 Thread transcript:

@@ -8,6 +8,7 @@ import { sendAlert } from "../alerts.ts";
 import { AppError } from "../../types/index.ts";
 import { publish } from "../event-bus.ts";
 import { fetchThreadListItem } from "../../db/queries.ts";
+import { getStoreProfile } from "../store-profile.ts";
 import type {
   Playbook,
   PlaybookRun,
@@ -131,6 +132,8 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   );
   const senderName = senderNameRow?.value ?? null;
 
+  const storeProfile = await getStoreProfile(run.workspace_id);
+
   // Build context
   const variables: Record<string, unknown> =
     typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
@@ -215,6 +218,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       gmailThreadId: thread.gmail_thread_id,
       subject: thread.subject,
       senderName,
+      storeProfile,
     };
 
     // Record step execution start
@@ -361,17 +365,33 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
       case "pause": {
         status = result.decision.status;
-        // Persist and stop the loop
+        const sendAfter =
+          result.decision.delaySec
+            ? new Date(Date.now() + result.decision.delaySec * 1000)
+            : null;
+        // Persist and stop the loop; write send_after when delay is present
         await execute(
-          "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3 WHERE id = $4",
-          [status, currentStepId, JSON.stringify(variables), runId],
+          "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3, send_after = $4 WHERE id = $5",
+          [status, currentStepId, JSON.stringify(variables), sendAfter, runId],
         );
+        // Update thread status on pause so it surfaces in the inbox immediately
+        if (
+          status === "waiting_for_customer" ||
+          status === "waiting_for_human" ||
+          status === "waiting_to_send"
+        ) {
+          await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
+        }
         publish({
           type: "run_updated",
           workspaceId: run.workspace_id,
           threadId: run.thread_id,
           run: { ...run, status, current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
         });
+        const pausedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+        if (pausedThreadItem) {
+          publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: pausedThreadItem as unknown as Record<string, unknown> });
+        }
         logger.info("playbook.run_paused", { run_id: runId, step_id: currentStepId, status });
         return { runId, status, currentStepId, context: variables };
       }
@@ -496,12 +516,11 @@ export async function resumeRun(runId: number): Promise<RunResult> {
         [askStep.on_reply_goto, runId],
       );
     } else {
-      // Fallback: advance to next step in sequence
-      const currentIndex = steps.findIndex((s) => s.id === run.current_step_id);
-      const nextStep = currentIndex < steps.length - 1 ? steps[currentIndex + 1] : null;
+      // current_step_id was already advanced to on_reply_goto by the approve endpoint.
+      // Run from the current position without skipping it.
       await execute(
         "UPDATE playbook_runs SET status = 'running', current_step_id = $1 WHERE id = $2",
-        [nextStep?.id ?? null, runId],
+        [run.current_step_id, runId],
       );
     }
   } else if (run.status === "waiting_for_human") {

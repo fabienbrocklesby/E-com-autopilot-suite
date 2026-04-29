@@ -18,6 +18,8 @@ import { applyLabel } from "./gmail.ts";
 import { evaluateRules } from "./sheet-rules.ts";
 import { startRun } from "./playbook/executor.ts";
 import type { Playbook } from "./playbook/types.ts";
+import { publish } from "./event-bus.ts";
+import { fetchThreadListItem } from "../db/queries.ts";
 
 /**
  * Categorise a thread and route it to the appropriate playbook.
@@ -143,6 +145,12 @@ export async function categoriseAndDraft(threadId: number): Promise<{
         [threadId],
       ) as Thread;
 
+      // Notify frontend of category/status change
+      const threadListItem = await fetchThreadListItem(threadId, workspaceId);
+      if (threadListItem) {
+        publish({ type: "thread_updated", workspaceId, thread: threadListItem as unknown as Record<string, unknown> });
+      }
+
       return {
         thread: updatedThread,
         categoryId,
@@ -167,6 +175,12 @@ export async function categoriseAndDraft(threadId: number): Promise<{
     "SELECT * FROM threads WHERE id = $1",
     [threadId],
   ) as Thread;
+
+  // Notify frontend of category/status change
+  const threadListItem = await fetchThreadListItem(threadId, workspaceId);
+  if (threadListItem) {
+    publish({ type: "thread_updated", workspaceId, thread: threadListItem as unknown as Record<string, unknown> });
+  }
 
   return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated: false };
 }

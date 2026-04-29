@@ -52,7 +52,7 @@ export const evaluateHandler: StepHandler = {
     const model = await getModel(ctx.workspaceId);
 
     const systemPrompt = `You are checking whether a customer support workflow has everything it needs to proceed to the next step.
-
+${ctx.storeProfile ? `\nStore context:\n${ctx.storeProfile}\n` : ""}
 REQUIRED VARIABLES (all must be present and valid for the workflow to continue):
 ${requiredContext.map((key) => `- ${key}: ${ctx.variables[key] ?? "(MISSING)"}`).join("\n")}
 

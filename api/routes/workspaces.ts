@@ -44,14 +44,17 @@ workspacesRouter.post("/", async (c) => {
   if (!body.name?.trim()) throw new AppError(422, "name is required");
 
   const workspace = await queryOne<Workspace>(
-    `INSERT INTO workspaces (name, gmail_address, sheet_id, sheet_name)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO workspaces (name, gmail_address, sheet_id, sheet_name, store_name, store_description, store_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
     [
       body.name.trim(),
       body.gmail_address ?? null,
       body.sheet_id ?? null,
       body.sheet_name ?? "Sheet1",
+      body.store_name ?? null,
+      body.store_description ?? null,
+      body.store_url ?? null,
     ],
   );
   return c.json({ workspace }, 201);
@@ -69,6 +72,7 @@ workspacesRouter.patch("/:id", async (c) => {
 
   const allowed: (keyof UpdateWorkspacePayload)[] = [
     "name", "gmail_address", "sheet_id", "sheet_name",
+    "store_name", "store_description", "store_url",
   ];
   for (const key of allowed) {
     if (body[key] !== undefined) {

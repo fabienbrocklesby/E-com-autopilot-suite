@@ -101,7 +101,14 @@ export const reviewQueueStore = derived(threadsStore, ($threads) =>
 
 /** Count of threads that need immediate human attention (drives inbox sidebar badge). */
 export const attentionCountStore = derived(threadsStore, ($threads) =>
-	$threads.items.filter(
-		(t) => t.has_pending_action || t.status === 'in_review' || (t.draft_count > 0 && t.status === 'new')
-	).length
+	$threads.items.filter((t) => {
+		if (t.has_pending_action) return true;
+		if (t.latest_run_status === 'waiting_for_human') return true;
+		const runIsActive = t.latest_run_status != null &&
+			['running', 'waiting_for_customer', 'retrying'].includes(t.latest_run_status);
+		if (runIsActive) return false;
+		if (t.status === 'in_review') return true;
+		if (t.draft_count > 0 && t.status === 'new') return true;
+		return false;
+	}).length
 );

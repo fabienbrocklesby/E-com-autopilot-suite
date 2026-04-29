@@ -11,6 +11,86 @@ Each entry:
 
 ---
 
+## 2026-04-19 - Fix manual_approval input field not shown on second waiting_for_human pause
+
+**Phase**: bugfix
+**Status**: complete
+
+### Root cause
+
+Two bugs, same flow: refund playbook had `ask_2` (ask_customer with `require_approval`) followed later by `approval_1` (manual_approval with `capture_input: true`).
+
+**Bug 1 (primary - reported)**: On `+page.svelte`, the SSE `run_updated` handler merged raw DB run data with the old run via `{ ...oldRun, ...sseRun }`. The SSE payload has only real DB columns — the SQL-computed `step_capture_input`, `step_input_prompt`, `step_pending_send`, `step_reference_context` fields are absent. When the run transitioned from `ask_2` pause (step_capture_input=false) to `approval_1` pause (step_capture_input=true), the merge preserved the stale `false` value from the previous pause. `ManualActionBanner.captureInput` stayed false, the input textarea never rendered, and clicking approve sent no input — so `approved_amount` was never captured and `send_1` re-generated the same message.
+
+**Bug 2 (secondary - silent)**: `resumeRun` in `executor.ts` had a fallback for `waiting_for_customer` runs where `current_step_id` is not an `ask_customer` step. The approve endpoint already advances `current_step_id` to `on_reply_goto` (`extract_2` in this case). The fallback then incorrectly advanced one step further, skipping `extract_2` entirely. `refund_reason` was never extracted.
+
+### Fix
+
+- **`frontend/src/routes/threads/[id]/+page.svelte`**: In the `run_updated` SSE handler, after the standard merge, when `run.status === 'waiting_for_human'`, re-fetch the full runs list via `playbooksApi.listRuns({ thread_id })`. This hydrates the SQL-computed `step_*` fields so `ManualActionBanner` receives correct data.
+
+- **`api/services/playbook/executor.ts`** `resumeRun` fallback: Instead of advancing to `steps[currentIndex + 1]`, keep `current_step_id` as-is and set status to `running`. Since the approve endpoint already positioned `current_step_id` at the target step, `advanceRun` will start there correctly.
+
+### Docs consulted
+
+- Svelte 5 runes: `/sveltejs/svelte` via context7 — confirmed `$derived` / `$state` patterns for the SSE handler
+
+
+
+---
+
+## 2026-04-19 - Store profile feature
+
+**Phase**: features
+**Status**: complete
+
+### What was done
+
+Added a store profile (store name, description, URL) to each workspace so the AI has business context when generating replies and categorising emails.
+
+- **Migration**: `api/db/migrations/025_workspace_store_profile.sql` - adds `store_name`, `store_description`, `store_url` nullable TEXT columns to `workspaces`
+- **Backend types**: `api/types/index.ts` - added three fields to `Workspace` and `CreateWorkspacePayload`
+- **Workspace route**: `api/routes/workspaces.ts` - added fields to PATCH allowed list and POST INSERT
+- **Store profile helper**: `api/services/store-profile.ts` - formats workspace profile into an AI-ready string
+- **AI injection**: `api/services/ai.ts` `categoriseEmail()` - loads and injects store profile into system prompt
+- **RunContext**: `api/services/playbook/types.ts` - added `storeProfile: string | null`
+- **Executor**: `api/services/playbook/executor.ts` - loads store profile once per run, passes to all handlers
+- **Handlers updated**: `send_reply.ts`, `ask_customer.ts`, `extract.ts`, `evaluate.ts` - conditional injection into system prompts
+- **Frontend types**: `frontend/src/lib/api.ts` - `Workspace` and `WorkspacePayload` updated
+- **Settings page**: `frontend/src/routes/settings/+page.svelte` - three new fields in the workspace edit form
+
+### Design decisions
+
+- Workspace columns over settings key-value: store profile is core identity metadata with structure, already loaded in all AI paths
+- Injection is conditional (only when non-null) so existing behavior is unchanged when no profile is set
+- Store context phrasing tells AI to use it naturally, not robotically
+
+---
+
+## 2026-04-19 - Fix SSE live update gaps (new threads not appearing)
+
+**Phase**: live-updates
+**Status**: complete
+
+### Root cause
+
+Two code paths never published `thread_updated`, so new threads would land in the collapsed "Other / Noise" bucket and never move to "Needs Attention":
+
+1. **`advanceRun` pause case** (`api/services/playbook/executor.ts`): returned early before the thread status update (`UPDATE threads SET status = 'in_review'`) and the `thread_updated` publish at the bottom of the function. Playbooks that paused (waiting_for_human / waiting_for_customer) left the thread at its old status and the frontend was never notified.
+
+2. **`categoriseAndDraft`** (`api/services/categorisation.ts`): set `category_id` and optionally `status = 'in_review'` but never published `thread_updated`, so the frontend never saw the category change.
+
+### Fix
+
+- `executor.ts` `pause` case: added `UPDATE threads SET status = 'in_review'` + `fetchThreadListItem` + `publish("thread_updated")` before the early return
+- `categorisation.ts`: added `publish` and `fetchThreadListItem` imports, added `thread_updated` publish after every code path that updates the thread (both playbook and no-playbook paths)
+- `frontend/src/routes/+page.svelte` `thread_updated` handler: changed from `map` (update-only) to upsert — if thread isn't in the list yet (e.g. `thread_created` was missed during reconnection), it's prepended
+
+### Verified (playwright)
+
+SSE delivers `thread_updated` to browser within ~1s. Thread appears in "NEEDS YOUR ATTENTION" group without page refresh.
+
+---
+
 ## 2026-04-18 - Live updates via SSE
 
 **Phase**: live-updates
