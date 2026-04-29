@@ -86,6 +86,7 @@
 	});
 </script>
 
+{#if !($page.url.pathname as string).startsWith('/login')}
 <div class="app" class:sidebar-open={sidebarOpen}>
 	<!-- Mobile top bar (hidden on desktop) -->
 	<header class="mobile-topbar">
@@ -168,6 +169,9 @@
 		{@render children()}
 	</main>
 </div>
+{:else}
+	{@render children()}
+{/if}
 
 <style>
 	:global(*, *::before, *::after) {

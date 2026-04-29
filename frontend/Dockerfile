@@ -17,11 +17,17 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# PUBLIC_API_BASE_URL is baked into the JS bundle at build time by SvelteKit's
+# $env/static/public. It must be passed as a build arg: --build-arg PUBLIC_API_BASE_URL=...
+ARG PUBLIC_API_BASE_URL
+ENV PUBLIC_API_BASE_URL=$PUBLIC_API_BASE_URL
+
 COPY package.json ./
 RUN npm install
 
 COPY . .
-RUN npm run build
+# Cap Node heap to 1024xw MB to prevent OOM kills on low-memory VPS servers.
+RUN NODE_OPTIONS="--max-old-space-size=1024" npm run build
 
 # ─── Production stage ───────────────────────────────────────────────────────────
 FROM node:22-alpine AS production
