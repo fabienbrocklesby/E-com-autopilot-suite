@@ -24,8 +24,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	const session = event.cookies.get('dashboard_session');
 	if (session !== expectedToken(password)) {
-		// Preserve the originally requested URL so we can redirect back after login.
-		const returnTo = encodeURIComponent(event.url.pathname + event.url.search);
+		// Only preserve the pathname, not query params — stale oauth_error params
+		// in the URL would otherwise survive login and confuse the settings page.
+		const returnTo = encodeURIComponent(event.url.pathname);
 		throw redirect(302, `/login?returnTo=${returnTo}`);
 	}
 

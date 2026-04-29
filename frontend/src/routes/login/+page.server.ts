@@ -44,7 +44,9 @@ export const actions: Actions = {
 		cookies.set('dashboard_session', expectedToken(envPassword), {
 			path: '/',
 			httpOnly: true,
-			sameSite: 'strict',
+			// 'lax' (not 'strict') so the cookie survives top-level cross-site
+			// navigations such as the OAuth redirect chain: Google → API → frontend.
+			sameSite: 'lax',
 			secure: isProduction,
 			maxAge: 60 * 60 * 24 * 30 // 30 days
 		});
