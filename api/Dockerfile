@@ -25,8 +25,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup --system --gid 1001 deno_group && \
-	adduser --system --uid 1001 --ingroup deno_group deno_user
+RUN groupadd --system --gid 1001 deno_group && \
+	useradd --system --uid 1001 --gid deno_group deno_user
 
 COPY deno.json .
 COPY . .
