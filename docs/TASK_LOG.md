@@ -11,6 +11,24 @@ Each entry:
 
 ---
 
+## 2026-04-30 - Gmail label sync imports categories
+
+**Problem:** Production Settings -> Sync Labels reported `0` even when Gmail had existing user labels. The sync path only logged unknown Gmail labels instead of importing them.
+
+**Changes made:**
+- `api/services/gmail.ts`: keeps the existing categories -> Gmail pass, then imports untracked user-created Gmail labels as blank categories linked by `gmail_label_id`.
+- `api/services/gmail.ts`: creates the same blank inactive playbook for imported labels that normal dashboard category creation creates.
+- `docs/PLAYBOOK_ENGINE.md`: updated the label sync spec from dashboard-only source of truth to two-way category/label convergence.
+
+**Validation:**
+- `deno fmt services/gmail.ts` applied.
+- `deno fmt --check services/gmail.ts` passes.
+- `deno check main.ts` passes.
+- `deno lint services/gmail.ts` passes.
+- Full `deno lint` still fails on existing repo-wide lint issues unrelated to this change, including unversioned `npm:hono` imports and unused variables in older files.
+
+---
+
 ## 2026-04-29 - Sync Columns range parsing fix
 
 **Problem:** Production Sync Columns returned Google Sheets `400 INVALID_ARGUMENT`: `Unable to parse range: 1WvR96hg85cSudlWtfJrjhitzntkGDXvu0TldNA20hEo!1:1`.

@@ -168,7 +168,7 @@ These need answers before Phase 2 starts. Track resolutions here:
 
 ## Gmail label sync
 
-**Source of truth**: the dashboard. Gmail labels are a mirror, not a master.
+**Source of truth**: two-way sync between dashboard categories and user-created Gmail labels.
 
 ### Behaviours (settled as of Phase 0)
 
@@ -177,14 +177,14 @@ These need answers before Phase 2 starts. Track resolutions here:
 | Create category in dashboard | Gmail label created with same name on next `/labels/sync` |
 | Rename category in dashboard | Gmail label renamed via `users.labels.patch` on next sync |
 | Delete category in dashboard | Gmail label is NOT deleted automatically (manual cleanup) |
-| Create label in Gmail | Logged as "untracked label"; no category auto-created |
+| Create label in Gmail | Category and blank inactive playbook created on next `/labels/sync` |
 | Rename label in Gmail | On next sync, dashboard sees the old linked label id still exists, so no rename propagates back - the Gmail label takes the dashboard name on next rename sync |
 
 ### Implementation
 
 - `syncLabels(email, workspaceId)` in `api/services/gmail.ts`
 - Pass 1: categories → Gmail (create missing labels, rename mismatched ones)
-- Pass 2: Gmail → dashboard (log untracked labels only; no auto-import)
+- Pass 2: Gmail → dashboard (import untracked user labels as blank categories with inactive playbooks)
 - `gmailPatch<T>` helper added for `PATCH /gmail/v1/users/{userId}/labels/{id}`
 
 ## What this engine does NOT do (yet)

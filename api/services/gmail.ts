@@ -3,15 +3,14 @@
  * Raw HTTP calls to the Gmail REST API v1.
  * Reference: https://developers.google.com/gmail/api/reference/rest
  */
-import { queryOne, execute, query } from "../db/client.ts";
-import { AppError, GmailMessage, GmailThread, Category, Message } from "../types/index.ts";
+import { execute, query, queryOne, transaction } from "../db/client.ts";
+import { AppError, Category, GmailMessage, GmailThread, Message } from "../types/index.ts";
 import { categoriseAndDraft } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
 import { resumeRun } from "./playbook/executor.ts";
 import type { PlaybookRun } from "./playbook/types.ts";
 import { logger } from "./logger.ts";
 import { rateLimitedCall } from "./rate_limit.ts";
-import { sendAlert } from "./alerts.ts";
 import { publish } from "./event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
 
@@ -26,7 +25,11 @@ async function gmailGet<T>(email: string, path: string): Promise<T> {
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new AppError(res.status as 400 | 401 | 403 | 404 | 500, `Gmail API error on ${path}`, detail);
+    throw new AppError(
+      res.status as 400 | 401 | 403 | 404 | 500,
+      `Gmail API error on ${path}`,
+      detail,
+    );
   }
   return res.json() as Promise<T>;
 }
@@ -43,7 +46,11 @@ async function gmailPost<T>(email: string, path: string, body: unknown): Promise
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new AppError(res.status as 400 | 401 | 403 | 404 | 500, `Gmail API error on POST ${path}`, detail);
+    throw new AppError(
+      res.status as 400 | 401 | 403 | 404 | 500,
+      `Gmail API error on POST ${path}`,
+      detail,
+    );
   }
   return res.json() as Promise<T>;
 }
@@ -60,7 +67,11 @@ async function gmailPatch<T>(email: string, path: string, body: unknown): Promis
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new AppError(res.status as 400 | 401 | 403 | 404 | 500, `Gmail API error on PATCH ${path}`, detail);
+    throw new AppError(
+      res.status as 400 | 401 | 403 | 404 | 500,
+      `Gmail API error on PATCH ${path}`,
+      detail,
+    );
   }
   return res.json() as Promise<T>;
 }
@@ -98,7 +109,7 @@ async function retryOn404<T>(
 /**
  * Fetch a Gmail thread by its thread ID.
  */
-export async function fetchGmailThread(
+export function fetchGmailThread(
   email: string,
   gmailThreadId: string,
 ): Promise<GmailThread> {
@@ -141,12 +152,17 @@ export async function processNewMessages(
     for (const added of entry.messagesAdded ?? []) {
       const msg = added.message;
       try {
-        await rateLimitedCall(workspaceId, "gmail", () =>
-          ingestMessage(email, msg.id, msg.threadId, workspaceId)
+        await rateLimitedCall(
+          workspaceId,
+          "gmail",
+          () => ingestMessage(email, msg.id, msg.threadId, workspaceId),
         );
       } catch (err) {
         if (err instanceof AppError && err.statusCode === 404) {
-          logger.warn("gmail.thread_not_found", { gmail_thread_id: msg.threadId, gmail_message_id: msg.id });
+          logger.warn("gmail.thread_not_found", {
+            gmail_thread_id: msg.threadId,
+            gmail_message_id: msg.id,
+          });
           continue;
         }
         // DLQ: capture failed ingestion for retry
@@ -201,7 +217,8 @@ async function ingestMessage(
 
   const subject = headerValue(gmailMsg, "Subject") ?? "(no subject)";
   const from = headerValue(gmailMsg, "From") ?? "";
-  const messageIdHeader = headerValue(gmailMsg, "Message-Id") ?? headerValue(gmailMsg, "Message-ID") ?? null;
+  const messageIdHeader = headerValue(gmailMsg, "Message-Id") ??
+    headerValue(gmailMsg, "Message-ID") ?? null;
   const receivedAt = new Date(parseInt(gmailMsg.internalDate)).toISOString();
   const { plain, html } = extractBody(gmailMsg);
 
@@ -362,9 +379,7 @@ export async function sendReply(
 
   if (inReplyToMessageId) {
     // Ensure it is wrapped in angle brackets (RFC 2822 requires this).
-    const mid = inReplyToMessageId.startsWith("<")
-      ? inReplyToMessageId
-      : `<${inReplyToMessageId}>`;
+    const mid = inReplyToMessageId.startsWith("<") ? inReplyToMessageId : `<${inReplyToMessageId}>`;
     headers.push(`In-Reply-To: ${mid}`);
     headers.push(`References: ${mid}`);
   }
@@ -384,8 +399,10 @@ export async function sendReply(
     payload.threadId = gmailThreadId;
   }
 
-  const sent = await rateLimitedCall(workspaceId, "gmail", () =>
-    gmailPost<{ id: string }>(email, "/messages/send", payload)
+  const sent = await rateLimitedCall(
+    workspaceId,
+    "gmail",
+    () => gmailPost<{ id: string }>(email, "/messages/send", payload),
   );
 
   logger.info("gmail.reply_sent", { gmail_thread_id: gmailThreadId, message_id: sent.id });
@@ -474,18 +491,30 @@ export async function syncLabels(
   email: string,
   workspaceId: number,
 ): Promise<number> {
+  type GmailLabel = { id: string; name: string; type?: string };
+
   // Gmail system label prefixes/names to skip when importing.
-  const SYSTEM_LABEL_PREFIXES = ["INBOX", "SENT", "DRAFT", "SPAM", "TRASH",
-    "STARRED", "IMPORTANT", "UNREAD", "CATEGORY_", "CHAT"];
+  const SYSTEM_LABEL_PREFIXES = [
+    "INBOX",
+    "SENT",
+    "DRAFT",
+    "SPAM",
+    "TRASH",
+    "STARRED",
+    "IMPORTANT",
+    "UNREAD",
+    "CATEGORY_",
+    "CHAT",
+  ];
 
   // Fetch existing Gmail labels.
-  const labelList = await gmailGet<{ labels: Array<{ id: string; name: string; type?: string }> }>(
+  const labelList = await gmailGet<{ labels: GmailLabel[] }>(
     email,
     "/labels",
   );
   const existingLabels = labelList.labels ?? [];
   const labelByName = new Map(existingLabels.map((l) => [l.name.toLowerCase(), l.id]));
-  const labelById   = new Map(existingLabels.map((l) => [l.id, l.name]));
+  const labelById = new Map(existingLabels.map((l) => [l.id, l.name]));
 
   const categories = await query<Category>(
     "SELECT * FROM categories WHERE workspace_id = $1",
@@ -494,6 +523,11 @@ export async function syncLabels(
 
   // Build a set of names already covered by a category (lowercase).
   const coveredNames = new Set(categories.map((c) => c.name.toLowerCase()));
+  const coveredLabelIds = new Set(
+    categories
+      .map((c) => c.gmail_label_id)
+      .filter((id): id is string => Boolean(id)),
+  );
 
   let synced = 0;
 
@@ -509,8 +543,13 @@ export async function syncLabels(
           { name: cat.name },
         );
         synced++;
-        logger.info("gmail.label_renamed", { workspace_id: workspaceId, old_name: gmailName, new_name: cat.name });
+        logger.info("gmail.label_renamed", {
+          workspace_id: workspaceId,
+          old_name: gmailName,
+          new_name: cat.name,
+        });
       }
+      coveredLabelIds.add(cat.gmail_label_id);
       continue;
     }
 
@@ -522,6 +561,7 @@ export async function syncLabels(
         [existingId, cat.id],
       );
       synced++;
+      coveredLabelIds.add(existingId);
       continue;
     }
 
@@ -540,12 +580,12 @@ export async function syncLabels(
       [created.id, cat.id],
     );
     synced++;
+    coveredLabelIds.add(created.id);
   }
 
   // ── Pass 2: Gmail → categories ────────────────────────────────────────────
-  // Dashboard is the source of truth. Gmail-side label creates/renames are
-  // surfaced as untracked labels (logged) rather than auto-imported - the
-  // client must create or rename categories in the dashboard.
+  // Gmail labels created outside the dashboard become blank categories, matching
+  // the normal category creation flow with an inactive playbook ready to edit.
   for (const label of existingLabels) {
     // Skip system labels.
     const isSystem = label.type === "system" ||
@@ -556,11 +596,34 @@ export async function syncLabels(
     if (coveredNames.has(label.name.toLowerCase())) continue;
 
     // Skip if a category is already linked to this label id.
-    const linkedCategory = categories.find((c) => c.gmail_label_id === label.id);
-    if (linkedCategory) continue;
+    if (coveredLabelIds.has(label.id)) continue;
 
-    // Untracked label - log it for visibility but do not auto-create a category.
-    logger.debug("gmail.untracked_label", { workspace_id: workspaceId, label_name: label.name, label_id: label.id });
+    await transaction(async (tx) => {
+      const rows = await tx.queryObject<Category>({
+        text:
+          `INSERT INTO categories (workspace_id, name, description, instructions, gmail_label_id)
+               VALUES ($1, $2, '', '', $3)
+               RETURNING *`,
+        args: [workspaceId, label.name, label.id],
+      });
+      const created = rows.rows[0];
+      if (!created) throw new AppError(500, "Failed to create category from Gmail label");
+
+      await tx.queryObject({
+        text: `INSERT INTO playbooks (workspace_id, category_id, name, steps, version, is_active)
+               VALUES ($1, $2, $3, '[]'::jsonb, 1, false)`,
+        args: [workspaceId, created.id, label.name],
+      });
+    });
+
+    coveredNames.add(label.name.toLowerCase());
+    coveredLabelIds.add(label.id);
+    synced++;
+    logger.info("gmail.label_imported", {
+      workspace_id: workspaceId,
+      label_name: label.name,
+      label_id: label.id,
+    });
   }
 
   logger.info("gmail.labels_synced", { workspace_id: workspaceId, synced });
