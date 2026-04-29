@@ -31,6 +31,7 @@
 	}
 
 	onMount(async () => {
+		localStorage.removeItem('api_token');
 		checkMobile();
 		window.addEventListener('resize', checkMobile);
 		try {

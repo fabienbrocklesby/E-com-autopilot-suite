@@ -2,9 +2,8 @@
  * Typed API client for the email-dash backend.
  * All fetch calls funnel through here for consistent error handling and base URL.
  */
-import { PUBLIC_API_BASE_URL } from '$env/static/public';
 
-const BASE_URL = PUBLIC_API_BASE_URL;
+const BASE_URL = '/api';
 
 export interface ApiError {
 	message: string;
@@ -23,15 +22,10 @@ async function request<T>(
 	path: string,
 	options: RequestInit = {}
 ): Promise<T> {
-	const token = typeof localStorage !== 'undefined'
-		? localStorage.getItem('api_token') ?? ''
-		: '';
-
 	const res = await fetch(`${BASE_URL}${path}`, {
 		...options,
 		headers: {
 			'Content-Type': 'application/json',
-			...(token ? { Authorization: `Bearer ${token}` } : {}),
 			...options.headers
 		}
 	});

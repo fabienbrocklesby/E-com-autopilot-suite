@@ -64,6 +64,7 @@ services:
         required: false
     environment:
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      SERVER_API_BASE_URL: ${SERVER_API_BASE_URL:-http://api:8000}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
     ports:
       - "${FRONTEND_PORT:-3000}:5173"

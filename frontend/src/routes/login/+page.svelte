@@ -20,7 +20,7 @@
 
 		<form
 			method="POST"
-			action="?/default&returnTo={encodeURIComponent(data.returnTo)}"
+			action={`?returnTo=${encodeURIComponent(data.returnTo)}`}
 			use:enhance={() => {
 				loading = true;
 				return async ({ update }) => {

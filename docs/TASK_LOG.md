@@ -11,6 +11,37 @@ Each entry:
 
 ---
 
+## 2026-04-29 - Dashboard auth persistence and OAuth status fix
+
+**Problem:** Live dashboard repeatedly showed the password gate and Google OAuth appeared to complete, but Settings still showed the account as not connected.
+
+**Root causes found:**
+- `frontend/src/routes/login/+page.svelte` posted to `?/default`, which SvelteKit rejects for unnamed/default actions during enhanced form submissions (`Cannot use reserved action name "default"`). Browser logins could 500 instead of reliably setting the `dashboard_session` cookie.
+- Frontend API calls depended on a browser-side bearer token in `localStorage.api_token`; the password login flow did not reliably establish that token, and storing the API secret in browser storage is not appropriate for production.
+- `frontend/vite.config.ts` had a stale `/api` dev proxy to `localhost:8000`, which bypassed SvelteKit and fails inside the Docker frontend container.
+- The new SvelteKit proxy initially forwarded `content-encoding: gzip` after Node fetch had decoded the body, causing Chrome `ERR_CONTENT_DECODING_FAILED`.
+
+**Changes made:**
+- Added `frontend/src/routes/api/[...path]/+server.ts`: same-origin API proxy that injects `Authorization: Bearer <API_SECRET>` server-side only.
+- Changed `frontend/src/lib/api.ts` to call same-origin `/api` and removed all browser bearer-token reads.
+- Changed `frontend/src/lib/sse.ts` to connect through `/api/events/...` without token query params.
+- Fixed login form action to post to the unnamed action correctly while preserving `returnTo`.
+- Added legacy cleanup in `frontend/src/routes/+layout.svelte` to remove old `localStorage.api_token` from existing browsers.
+- Removed the stale Vite `/api` proxy and added `SERVER_API_BASE_URL=http://api:8000` for Docker frontend-to-api traffic.
+
+**Validation:**
+- `npm run check` in `frontend/`: 0 errors, existing unrelated warnings remain.
+- Docker stack recreated/restarted.
+- `curl` login sets `dashboard_session` with `Max-Age=2592000`, `HttpOnly`, `SameSite=Lax`.
+- `curl` with only dashboard cookie to `http://localhost:3000/api/auth/status` returns connected Google account JSON.
+- `curl` to `http://localhost:3000/api/auth/google/start` via frontend proxy returns Google OAuth 302.
+- Playwright: logged in from `/login?returnTo=/settings`, landed on `/settings`, refresh stayed on dashboard, Settings showed connected Google account, and `localStorage.getItem("api_token") === null`.
+
+**Deployment note:**
+- Production frontend needs `API_SECRET` available server-side and `SERVER_API_BASE_URL=https://api.exclusivemotorsdashboard.com` (or the internal API URL if Dokploy provides one). No API secret should be exposed as `PUBLIC_*` or stored in browser storage.
+
+---
+
 ## 2026-04-19 - Fix manual_approval input field not shown on second waiting_for_human pause
 
 **Phase**: bugfix
