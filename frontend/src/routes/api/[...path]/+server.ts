@@ -15,9 +15,22 @@ const HOP_BY_HOP_HEADERS = new Set([
 	'upgrade'
 ]);
 
-function apiBaseUrl(): string {
-	const baseUrl = env.SERVER_API_BASE_URL ?? env.API_BASE_URL ?? 'http://localhost:8000';
+function apiBaseUrl(url: URL): string {
+	const baseUrl = env.SERVER_API_BASE_URL ?? env.API_BASE_URL ?? inferredApiBaseUrl(url);
 	return baseUrl.replace(/\/$/, '');
+}
+
+function inferredApiBaseUrl(url: URL): string {
+	const hostname = url.hostname;
+	if (hostname === 'localhost' || hostname === '127.0.0.1') {
+		return 'http://localhost:8000';
+	}
+
+	if (hostname.startsWith('api.')) {
+		return url.origin;
+	}
+
+	return `${url.protocol}//api.${hostname}`;
 }
 
 function apiSecret(): string {
@@ -42,17 +55,32 @@ function proxiedHeaders(request: Request): Headers {
 
 const proxy: RequestHandler = async ({ params, request, url }) => {
 	const path = params.path ?? '';
-	const targetUrl = `${apiBaseUrl()}/${path}${url.search}`;
+	const targetUrl = `${apiBaseUrl(url)}/${path}${url.search}`;
 	const method = request.method.toUpperCase();
 	const hasBody = method !== 'GET' && method !== 'HEAD';
 
-	const response = await fetch(targetUrl, {
-		method,
-		headers: proxiedHeaders(request),
-		body: hasBody ? request.body : undefined,
-		duplex: hasBody ? 'half' : undefined,
-		redirect: 'manual'
-	} as RequestInit & { duplex?: 'half' });
+	let response: Response;
+	try {
+		response = await fetch(targetUrl, {
+			method,
+			headers: proxiedHeaders(request),
+			body: hasBody ? request.body : undefined,
+			duplex: hasBody ? 'half' : undefined,
+			redirect: 'manual'
+		} as RequestInit & { duplex?: 'half' });
+	} catch (err) {
+		console.error('[api proxy] upstream request failed', { targetUrl, error: String(err) });
+		return Response.json(
+			{
+				error: {
+					message: 'API proxy upstream request failed',
+					detail: targetUrl,
+					status: 502
+				}
+			},
+			{ status: 502 }
+		);
+	}
 
 	const responseHeaders = new Headers(response.headers);
 	for (const header of HOP_BY_HOP_HEADERS) {

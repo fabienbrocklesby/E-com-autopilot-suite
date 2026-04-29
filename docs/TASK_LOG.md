@@ -42,6 +42,22 @@ Each entry:
 
 ---
 
+### Follow-up: production `/api/auth/google/start` returned 500
+
+**Observed:** Direct API endpoint `https://api.exclusivemotorsdashboard.com/auth/google/start` returns a valid 302 to Google, so the API OAuth route itself is healthy.
+
+**Likely cause:** The frontend proxy was deployed without `SERVER_API_BASE_URL`, causing the proxy fallback to target `http://localhost:8000` from inside the frontend runtime.
+
+**Fix:** Updated `frontend/src/routes/api/[...path]/+server.ts` so, when explicit server env is missing, it infers the API origin from the dashboard host:
+- `https://exclusivemotorsdashboard.com` → `https://api.exclusivemotorsdashboard.com`
+- localhost → `http://localhost:8000`
+
+Also added a caught upstream error response (`502` JSON with the attempted target URL) instead of an opaque SvelteKit 500.
+
+**Validation:** `npm run check` still reports 0 errors. Local `/api/auth/google/start` still returns a Google OAuth 302 through Docker.
+
+---
+
 ## 2026-04-19 - Fix manual_approval input field not shown on second waiting_for_human pause
 
 **Phase**: bugfix
