@@ -1,5 +1,4 @@
 import { redirect } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { createHmac } from 'node:crypto';
 import type { Handle } from '@sveltejs/kit';
 
@@ -10,7 +9,8 @@ function expectedToken(password: string): string {
 }
 
 export const handle: Handle = async ({ event, resolve }) => {
-	const password = env.DASHBOARD_PASSWORD;
+	// Use process.env directly — reliable in both Vite dev and Node production.
+	const password = process.env.DASHBOARD_PASSWORD;
 
 	// If no password is configured, allow through (allows unprotected dev setups).
 	if (!password) {

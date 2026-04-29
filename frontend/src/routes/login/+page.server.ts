@@ -1,5 +1,4 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
 import { createHmac } from 'node:crypto';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -8,7 +7,7 @@ function expectedToken(password: string): string {
 }
 
 export const load: PageServerLoad = async ({ cookies, url }) => {
-	const password = env.DASHBOARD_PASSWORD;
+	const password = process.env.DASHBOARD_PASSWORD;
 	if (!password) {
 		// No password configured — skip to app.
 		throw redirect(302, '/');
@@ -33,7 +32,7 @@ export const actions: Actions = {
 			return fail(400, { error: 'Password is required.' });
 		}
 
-		const envPassword = env.DASHBOARD_PASSWORD;
+		const envPassword = process.env.DASHBOARD_PASSWORD;
 		if (!envPassword || password !== envPassword) {
 			// Use a short fixed delay to slow brute-force attempts.
 			await new Promise((r) => setTimeout(r, 400));
