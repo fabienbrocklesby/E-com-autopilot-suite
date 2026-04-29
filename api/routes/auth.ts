@@ -80,80 +80,96 @@ authRouter.get("/google/callback", async (c) => {
   }
   await execute("DELETE FROM oauth_states WHERE state = $1", [state]);
 
-  if (!code) throw new AppError(400, "Missing authorization code");
-
-  // Exchange the authorization code for tokens.
-  const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      redirect_uri: REDIRECT_URI,
-      grant_type: "authorization_code",
-    }).toString(),
-  });
-
-  if (!tokenRes.ok) {
-    const detail = await tokenRes.text();
-    throw new AppError(502, "Failed to exchange authorization code", detail);
+  if (!code) {
+    return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=missing_code`);
   }
 
-  const tokens = await tokenRes.json() as {
-    access_token: string;
-    refresh_token?: string;
-    expires_in: number;
-    token_type: string;
-  };
+  // Wrap the rest of the flow so any server-side failure (ENCRYPTION_KEY missing,
+  // DB error, upstream API error, etc.) redirects to the frontend with a clear
+  // error message rather than returning raw JSON at the API origin.
+  try {
+    // Exchange the authorization code for tokens.
+    const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        redirect_uri: REDIRECT_URI,
+        grant_type: "authorization_code",
+      }).toString(),
+    });
 
-  if (!tokens.refresh_token) {
-    throw new AppError(400, "No refresh token returned. Revoke app access and try again.");
+    if (!tokenRes.ok) {
+      const detail = await tokenRes.text();
+      console.error("[auth] Token exchange failed:", detail);
+      return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=token_exchange_failed`);
+    }
+
+    const tokens = await tokenRes.json() as {
+      access_token: string;
+      refresh_token?: string;
+      expires_in: number;
+      token_type: string;
+    };
+
+    if (!tokens.refresh_token) {
+      return c.redirect(
+        `${FRONTEND_ORIGIN}/settings?oauth_error=${encodeURIComponent("no_refresh_token__revoke_app_access_and_retry")}`,
+      );
+    }
+
+    // Fetch the authenticated user's email address.
+    const userRes = await fetch(GOOGLE_USERINFO_URL, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    if (!userRes.ok) {
+      console.error("[auth] Failed to fetch user info:", await userRes.text());
+      return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=userinfo_failed`);
+    }
+
+    const userInfo = await userRes.json() as { email: string };
+    const expiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+
+    // Upsert tokens in the database (encrypted). workspace_id defaults to 1 on first connect.
+    const encAccess = await encryptToken(tokens.access_token);
+    const encRefresh = await encryptToken(tokens.refresh_token!);
+    await execute(
+      `INSERT INTO oauth_tokens
+         (workspace_id, email, expiry, access_token_encrypted, refresh_token_encrypted)
+       VALUES (1, $1, $2, $3, $4)
+       ON CONFLICT (email) DO UPDATE
+         SET expiry                  = EXCLUDED.expiry,
+             access_token_encrypted  = EXCLUDED.access_token_encrypted,
+             refresh_token_encrypted = EXCLUDED.refresh_token_encrypted`,
+      [userInfo.email, expiry, encAccess, encRefresh],
+    );
+
+    // Resolve which workspace this email belongs to (default = workspace 1).
+    const tokenRow = await queryOne<{ workspace_id: number }>(
+      "SELECT workspace_id FROM oauth_tokens WHERE email = $1",
+      [userInfo.email],
+    );
+    const workspaceId = tokenRow?.workspace_id ?? 1;
+
+    // Register Gmail push notifications. Fire-and-forget - don't block the redirect.
+    setupGmailWatch(userInfo.email).catch((err) =>
+      console.error("[auth] Failed to set up Gmail watch:", err)
+    );
+
+    // Sync Gmail labels with workspace categories. Fire-and-forget.
+    syncLabels(userInfo.email, workspaceId).catch((err) =>
+      console.error("[auth] Failed to sync Gmail labels:", err)
+    );
+
+    return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_success=1`);
+  } catch (err) {
+    // Log and redirect rather than surfacing raw JSON at the API origin.
+    console.error("[auth] OAuth callback error:", err);
+    const msg = err instanceof Error ? err.message : "server_error";
+    return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_error=${encodeURIComponent(msg)}`);
   }
-
-  // Fetch the authenticated user's email address.
-  const userRes = await fetch(GOOGLE_USERINFO_URL, {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  });
-  if (!userRes.ok) {
-    throw new AppError(502, "Failed to fetch user info from Google");
-  }
-
-  const userInfo = await userRes.json() as { email: string };
-  const expiry = new Date(Date.now() + tokens.expires_in * 1000).toISOString();
-
-  // Upsert tokens in the database (encrypted). workspace_id defaults to 1 on first connect.
-  const encAccess = await encryptToken(tokens.access_token);
-  const encRefresh = await encryptToken(tokens.refresh_token!);
-  await execute(
-    `INSERT INTO oauth_tokens
-       (workspace_id, email, expiry, access_token_encrypted, refresh_token_encrypted)
-     VALUES (1, $1, $2, $3, $4)
-     ON CONFLICT (email) DO UPDATE
-       SET expiry                  = EXCLUDED.expiry,
-           access_token_encrypted  = EXCLUDED.access_token_encrypted,
-           refresh_token_encrypted = EXCLUDED.refresh_token_encrypted`,
-    [userInfo.email, expiry, encAccess, encRefresh],
-  );
-
-  // Resolve which workspace this email belongs to (default = workspace 1).
-  const tokenRow = await queryOne<{ workspace_id: number }>(
-    "SELECT workspace_id FROM oauth_tokens WHERE email = $1",
-    [userInfo.email],
-  );
-  const workspaceId = tokenRow?.workspace_id ?? 1;
-
-  // Register Gmail push notifications. Fire-and-forget - don't block the redirect.
-  setupGmailWatch(userInfo.email).catch((err) =>
-    console.error("[auth] Failed to set up Gmail watch:", err)
-  );
-
-  // Sync Gmail labels with workspace categories. Fire-and-forget.
-  syncLabels(userInfo.email, workspaceId).catch((err) =>
-    console.error("[auth] Failed to sync Gmail labels:", err)
-  );
-
-  return c.redirect(`${FRONTEND_ORIGIN}/settings?oauth_success=1`);
 });
 
 // GET /auth/status - check whether an OAuth token is stored (protected)

@@ -24,10 +24,15 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	const session = event.cookies.get('dashboard_session');
 	if (session !== expectedToken(password)) {
-		// Only preserve the pathname, not query params — stale oauth_error params
-		// in the URL would otherwise survive login and confuse the settings page.
-		const returnTo = encodeURIComponent(event.url.pathname);
-		throw redirect(302, `/login?returnTo=${returnTo}`);
+		// Preserve pathname. Also preserve oauth_success and oauth_error so the
+		// settings page can show feedback after the user logs in. Other query
+		// params are deliberately dropped to avoid stale state surviving login.
+		let returnTo = event.url.pathname;
+		const oauthSuccess = event.url.searchParams.get('oauth_success');
+		const oauthError = event.url.searchParams.get('oauth_error');
+		if (oauthSuccess) returnTo += `?oauth_success=${encodeURIComponent(oauthSuccess)}`;
+		else if (oauthError) returnTo += `?oauth_error=${encodeURIComponent(oauthError)}`;
+		throw redirect(302, `/login?returnTo=${encodeURIComponent(returnTo)}`);
 	}
 
 	return resolve(event);
