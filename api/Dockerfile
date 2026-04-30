@@ -6,8 +6,19 @@ WORKDIR /app
 # Install curl for the Docker healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-COPY deno.json .
-COPY . .
+# Supports both build contexts:
+# - repo root, used by docker-compose/Dokploy compose so root docs can be copied
+# - api/, used by standalone API Dockerfile deployments
+COPY . /tmp/build-context
+RUN set -eux; \
+	if [ -f /tmp/build-context/api/main.ts ]; then \
+		cp -R /tmp/build-context/api/. /app/; \
+		mkdir -p /app/docs; \
+		cp /tmp/build-context/docs/PLAYBOOK_DESIGN_GUIDE.md /app/docs/PLAYBOOK_DESIGN_GUIDE.md; \
+	else \
+		cp -R /tmp/build-context/. /app/; \
+	fi; \
+	rm -rf /tmp/build-context
 
 # Pre-cache all remote imports so they are baked into the image layer.
 RUN deno cache main.ts
@@ -28,8 +39,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 RUN groupadd --system --gid 1001 deno_group && \
 	useradd --system --uid 1001 --gid deno_group deno_user
 
-COPY deno.json .
-COPY . .
+COPY . /tmp/build-context
+RUN set -eux; \
+	if [ -f /tmp/build-context/api/main.ts ]; then \
+		cp -R /tmp/build-context/api/. /app/; \
+		mkdir -p /app/docs; \
+		cp /tmp/build-context/docs/PLAYBOOK_DESIGN_GUIDE.md /app/docs/PLAYBOOK_DESIGN_GUIDE.md; \
+	else \
+		cp -R /tmp/build-context/. /app/; \
+	fi; \
+	rm -rf /tmp/build-context
 RUN deno cache main.ts
 
 RUN chown -R deno_user:deno_group /app

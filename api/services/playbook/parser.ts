@@ -27,7 +27,7 @@ const VALID_STEP_TYPES = [
 
 // ─── Design guide loader ──────────────────────────────────────────────────────
 
-// In the Docker container, docs/ is mounted at /docs. Locally, resolve relative to cwd.
+// In dev, docs/ is mounted at /docs. Production images include docs under /app.
 const DESIGN_GUIDE_PATH = (() => {
   try {
     Deno.statSync("/docs");
@@ -76,7 +76,6 @@ async function buildWorkspaceContext(workspaceId: number): Promise<string> {
 
   return `This workspace's Google Sheet has these columns:\n\n${columnList}\n\nThe playbook you generate MUST only reference columns that exist in this list.\nMatch logic should only use context variables that can be extracted from typical customer emails AND have a corresponding column in this sheet.`;
 }
-
 
 export interface ParseResult {
   steps: PlaybookStep[];
@@ -165,7 +164,11 @@ export async function parsePlaybook(
       }
     }
     if (step.type === "evaluate") {
-      const s = step as { if_satisfied_goto?: string; if_missing_goto?: string; if_escalate_goto?: string };
+      const s = step as {
+        if_satisfied_goto?: string;
+        if_missing_goto?: string;
+        if_escalate_goto?: string;
+      };
       if (s.if_satisfied_goto && !stepIds.has(s.if_satisfied_goto)) {
         warnings.push(`Step "${step.id}": if_satisfied_goto "${s.if_satisfied_goto}" not found`);
       }
@@ -207,16 +210,20 @@ export async function parsePlaybookStep(
   const contextLines: string[] = [];
   if (playbookContext) contextLines.push(`Playbook purpose: ${playbookContext}`);
   if (previousSteps.length > 0) {
-    contextLines.push(`Previous steps: ${previousSteps.map((s) => `${s.id} (${s.type})`).join(", ")}`);
+    contextLines.push(
+      `Previous steps: ${previousSteps.map((s) => `${s.id} (${s.type})`).join(", ")}`,
+    );
   }
   if (nextSteps.length > 0) {
     contextLines.push(`Next steps: ${nextSteps.map((s) => `${s.id} (${s.type})`).join(", ")}`);
   }
 
-  const systemPrompt = `${guide.replace(
-    "## Workspace context (injected at runtime)\n\nThis section is replaced at runtime with the actual workspace sheet columns and configuration. The parser injects this before sending to the AI. You will see the specific columns available for this workspace here when the prompt is assembled.",
-    `## Workspace context\n\n${workspaceContext}`,
-  )}
+  const systemPrompt = `${
+    guide.replace(
+      "## Workspace context (injected at runtime)\n\nThis section is replaced at runtime with the actual workspace sheet columns and configuration. The parser injects this before sending to the AI. You will see the specific columns available for this workspace here when the prompt is assembled.",
+      `## Workspace context\n\n${workspaceContext}`,
+    )
+  }
 
 ## Task
 Generate a SINGLE step object as JSON (not an array). The step must fit the existing playbook context.
@@ -242,7 +249,8 @@ Respond with a single JSON object (no array wrapper) representing one playbook s
 
   if (!parsed.id || typeof parsed.id !== "string") {
     // Auto-generate an id from the description
-    parsed.id = description.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30) + "_" + Date.now();
+    parsed.id = description.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30) + "_" +
+      Date.now();
   }
 
   if (!parsed.type || !VALID_STEP_TYPES.includes(parsed.type as typeof VALID_STEP_TYPES[number])) {

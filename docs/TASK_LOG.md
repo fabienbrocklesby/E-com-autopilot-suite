@@ -11,6 +11,24 @@ Each entry:
 
 ---
 
+## 2026-04-30 - Production playbook parser guide packaging fix
+
+**Problem:** Production `POST /playbooks/parse` returned 500 because the API container could not read `/app/docs/PLAYBOOK_DESIGN_GUIDE.md`.
+
+**Root cause:** Local Compose mounted `./docs:/docs`, but production API images were built from the `api/` context, so the repo-root design guide was not packaged into the runtime filesystem.
+
+**Changes made:**
+- `api/Dockerfile`: supports repo-root and `api/` build contexts, copying the API files plus `docs/PLAYBOOK_DESIGN_GUIDE.md` into `/app/docs` when built from the repo root.
+- `docker-compose.yml`: API build context changed to the repo root with `api/Dockerfile`, so Dokploy Compose builds include the guide.
+- `api/docs/PLAYBOOK_DESIGN_GUIDE.md`: packaged copy for standalone API Dockerfile deployments that still build from `api/`.
+- `.dockerignore`: keeps repo-root API builds from sending frontend assets, screenshots, local env files, and git metadata.
+
+**Validation:**
+- `docker compose config --quiet` passes.
+- `deno fmt services/playbook/parser.ts` applied; `deno fmt --check services/playbook/parser.ts` passes.
+- `docs/PLAYBOOK_DESIGN_GUIDE.md` and `api/docs/PLAYBOOK_DESIGN_GUIDE.md` are byte-for-byte synced.
+- Local `docker build -f api/Dockerfile --target production -t ecom-autopilot-api:test .` was attempted but Docker Desktop hung on credential/metadata lookup before evaluating the Dockerfile, then was cancelled.
+
 ## 2026-04-30 - Gmail label sync imports categories
 
 **Problem:** Production Settings -> Sync Labels reported `0` even when Gmail had existing user labels. The sync path only logged unknown Gmail labels instead of importing them.
