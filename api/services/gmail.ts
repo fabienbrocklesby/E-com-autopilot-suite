@@ -215,24 +215,16 @@ async function ingestMessage(
   const gmailMsg = gmailThread.messages.find((m) => m.id === gmailMessageId);
   if (!gmailMsg) return;
 
-  const subject = headerValue(gmailMsg, "Subject") ?? "(no subject)";
-  const from = headerValue(gmailMsg, "From") ?? "";
-  const messageIdHeader = headerValue(gmailMsg, "Message-Id") ??
-    headerValue(gmailMsg, "Message-ID") ?? null;
-  const receivedAt = new Date(parseInt(gmailMsg.internalDate)).toISOString();
-  const { plain, html } = extractBody(gmailMsg);
+  const parsedMessages = gmailThread.messages.map((message) =>
+    parseGmailMessageForIngest(message, email)
+  );
+  const currentMessage = parsedMessages.find((message) =>
+    message.gmailMessageId === gmailMessageId
+  );
+  if (!currentMessage) return;
 
-  // Determine message direction. Gmail's SENT label is the authoritative signal -
-  // compare against the connected account email as a secondary check.
-  const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
-  const fromNormalised = from.toLowerCase();
-  const accountNormalised = email.toLowerCase();
-  // A message is outbound if it carries SENT or was sent from the connected account.
-  const direction: "inbound" | "outbound" =
-    hasSentLabel || fromNormalised.includes(accountNormalised) ? "outbound" : "inbound";
-
-  // Build a short summary by truncating plain text to 1000 chars.
-  const threadSummary = plain.replace(/\s+/g, " ").trim().slice(0, 1000);
+  // Build a short summary from the latest webhook-triggering message.
+  const threadSummary = currentMessage.plain.replace(/\s+/g, " ").trim().slice(0, 1000);
 
   // Upsert the thread record, now with workspace_id, thread_summary, and account_email.
   // account_email ties the thread to the specific Google account that ingested it so that
@@ -245,7 +237,7 @@ async function ingestMessage(
            thread_summary = EXCLUDED.thread_summary,
            account_email = EXCLUDED.account_email
      RETURNING id, (xmax = 0) AS is_new_row`,
-    [workspaceId, gmailThreadId, subject, gmailMsg.snippet, threadSummary, email],
+    [workspaceId, gmailThreadId, currentMessage.subject, gmailMsg.snippet, threadSummary, email],
   );
 
   if (!threadRow) return;
@@ -259,23 +251,40 @@ async function ingestMessage(
     });
   }
 
-  // Insert the message, storing the RFC 2822 Message-ID for reply threading.
-  const insertedMsg = await queryOne<Message>(
-    `INSERT INTO messages
-       (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (gmail_message_id) DO NOTHING
-     RETURNING *`,
-    [threadRow.id, gmailMessageId, from, plain, html, receivedAt, direction, messageIdHeader],
-  );
+  // Gmail gives us the whole conversation here. Store every missing message before
+  // categorisation so AI/playbooks can see context from threads that existed pre-launch.
+  for (const parsedMessage of parsedMessages) {
+    const insertedMsg = await queryOne<Message>(
+      `INSERT INTO messages
+         (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (gmail_message_id) DO NOTHING
+       RETURNING *`,
+      [
+        threadRow.id,
+        parsedMessage.gmailMessageId,
+        parsedMessage.from,
+        parsedMessage.plain,
+        parsedMessage.html,
+        parsedMessage.receivedAt,
+        parsedMessage.direction,
+        parsedMessage.messageIdHeader,
+      ],
+    );
 
-  if (insertedMsg) {
-    publish({ type: "message_created", workspaceId, threadId: threadRow.id, message: insertedMsg });
+    if (insertedMsg) {
+      publish({
+        type: "message_created",
+        workspaceId,
+        threadId: threadRow.id,
+        message: insertedMsg,
+      });
+    }
   }
 
   // Only run categorisation for inbound messages. Outbound messages (sent by this
   // app or by the user) must not trigger another draft or auto-reply loop.
-  if (direction === "outbound") {
+  if (currentMessage.direction === "outbound") {
     logger.debug("gmail.skip_outbound", { gmail_message_id: gmailMessageId });
     return;
   }
@@ -302,14 +311,50 @@ async function ingestMessage(
   if (gmailLabelsAuthoritative) {
     logger.info("gmail.labels_authoritative_categorisation", {
       thread_id: threadRow.id,
-      gmail_label_ids: gmailMsg.labelIds,
+      gmail_label_ids: currentMessage.labelIds,
     });
-    await categoriseFromGmailLabels(threadRow.id, gmailMsg.labelIds ?? []);
+    await categoriseFromGmailLabels(threadRow.id, currentMessage.labelIds);
     return;
   }
 
   // Run the AI categorisation pipeline (which may route to a playbook for new threads).
   await categoriseAndDraft(threadRow.id);
+}
+
+interface ParsedGmailMessage {
+  gmailMessageId: string;
+  subject: string;
+  from: string;
+  plain: string;
+  html: string;
+  receivedAt: string;
+  direction: "inbound" | "outbound";
+  messageIdHeader: string | null;
+  labelIds: string[];
+}
+
+function parseGmailMessageForIngest(
+  gmailMsg: GmailMessage,
+  accountEmail: string,
+): ParsedGmailMessage {
+  const from = headerValue(gmailMsg, "From") ?? "";
+  const { plain, html } = extractBody(gmailMsg);
+  const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
+  const fromNormalised = from.toLowerCase();
+  const accountNormalised = accountEmail.toLowerCase();
+
+  return {
+    gmailMessageId: gmailMsg.id,
+    subject: headerValue(gmailMsg, "Subject") ?? "(no subject)",
+    from,
+    plain,
+    html,
+    receivedAt: new Date(parseInt(gmailMsg.internalDate)).toISOString(),
+    direction: hasSentLabel || fromNormalised.includes(accountNormalised) ? "outbound" : "inbound",
+    messageIdHeader: headerValue(gmailMsg, "Message-Id") ??
+      headerValue(gmailMsg, "Message-ID") ?? null,
+    labelIds: gmailMsg.labelIds ?? [],
+  };
 }
 
 async function isGmailLabelsAuthoritative(workspaceId: number): Promise<boolean> {

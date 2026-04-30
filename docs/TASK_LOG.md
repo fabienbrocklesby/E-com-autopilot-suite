@@ -11,6 +11,21 @@ Each entry:
 
 ---
 
+## 2026-04-30 - Backfill Gmail thread context during ingestion
+
+**Problem:** When a customer replied to a Gmail conversation that existed before the dashboard saw it, the webhook only stored the newest Gmail message. Categorisation and playbooks then saw that reply as a contextless new thread.
+
+**Changes made:**
+- `api/services/gmail.ts`: when ingesting a webhook message, `threads.get?format=full` is still used, but ingestion now inserts every missing message from the returned Gmail conversation before categorisation/resume logic runs.
+- Added a shared parser for Gmail message fields so historical and current messages store the same body, direction, received time, labels, and RFC 2822 `Message-ID` data.
+
+**Validation:**
+- `deno fmt api/services/gmail.ts` applied.
+- `deno lint api/services/gmail.ts` passes.
+- `deno check api/services/gmail.ts` passes.
+
+---
+
 ## 2026-04-30 - Gmail labels authoritative routing toggle
 
 **Problem:** Some stores use reliable Gmail filters/labels and do not want the AI to re-categorise those inbound emails or write category labels back to Gmail.
