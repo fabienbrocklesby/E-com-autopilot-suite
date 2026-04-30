@@ -168,7 +168,9 @@ These need answers before Phase 2 starts. Track resolutions here:
 
 ## Gmail label sync
 
-**Source of truth**: two-way sync between dashboard categories and user-created Gmail labels.
+**Default source of truth**: two-way sync between dashboard categories and user-created Gmail labels.
+
+**Optional Gmail-authoritative mode**: when the `gmail_labels_authoritative` setting is `true`, Gmail labels are the routing source of truth. Inbound emails skip AI categorisation; the first Gmail label ID that matches a dashboard category's `gmail_label_id` determines the category, and the active playbook for that category starts with confidence `1`. If no Gmail label matches, the thread goes to `in_review` without an AI categorisation attempt.
 
 ### Behaviours (settled as of Phase 0)
 
@@ -179,12 +181,14 @@ These need answers before Phase 2 starts. Track resolutions here:
 | Delete category in dashboard | Gmail label is NOT deleted automatically (manual cleanup) |
 | Create label in Gmail | Category and blank inactive playbook created on next `/labels/sync` |
 | Rename label in Gmail | On next sync, dashboard sees the old linked label id still exists, so no rename propagates back - the Gmail label takes the dashboard name on next rename sync |
+| Enable Gmail-authoritative mode | Label sync no longer creates or renames Gmail labels from dashboard categories; it only links/imports Gmail labels into dashboard categories |
 
 ### Implementation
 
 - `syncLabels(email, workspaceId)` in `api/services/gmail.ts`
 - Pass 1: categories → Gmail (create missing labels, rename mismatched ones)
 - Pass 2: Gmail → dashboard (import untracked user labels as blank categories with inactive playbooks)
+- Gmail-authoritative mode skips Pass 1 and uses `categoriseFromGmailLabels()` during ingestion
 - `gmailPatch<T>` helper added for `PATCH /gmail/v1/users/{userId}/labels/{id}`
 
 ## What this engine does NOT do (yet)

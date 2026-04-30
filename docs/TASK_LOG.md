@@ -11,6 +11,27 @@ Each entry:
 
 ---
 
+## 2026-04-30 - Gmail labels authoritative routing toggle
+
+**Problem:** Some stores use reliable Gmail filters/labels and do not want the AI to re-categorise those inbound emails or write category labels back to Gmail.
+
+**Changes made:**
+- `frontend/src/routes/settings/+page.svelte`: added a global boolean setting, `gmail_labels_authoritative`, labelled "Use Gmail labels for categories".
+- `api/services/gmail.ts`: when the setting is enabled, inbound ingestion routes from Gmail label IDs instead of calling AI categorisation.
+- `api/services/categorisation.ts`: added `categoriseFromGmailLabels()` and shared category/playbook routing so AI and Gmail-label paths behave consistently after category selection.
+- `api/services/gmail.ts`: label sync now skips dashboard-to-Gmail creation/renames while Gmail-authoritative mode is enabled, and only links/imports Gmail labels into categories.
+- `docs/PLAYBOOK_ENGINE.md`: documented the Gmail-authoritative mode.
+
+**Validation:**
+- `deno fmt services/gmail.ts services/categorisation.ts` applied.
+- `deno check main.ts` passes.
+- `deno lint services/gmail.ts services/categorisation.ts` passes.
+- `npm run check` in `frontend/` passes with 0 errors; existing unrelated warnings remain.
+- Playwright smoke test on local Vite `http://127.0.0.1:3001/settings` verified the new toggle renders and saves on/off through the SvelteKit API proxy when `API_SECRET` is loaded.
+- Postgres verified `settings.gmail_labels_authoritative` ended as `false` after the smoke test reset.
+
+---
+
 ## 2026-04-30 - Inbox thread email rendering
 
 **Problem:** Thread detail pages displayed `body_plain` directly, so HTML emails and plain-text email link patterns such as `View your order<https://...>` looked broken and noisy.

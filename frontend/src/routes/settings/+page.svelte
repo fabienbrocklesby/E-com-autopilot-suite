@@ -24,6 +24,14 @@
 
   const SETTING_DEFS: SettingDef[] = [
     {
+      key: "gmail_labels_authoritative",
+      label: "Use Gmail labels for categories",
+      description:
+        "Skip AI categorisation for inbound email and run the playbook attached to the Gmail label applied by your filters.",
+      hint: "Sync labels after changing Gmail filters or labels so matching categories exist in the dashboard.",
+      type: "boolean",
+    },
+    {
       key: "openai_model",
       label: "OpenAI model",
       description: "Model used for categorisation and draft generation.",

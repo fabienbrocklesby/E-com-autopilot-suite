@@ -4,8 +4,8 @@
  * Reference: https://developers.google.com/gmail/api/reference/rest
  */
 import { execute, query, queryOne, transaction } from "../db/client.ts";
-import { AppError, Category, GmailMessage, GmailThread, Message } from "../types/index.ts";
-import { categoriseAndDraft } from "./categorisation.ts";
+import { AppError, Category, GmailMessage, GmailThread, Message, Setting } from "../types/index.ts";
+import { categoriseAndDraft, categoriseFromGmailLabels } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
 import { resumeRun } from "./playbook/executor.ts";
 import type { PlaybookRun } from "./playbook/types.ts";
@@ -298,8 +298,26 @@ async function ingestMessage(
     return;
   }
 
-  // Run the categorisation pipeline (which may route to a playbook for new threads).
+  const gmailLabelsAuthoritative = await isGmailLabelsAuthoritative(workspaceId);
+  if (gmailLabelsAuthoritative) {
+    logger.info("gmail.labels_authoritative_categorisation", {
+      thread_id: threadRow.id,
+      gmail_label_ids: gmailMsg.labelIds,
+    });
+    await categoriseFromGmailLabels(threadRow.id, gmailMsg.labelIds ?? []);
+    return;
+  }
+
+  // Run the AI categorisation pipeline (which may route to a playbook for new threads).
   await categoriseAndDraft(threadRow.id);
+}
+
+async function isGmailLabelsAuthoritative(workspaceId: number): Promise<boolean> {
+  const setting = await queryOne<Setting>(
+    "SELECT * FROM settings WHERE workspace_id = $1 AND key = 'gmail_labels_authoritative'",
+    [workspaceId],
+  );
+  return setting?.value === "true";
 }
 
 /**
@@ -476,14 +494,14 @@ export async function applyLabel(
 }
 
 /**
- * Synchronise Gmail labels with workspace categories - bidirectional.
+ * Synchronise Gmail labels with workspace categories.
  *
  * Pass 1 (categories → Gmail): For each category without a gmail_label_id,
  *   create the Gmail label. For categories whose stored label no longer exists,
- *   re-create it.
+ *   re-create it. Skipped when Gmail labels are authoritative.
  *
  * Pass 2 (Gmail → categories): For each user-created Gmail label that has no
- *   matching category, create the category so the AI can use it.
+ *   matching category, create the category so routing can use it.
  *
  * Returns the total number of labels/categories created or linked.
  */
@@ -520,9 +538,11 @@ export async function syncLabels(
     "SELECT * FROM categories WHERE workspace_id = $1",
     [workspaceId],
   );
+  const gmailLabelsAuthoritative = await isGmailLabelsAuthoritative(workspaceId);
 
   // Build a set of names already covered by a category (lowercase).
   const coveredNames = new Set(categories.map((c) => c.name.toLowerCase()));
+  const categoryByName = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
   const coveredLabelIds = new Set(
     categories
       .map((c) => c.gmail_label_id)
@@ -532,55 +552,59 @@ export async function syncLabels(
   let synced = 0;
 
   // ── Pass 1: categories → Gmail ─────────────────────────────────────────────
-  for (const cat of categories) {
-    // Already linked - check if the category was renamed and propagate to Gmail.
-    if (cat.gmail_label_id && labelById.has(cat.gmail_label_id)) {
-      const gmailName = labelById.get(cat.gmail_label_id);
-      if (gmailName?.toLowerCase() !== cat.name.toLowerCase()) {
-        await gmailPatch<{ id: string; name: string }>(
-          email,
-          `/labels/${cat.gmail_label_id}`,
-          { name: cat.name },
+  if (!gmailLabelsAuthoritative) {
+    for (const cat of categories) {
+      // Already linked - check if the category was renamed and propagate to Gmail.
+      if (cat.gmail_label_id && labelById.has(cat.gmail_label_id)) {
+        const gmailName = labelById.get(cat.gmail_label_id);
+        if (gmailName?.toLowerCase() !== cat.name.toLowerCase()) {
+          await gmailPatch<{ id: string; name: string }>(
+            email,
+            `/labels/${cat.gmail_label_id}`,
+            { name: cat.name },
+          );
+          synced++;
+          logger.info("gmail.label_renamed", {
+            workspace_id: workspaceId,
+            old_name: gmailName,
+            new_name: cat.name,
+          });
+        }
+        coveredLabelIds.add(cat.gmail_label_id);
+        continue;
+      }
+
+      // A label with the same name already exists in Gmail - link it.
+      const existingId = labelByName.get(cat.name.toLowerCase());
+      if (existingId) {
+        await execute(
+          "UPDATE categories SET gmail_label_id = $1 WHERE id = $2",
+          [existingId, cat.id],
         );
         synced++;
-        logger.info("gmail.label_renamed", {
-          workspace_id: workspaceId,
-          old_name: gmailName,
-          new_name: cat.name,
-        });
+        coveredLabelIds.add(existingId);
+        continue;
       }
-      coveredLabelIds.add(cat.gmail_label_id);
-      continue;
-    }
 
-    // A label with the same name already exists in Gmail - link it.
-    const existingId = labelByName.get(cat.name.toLowerCase());
-    if (existingId) {
+      // Create a new Gmail label for this category.
+      const created = await gmailPost<{ id: string; name: string }>(
+        email,
+        "/labels",
+        {
+          name: cat.name,
+          labelListVisibility: "labelShow",
+          messageListVisibility: "show",
+        },
+      );
       await execute(
         "UPDATE categories SET gmail_label_id = $1 WHERE id = $2",
-        [existingId, cat.id],
+        [created.id, cat.id],
       );
       synced++;
-      coveredLabelIds.add(existingId);
-      continue;
+      coveredLabelIds.add(created.id);
     }
-
-    // Create a new Gmail label for this category.
-    const created = await gmailPost<{ id: string; name: string }>(
-      email,
-      "/labels",
-      {
-        name: cat.name,
-        labelListVisibility: "labelShow",
-        messageListVisibility: "show",
-      },
-    );
-    await execute(
-      "UPDATE categories SET gmail_label_id = $1 WHERE id = $2",
-      [created.id, cat.id],
-    );
-    synced++;
-    coveredLabelIds.add(created.id);
+  } else {
+    logger.info("gmail.label_sync_gmail_authoritative", { workspace_id: workspaceId });
   }
 
   // ── Pass 2: Gmail → categories ────────────────────────────────────────────
@@ -592,12 +616,30 @@ export async function syncLabels(
       SYSTEM_LABEL_PREFIXES.some((p) => label.name.toUpperCase().startsWith(p));
     if (isSystem) continue;
 
-    // Skip if a category already covers this label name.
-    if (coveredNames.has(label.name.toLowerCase())) continue;
-
     // Skip if a category is already linked to this label id.
     if (coveredLabelIds.has(label.id)) continue;
 
+    const sameNameCategory = categoryByName.get(label.name.toLowerCase());
+    if (sameNameCategory) {
+      await execute(
+        "UPDATE categories SET gmail_label_id = $1 WHERE id = $2",
+        [label.id, sameNameCategory.id],
+      );
+      coveredLabelIds.add(label.id);
+      synced++;
+      logger.info("gmail.label_linked", {
+        workspace_id: workspaceId,
+        category_id: sameNameCategory.id,
+        label_name: label.name,
+        label_id: label.id,
+      });
+      continue;
+    }
+
+    // Skip if a category already covers this label name.
+    if (coveredNames.has(label.name.toLowerCase())) continue;
+
+    let createdCategory: Category | null = null;
     await transaction(async (tx) => {
       const rows = await tx.queryObject<Category>({
         text:
@@ -608,6 +650,7 @@ export async function syncLabels(
       });
       const created = rows.rows[0];
       if (!created) throw new AppError(500, "Failed to create category from Gmail label");
+      createdCategory = created;
 
       await tx.queryObject({
         text: `INSERT INTO playbooks (workspace_id, category_id, name, steps, version, is_active)
@@ -617,6 +660,7 @@ export async function syncLabels(
     });
 
     coveredNames.add(label.name.toLowerCase());
+    if (createdCategory) categoryByName.set(label.name.toLowerCase(), createdCategory);
     coveredLabelIds.add(label.id);
     synced++;
     logger.info("gmail.label_imported", {
