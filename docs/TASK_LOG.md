@@ -11,6 +11,23 @@ Each entry:
 
 ---
 
+## 2026-04-30 - Inbox thread email rendering
+
+**Problem:** Thread detail pages displayed `body_plain` directly, so HTML emails and plain-text email link patterns such as `View your order<https://...>` looked broken and noisy.
+
+**Changes made:**
+- `frontend/src/routes/threads/[id]/+page.svelte`: renders each message in a sandboxed `srcdoc` email frame using stored `body_html` when available.
+- Added a plain-text fallback that escapes text, preserves line breaks, and turns common `Label<https://...>` email links into readable anchors.
+- Email frames auto-size to their content and use a light email document surface so real email markup is isolated from dashboard styling.
+
+**Validation:**
+- `npm run check` in `frontend/` passes with 0 errors; existing unrelated warnings remain.
+- Docker stack started with `docker compose up -d postgres api frontend`.
+- Verified via Postgres that stored messages contain both HTML and plain-only cases.
+- Verified in Playwright on `http://localhost:3000/threads/115` that stored HTML messages render in email frames with no raw angle-bracket URL artifacts.
+- Inserted and removed a temporary plain-only test thread; Playwright confirmed `View your order<https://...>` renders as link text with the correct URL and no visible raw `<https://...>`.
+- Verified mobile viewport width `390px` has no message bubble overflow.
+
 ## 2026-04-30 - Production playbook parser guide packaging fix
 
 **Problem:** Production `POST /playbooks/parse` returned 500 because the API container could not read `/app/docs/PLAYBOOK_DESIGN_GUIDE.md`.

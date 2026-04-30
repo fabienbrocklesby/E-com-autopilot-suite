@@ -83,6 +83,125 @@
     return execStepMeta[type] ?? defaultExecMeta;
   }
 
+  const EMAIL_DOCUMENT_HEAD = `
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <base target="_blank">
+    <style>
+      :root { color-scheme: light; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #ffffff;
+        color: #111827;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+      }
+      body { min-width: 0; }
+      img, video { max-width: 100%; height: auto; }
+      table { max-width: 100%; border-collapse: collapse; }
+      a { color: #2563eb; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+      blockquote { margin: 12px 0; padding-left: 12px; border-left: 3px solid #d1d5db; color: #4b5563; }
+      pre, code { white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .plain-email { white-space: normal; }
+    </style>
+  `;
+
+  function escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function escapeAttribute(value: string): string {
+    return escapeHtml(value).replace(/`/g, "&#96;");
+  }
+
+  function plainEmailToHtml(text: string): string {
+    const linkedText = escapeHtml(text).replace(
+      /(^|[\n\r])([^<\n\r]{1,120})&lt;(https?:\/\/[^&<>\s]+)&gt;/g,
+      (_match, lineStart: string, label: string, url: string) =>
+        `${lineStart}<a href="${escapeAttribute(url)}" rel="noopener noreferrer">${label.trim()}</a>`,
+    );
+
+    return `<div class="plain-email">${linkedText.replace(/\r?\n/g, "<br>")}</div>`;
+  }
+
+  function wrapEmailDocument(content: string): string {
+    const html = content.trim();
+    if (/<html[\s>]/i.test(html)) {
+      if (/<head[\s>]/i.test(html)) {
+        return html.replace(/<head([^>]*)>/i, `<head$1>${EMAIL_DOCUMENT_HEAD}`);
+      }
+      return html.replace(/<html([^>]*)>/i, `<html$1><head>${EMAIL_DOCUMENT_HEAD}</head>`);
+    }
+
+    return `<!doctype html><html><head>${EMAIL_DOCUMENT_HEAD}</head><body>${html}</body></html>`;
+  }
+
+  function emailFrameSrcdoc(message: Message): string {
+    const html = message.body_html?.trim();
+    return wrapEmailDocument(html || plainEmailToHtml(message.body_plain ?? ""));
+  }
+
+  function autosizeEmailFrame(node: HTMLIFrameElement) {
+    let observer: ResizeObserver | null = null;
+    let timeout: number | undefined;
+    let attempts = 0;
+
+    const resize = () => {
+      const doc = node.contentDocument;
+      if (!doc) return;
+
+      const height = Math.max(
+        doc.body?.scrollHeight ?? 0,
+        doc.documentElement?.scrollHeight ?? 0,
+        96,
+      );
+      node.style.height = `${Math.min(height, 1800)}px`;
+    };
+
+    const scheduleResize = () => {
+      window.clearTimeout(timeout);
+      timeout = window.setTimeout(() => {
+        resize();
+        if (attempts < 8) {
+          attempts++;
+          scheduleResize();
+        }
+      }, attempts === 0 ? 0 : 180);
+    };
+
+    const handleLoad = () => {
+      attempts = 0;
+      observer?.disconnect();
+      observer = null;
+      scheduleResize();
+
+      const doc = node.contentDocument;
+      if (doc?.body && "ResizeObserver" in window) {
+        observer = new ResizeObserver(scheduleResize);
+        observer.observe(doc.body);
+      }
+    };
+
+    node.addEventListener("load", handleLoad);
+    scheduleResize();
+
+    return {
+      destroy() {
+        window.clearTimeout(timeout);
+        observer?.disconnect();
+        node.removeEventListener("load", handleLoad);
+      },
+    };
+  }
+
   function execSummary(stepType: string, output: Record<string, unknown> | null): string {
     if (!output) return "";
     switch (stepType) {
@@ -410,7 +529,15 @@
                 <span class="bubble-from">{message.from_address}</span>
                 <span class="bubble-date">{new Date(message.received_at).toLocaleString()}</span>
               </div>
-              <div class="bubble-body">{message.body_plain}</div>
+              <iframe
+                class="email-frame"
+                class:html-email={Boolean(message.body_html?.trim())}
+                title="Email from {message.from_address}"
+                srcdoc={emailFrameSrcdoc(message)}
+                sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+                referrerpolicy="no-referrer"
+                use:autosizeEmailFrame
+              ></iframe>
             </div>
           </div>
         {/each}
@@ -711,17 +838,20 @@
   }
 
   .bubble {
-    max-width: 72%;
-    padding: 12px 16px;
+    width: min(760px, 92%);
+    max-width: 92%;
+    padding: 12px 14px 14px;
     background: var(--color-surface-2);
     border: 1px solid var(--color-border);
-    border-radius: 16px 16px 16px 4px;
+    border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 6px;
+    overflow: hidden;
   }
 
   .bubble-wrapper.outbound .bubble {
+    width: min(640px, 82%);
     background: rgba(99, 102, 241, 0.12);
     border-color: rgba(99, 102, 241, 0.25);
-    border-radius: 16px 16px 4px 16px;
+    border-radius: var(--radius-lg) var(--radius-lg) 6px var(--radius-lg);
   }
 
   .bubble-meta {
@@ -751,12 +881,19 @@
     white-space: nowrap;
   }
 
-  .bubble-body {
-    font-size: 13.5px;
-    line-height: 1.65;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--color-text);
+  .email-frame {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    border: 0;
+    border-radius: 8px;
+    background: #ffffff;
+    color-scheme: light;
+  }
+
+  .email-frame.html-email {
+    min-height: 180px;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
   }
 
   /* ─── Drafts ─── */
@@ -992,7 +1129,12 @@
     }
 
     .bubble {
-      max-width: 88%;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .bubble-wrapper.outbound .bubble {
+      width: 94%;
     }
 
     .header-actions {
