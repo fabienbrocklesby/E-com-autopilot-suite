@@ -62,6 +62,25 @@ export interface EvaluateStep {
   optional_context?: string[];
 }
 
+export interface TriageRoute {
+  label: string;
+  description: string;
+  goto: string;
+}
+
+export interface TriageStep {
+  id: string;
+  type: "triage";
+  /** What the AI is deciding about the thread */
+  goal: string;
+  /** Candidate routes the AI may choose from */
+  routes: TriageRoute[];
+  /** Safe route when the AI is unsure or returns an invalid route */
+  fallback_goto: string;
+  /** Optional minimum confidence required to take the chosen route */
+  confidence_threshold?: number;
+}
+
 export interface ManualApprovalStep {
   id: string;
   type: "manual_approval";
@@ -112,6 +131,7 @@ export type PlaybookStep =
   | AskCustomerStep
   | BranchStep
   | EvaluateStep
+  | TriageStep
   | ManualApprovalStep
   | SendReplyStep
   | CompleteStep

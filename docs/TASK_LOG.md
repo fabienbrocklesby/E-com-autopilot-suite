@@ -11,6 +11,24 @@ Each entry:
 
 ---
 
+## 2026-05-01 - Triage step for automated Shopify no-action emails
+
+**Problem:** A production Shopify new-order notification was categorised into the Shopify/order category and ran the associated playbook even though it was informational only. The playbook prompt asked the AI to "evaluate whether the email is worth replying to", but the existing `evaluate` step is a variable-presence gate, not an intent/actionability router.
+
+**Changes made:**
+- Added a first-class `triage` playbook step for AI route selection on intent/actionability decisions.
+- `api/services/playbook/handlers/triage.ts`: reads the full thread context, chooses from configured routes, and falls back to the safe review/action route when the AI is unsure, below threshold, invalid, or unparseable.
+- Wired `triage` into playbook types, registry, parser validation, and dry-run traces.
+- `docs/PLAYBOOK_DESIGN_GUIDE.md` and packaged `api/docs/PLAYBOOK_DESIGN_GUIDE.md`: instruct the parser to use `triage` for "worth replying to" / automated notification flows, with a Shopify example where informational order notifications route directly to `complete`.
+- `api/services/playbook/handlers/triage_test.ts`: added regression coverage for high-confidence no-action routing and safe fallback behavior.
+
+**Validation:**
+- `deno fmt` applied to changed backend playbook files.
+- `deno check main.ts services/playbook/handlers/triage_test.ts` passes.
+- Targeted `deno lint` on changed playbook engine/parser files passes.
+- `deno test --allow-env --allow-net --allow-read services/playbook/handlers/triage_test.ts` passes: 3 tests.
+- Confirmed `docs/PLAYBOOK_DESIGN_GUIDE.md` and `api/docs/PLAYBOOK_DESIGN_GUIDE.md` are synced.
+
 ## 2026-05-01 - Reply to customer email from contact form notifications
 
 **Problem:** Shopify/contact form notifications arrive from an automated store sender, but the real customer email is inside the form body. Approving a draft or sending a manual reply would address the platform sender instead of the customer.

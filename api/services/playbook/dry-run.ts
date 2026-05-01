@@ -5,16 +5,18 @@
 import { queryOne } from "../../db/client.ts";
 import { chatCompletion } from "../ai.ts";
 import type {
-  Playbook,
-  PlaybookStep,
   AskCustomerStep,
   BranchStep,
-  EvaluateStep,
-  SendReplyStep,
   EscalateStep,
-  ManualApprovalStep,
+  EvaluateStep,
   ExtractStep,
+  ManualApprovalStep,
+  Playbook,
+  PlaybookStep,
+  SendReplyStep,
+  TriageStep,
 } from "./types.ts";
+import { resolveTriageDecision } from "./handlers/triage.ts";
 
 export interface DryRunTraceEntry {
   stepId: string;
@@ -60,8 +62,9 @@ export async function dryRunPlaybook(
   );
   if (!playbook) throw new Error(`Playbook ${playbookId} not found`);
 
-  const steps: PlaybookStep[] =
-    typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+  const steps: PlaybookStep[] = typeof playbook.steps === "string"
+    ? JSON.parse(playbook.steps)
+    : playbook.steps;
 
   const context: Record<string, unknown> = {};
   const trace: DryRunTraceEntry[] = [];
@@ -88,7 +91,10 @@ export async function dryRunPlaybook(
     switch (step.type) {
       case "extract": {
         const extractStep = step as ExtractStep;
-        const prompt = `Extract the following variables from this email. Return JSON with the variable names as keys and null for missing values.\nVariables: ${extractStep.variables.join(", ")}\n\nEmail:\n${emailContent}`;
+        const prompt =
+          `Extract the following variables from this email. Return JSON with the variable names as keys and null for missing values.\nVariables: ${
+            extractStep.variables.join(", ")
+          }\n\nEmail:\n${emailContent}`;
         let extracted: Record<string, unknown> = {};
         let aiResponse = "";
         try {
@@ -142,7 +148,9 @@ export async function dryRunPlaybook(
         const askStep = step as AskCustomerStep;
         const message = askStep.message
           ? interpolate(typeof askStep.message === "string" ? askStep.message : "", context)
-          : `[AI would ask for: ${(askStep.required_context ?? []).join(", ")} - goal: ${askStep.goal ?? "gather info"}]`;
+          : `[AI would ask for: ${(askStep.required_context ?? []).join(", ")} - goal: ${
+            askStep.goal ?? "gather info"
+          }]`;
         trace.push({
           stepId: step.id,
           stepType: step.type,
@@ -160,7 +168,9 @@ export async function dryRunPlaybook(
       case "evaluate": {
         const evalStep = step as EvaluateStep;
         const missing = (evalStep.required_context ?? []).filter((v) => context[v] == null);
-        const routeTo = missing.length === 0 ? evalStep.if_satisfied_goto : evalStep.if_missing_goto;
+        const routeTo = missing.length === 0
+          ? evalStep.if_satisfied_goto
+          : evalStep.if_missing_goto;
         trace.push({
           stepId: step.id,
           stepType: step.type,
@@ -173,18 +183,73 @@ export async function dryRunPlaybook(
         break;
       }
 
+      case "triage": {
+        const triageStep = step as TriageStep;
+        const routeLines = triageStep.routes
+          .map((route) => `- ${route.label}: ${route.description}`)
+          .join("\n");
+        const prompt = `Choose the best route for this email thread.
+
+GOAL:
+${triageStep.goal}
+
+ROUTES:
+${routeLines}
+
+EMAIL:
+${emailContent}
+
+Return JSON only with route, confidence, and reasoning.`;
+        let aiResponse = "";
+        try {
+          aiResponse = await chatCompletion(
+            [{ role: "user", content: prompt }],
+            "gpt-4o",
+            { type: "json_object" },
+          );
+          const resolved = resolveTriageDecision(triageStep, JSON.parse(aiResponse));
+          trace.push({
+            stepId: step.id,
+            stepType: step.type,
+            status: "success",
+            summary: resolved.usedFallback
+              ? `triage: ${resolved.route} (${resolved.confidence}) fell back to ${resolved.stepId}`
+              : `triage: ${resolved.route} (${resolved.confidence}) → ${resolved.stepId}`,
+            aiCall: { prompt, response: aiResponse },
+          });
+          currentStepId = resolved.stepId;
+        } catch {
+          trace.push({
+            stepId: step.id,
+            stepType: step.type,
+            status: "success",
+            summary: `triage: AI failed, falling back to ${triageStep.fallback_goto}`,
+            aiCall: aiResponse ? { prompt, response: aiResponse } : undefined,
+          });
+          currentStepId = triageStep.fallback_goto;
+        }
+        break;
+      }
+
       case "send_reply": {
         const sendStep = step as SendReplyStep;
         let message: string;
         if (sendStep.goal) {
           const refs = (sendStep.reference_context ?? []).map((k) => `${k}=${context[k] ?? "?"}`);
-          message = `[AI would draft reply - goal: "${sendStep.goal}"${refs.length > 0 ? `, referencing: ${refs.join(", ")}` : ""}]`;
+          message = `[AI would draft reply - goal: "${sendStep.goal}"${
+            refs.length > 0 ? `, referencing: ${refs.join(", ")}` : ""
+          }]`;
         } else if (typeof sendStep.message === "string") {
           message = interpolate(sendStep.message, context);
-        } else if (sendStep.message && "ai_generate_using_category_voice" in (sendStep.message as object)) {
+        } else if (
+          sendStep.message && "ai_generate_using_category_voice" in (sendStep.message as object)
+        ) {
           message = "[AI would generate reply using category voice and tone]";
         } else if (sendStep.message) {
-          message = interpolate((sendStep.message as { from_template: string }).from_template, context);
+          message = interpolate(
+            (sendStep.message as { from_template: string }).from_template,
+            context,
+          );
         } else {
           message = "[No message or goal configured]";
         }
@@ -202,7 +267,9 @@ export async function dryRunPlaybook(
       case "manual_approval": {
         const approvalStep = step as ManualApprovalStep;
         const captureNote = approvalStep.capture_input
-          ? ` (captures input: "${approvalStep.input_prompt ?? "notes"}" → ${approvalStep.input_context_key ?? "human_notes"})`
+          ? ` (captures input: "${approvalStep.input_prompt ?? "notes"}" → ${
+            approvalStep.input_context_key ?? "human_notes"
+          })`
           : "";
         trace.push({
           stepId: step.id,
@@ -220,7 +287,8 @@ export async function dryRunPlaybook(
           stepId: step.id,
           stepType: step.type,
           status: "skipped",
-          summary: "Would search sheet for matching row (not executed in dry-run; row_number set to 1 for simulation)",
+          summary:
+            "Would search sheet for matching row (not executed in dry-run; row_number set to 1 for simulation)",
         });
         context["row_number"] = 1;
         currentStepId = nextStep(steps, step.id);
@@ -239,7 +307,12 @@ export async function dryRunPlaybook(
       }
 
       case "complete": {
-        trace.push({ stepId: step.id, stepType: step.type, status: "success", summary: "Run complete" });
+        trace.push({
+          stepId: step.id,
+          stepType: step.type,
+          status: "success",
+          summary: "Run complete",
+        });
         finalStatus = "complete";
         currentStepId = null;
         break;
@@ -260,7 +333,12 @@ export async function dryRunPlaybook(
 
       default: {
         const unknownStep = step as { id?: string; type?: string };
-        trace.push({ stepId: unknownStep.id ?? "?", stepType: unknownStep.type ?? "unknown", status: "skipped", summary: `Unknown step type` });
+        trace.push({
+          stepId: unknownStep.id ?? "?",
+          stepType: unknownStep.type ?? "unknown",
+          status: "skipped",
+          summary: `Unknown step type`,
+        });
         currentStepId = nextStep(steps, unknownStep.id ?? "");
       }
     }
@@ -268,7 +346,12 @@ export async function dryRunPlaybook(
 
   if (iterations >= MAX_ITERATIONS) {
     finalStatus = "failed";
-    trace.push({ stepId: "safety", stepType: "safety", status: "failed", summary: "Hit max iterations safety limit" });
+    trace.push({
+      stepId: "safety",
+      stepType: "safety",
+      status: "failed",
+      summary: "Hit max iterations safety limit",
+    });
   }
 
   return {

@@ -7,7 +7,7 @@
  * In production, a deploy restarts the process which re-reads the file.
  * In development, the cache is bypassed so edits take effect immediately.
  */
-import { query, queryOne } from "../../db/client.ts";
+import { query } from "../../db/client.ts";
 import { chatCompletion } from "../ai.ts";
 import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import type { PlaybookStep } from "./types.ts";
@@ -19,6 +19,7 @@ const VALID_STEP_TYPES = [
   "ask_customer",
   "branch",
   "evaluate",
+  "triage",
   "manual_approval",
   "send_reply",
   "complete",
@@ -177,6 +178,30 @@ export async function parsePlaybook(
       }
       if (s.if_escalate_goto && !stepIds.has(s.if_escalate_goto)) {
         warnings.push(`Step "${step.id}": if_escalate_goto "${s.if_escalate_goto}" not found`);
+      }
+    }
+    if (step.type === "triage") {
+      const s = step as {
+        routes?: Array<{ label?: string; goto?: string }>;
+        fallback_goto?: string;
+      };
+      if (!Array.isArray(s.routes) || s.routes.length === 0) {
+        warnings.push(`Step "${step.id}": triage routes missing`);
+      } else {
+        for (const route of s.routes) {
+          if (!route.goto || !stepIds.has(route.goto)) {
+            warnings.push(
+              `Step "${step.id}": triage route "${
+                route.label ?? "?"
+              }" goto "${route.goto}" not found`,
+            );
+          }
+        }
+      }
+      if (!s.fallback_goto) {
+        warnings.push(`Step "${step.id}": fallback_goto missing`);
+      } else if (!stepIds.has(s.fallback_goto)) {
+        warnings.push(`Step "${step.id}": fallback_goto "${s.fallback_goto}" not found`);
       }
     }
     if (step.type === "manual_approval") {

@@ -33,6 +33,14 @@ RIGHT: Only add manual_approval when the description says a human needs to do so
 IF the description says "no need to check the sheet", "no sheet lookup", "don't look up the sheet", "no sheet", or any equivalent phrasing:
   → Do NOT generate find_sheet_row or update_sheet steps. The client explicitly ruled them out.
 
+IF the description says to decide whether an email is worth replying to, whether it needs action, or whether automated notifications should be ignored:
+  → Use a `triage` step. Do NOT fake this with `evaluate`.
+
+IF the description is for automated platform emails (Shopify, marketplace, payment, shipping, invoices, receipts, order notifications):
+  → Use `triage` to separate informational notifications from real questions/action requests.
+  → Informational notifications route directly to `complete`.
+  → Real questions/action requests route to `send_reply` or `manual_approval`, depending on the description.
+
 Sheet steps require EXPLICIT MENTION in the description. Absence of mention means absence of steps.
 When in doubt: fewer steps. The client can always add steps later. You cannot un-send a reply.
 
@@ -41,9 +49,9 @@ When in doubt: fewer steps. The client can always add steps later. You cannot un
 Happy path top to bottom. Fallbacks at the bottom. Terminals last.
 
 CORRECT ORDER:
-1. extract (always first)
+1. extract (first when variables are needed) OR triage (first for actionability/no-action routing)
 2. find_sheet_row (if needed by the description)
-3. evaluate (the routing decision)
+3. evaluate (variable-presence routing) OR triage (intent/actionability routing)
 4. update_sheet, manual_approval, send_reply (the happy path actions)
 5. complete (happy terminal)
 6. ask_customer (fallback, only reached via evaluate's if_missing_goto)
@@ -51,15 +59,22 @@ CORRECT ORDER:
 
 ask_customer MUST be below the happy path. The engine advances sequentially by default. If ask_customer sits between find_sheet_row and evaluate, the happy path accidentally falls into it.
 
+For triage-first notification playbooks, the happy no-action path is often:
+triage → complete
+
+The actionable path is reached only through triage routing:
+triage → send_reply/manual_approval → complete
+
 ## Available step types
 
 ### extract
 
 **Purpose:** AI reads the email thread and pulls named variables into the context bag.
 
-**When to use:** Always first. Run once at the start of every playbook.
+**When to use:** First when later steps need extracted variables.
 
 **When NOT to use:** Don't use mid-flow to re-read the same thread. If a customer replies and the run resumes, the engine re-runs extract automatically from the `on_reply_goto` target.
+Don't use extract just to support a triage-only notification flow. `triage` reads the thread itself.
 
 **Config schema:**
 ```json
@@ -208,6 +223,50 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 - `condition` (string, required): Pattern: `"context.VAR != null"`, `"context.VAR == null"`, or `"context.VAR"` (truthy check).
 - `if_true` (string, required): Step ID when condition is true.
 - `if_false` (string, required): Step ID when condition is false.
+
+### triage
+
+**Purpose:** AI-driven route selection for intent/actionability decisions. The AI reads the email thread and chooses one configured route.
+
+**When to use:** When the playbook must decide what kind of email this is or whether it needs action: "is this worth replying to?", "is this an automated notification?", "does this need a human?", "is this a real customer/supplier request?"
+
+**When NOT to use:** Don't use for simple missing-variable checks. Use `evaluate` for "do we have order_number/refund_reason/row_number?" Don't use triage when the flow should always take the same action.
+
+**Config schema:**
+```json
+{
+  "id": "triage_1",
+  "type": "triage",
+  "goal": "Decide whether this Shopify email needs a response or can be closed as informational.",
+  "routes": [
+    {
+      "label": "no_action",
+      "description": "Automated receipt, order notification, payment notice, invoice, shipping notice, marketplace update, or no-reply notification with no question or requested task.",
+      "goto": "complete_1"
+    },
+    {
+      "label": "needs_response",
+      "description": "A real customer question, supplier issue, complaint, exception, or action request that needs a reply or operator review.",
+      "goto": "send_1"
+    }
+  ],
+  "fallback_goto": "send_1",
+  "confidence_threshold": 0.7
+}
+```
+
+**Fields:**
+- `goal` (string, required): What the AI is deciding.
+- `routes` (array, required): Each route is `{ label, description, goto }`. Labels must be unique and stable.
+- `fallback_goto` (string, required): Safe route when the AI is unsure, below threshold, or returns an invalid label. For notification triage, this should be the human-review/action route, not `complete`.
+- `confidence_threshold` (number, optional): Minimum confidence to take the chosen route. Use `0.7` for no-action notification triage so uncertain emails get reviewed.
+
+**Design rules:**
+- Use `triage` for business/intent routing. Use `evaluate` for context-variable readiness.
+- Informational automated notifications can route straight to `complete`.
+- The no-action route description must explicitly include receipts, order notifications, payment notices, invoices, shipping/fulfilment notices, marketplace notices, and no-reply notifications when those should close silently.
+- The actionable route description must explicitly include customer questions, supplier issues, complaints, exceptions, and action requests.
+- For automated notification flows, set `fallback_goto` to the actionable/human-review path. Never silently close an uncertain thread.
 
 ### evaluate
 
@@ -884,7 +943,55 @@ Description: "When someone asks about tracking or where their order is, ask them
 - evaluate checks for order_number; if present, goes straight to send_reply.
 - ask_customer is at the bottom - only reached via evaluate's if_missing_goto.
 
-### Example 6: Refund with reason required BEFORE updating status
+### Example 6: Automated Shopify notifications - close no-action emails
+
+Description: "This playbook handles automated Shopify emails, usually receipts, order confirmations, shipping notices, payment notices, or marketplace notifications. Do not check or update the Google Sheet. First, evaluate whether the email is worth replying to. Most Shopify receipt/order notification emails should not receive a reply. If the email is only an automated receipt, or a notification letting us know someone purchased from us, confirmation, dispatch notice, marketplace update, invoice, payment notice, or no-reply notification, close the playbook immediately with no customer reply. If the email contains a real customer question, supplier issue, action request, or something that appears to need a human response, draft a short helpful reply using only the information available in the email thread. Then pause for human approval before sending. After approval, send the reply and complete the playbook."
+
+```json
+{
+  "steps": [
+    {
+      "id": "triage_1",
+      "type": "triage",
+      "goal": "Decide whether this Shopify/platform email is informational only or needs a response.",
+      "routes": [
+        {
+          "label": "no_action",
+          "description": "Automated receipt, order confirmation, new order notification, shipping/dispatch notice, marketplace update, invoice, payment notice, or no-reply notification with no customer question, supplier issue, complaint, exception, or requested task.",
+          "goto": "complete_1"
+        },
+        {
+          "label": "needs_response",
+          "description": "A real customer question, supplier issue, complaint, delivery/order exception, or action request that appears to need a human/operator response.",
+          "goto": "send_1"
+        }
+      ],
+      "fallback_goto": "send_1",
+      "confidence_threshold": 0.7
+    },
+    {
+      "id": "send_1",
+      "type": "send_reply",
+      "goal": "Draft a short helpful reply using only information available in the email thread.",
+      "require_approval": true
+    },
+    {
+      "id": "complete_1",
+      "type": "complete"
+    }
+  ]
+}
+```
+
+**Why this shape:**
+- NO extract - triage reads the thread directly and no later step needs variables.
+- NO find_sheet_row or update_sheet - the description explicitly forbids sheet work.
+- `triage` is used instead of `evaluate` because this is an actionability/intent decision, not a missing-variable check.
+- Normal Shopify order emails like "No Name placed order #5020" are informational and route to `complete_1` with no reply.
+- `fallback_goto` points to `send_1`, not `complete_1`, so uncertain emails get human-reviewed instead of silently closed.
+- `send_1.require_approval` pauses the draft for human approval before anything is sent.
+
+### Example 7: Refund with reason required BEFORE updating status
 
 Description: "When someone asks for a refund, find them in the sheet using their name or what they bought. Reply to them asking why / what's wrong with the product (very important, we need to ask what's wrong before actually going ahead). Update status to Refund Requested. Wait for a response, then regardless of the response just wait for me to process the refund in Stripe and enter the details. Then update to Refunded with my notes and send a casual reply confirming."
 
