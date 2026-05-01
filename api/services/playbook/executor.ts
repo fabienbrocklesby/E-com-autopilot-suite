@@ -1,7 +1,7 @@
 /**
  * Playbook executor - the dispatch loop that advances a run through its steps.
  */
-import { query, queryOne, execute, transaction } from "../../db/client.ts";
+import { execute, query, queryOne } from "../../db/client.ts";
 import { getHandler } from "./registry.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
@@ -10,13 +10,13 @@ import { publish } from "../event-bus.ts";
 import { fetchThreadListItem } from "../../db/queries.ts";
 import { getStoreProfile } from "../store-profile.ts";
 import type {
+  AskCustomerStep,
   Playbook,
   PlaybookRun,
   PlaybookStep,
   RunContext,
-  StepResult,
-  AskCustomerStep,
   StepExecution,
+  StepResult,
 } from "./types.ts";
 
 // Retry delay sequence in seconds: 5min, 15min, 30min, 1h, 2h
@@ -39,6 +39,7 @@ interface RunMessage {
   id: number;
   from_address: string;
   body_plain: string;
+  body_html: string;
   direction: "inbound" | "outbound";
   received_at: Date;
   message_id_header: string | null;
@@ -74,10 +75,15 @@ async function escalateRunDueToLoop(
   );
   await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
   logger.error("playbook.run_escalated", { run_id: runId, reason });
-  await sendAlert(workspaceId, "run_escalated", { run_id: runId, thread_id: threadId, reason }).catch(() => {});
+  await sendAlert(workspaceId, "run_escalated", { run_id: runId, thread_id: threadId, reason })
+    .catch(() => {});
   const threadItem = await fetchThreadListItem(threadId, workspaceId);
   if (threadItem) {
-    publish({ type: "thread_updated", workspaceId, thread: threadItem as unknown as Record<string, unknown> });
+    publish({
+      type: "thread_updated",
+      workspaceId,
+      thread: threadItem as unknown as Record<string, unknown>,
+    });
   }
   return { runId, status: "escalated", currentStepId, context: variables };
 }
@@ -102,11 +108,14 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   if (!playbook) throw new Error(`Playbook ${run.playbook_id} not found`);
 
   // Parse steps from JSONB if needed
-  const steps: PlaybookStep[] =
-    typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+  const steps: PlaybookStep[] = typeof playbook.steps === "string"
+    ? JSON.parse(playbook.steps)
+    : playbook.steps;
 
   // Load the thread
-  const thread = await queryOne<{ id: number; gmail_thread_id: string; subject: string; workspace_id: number }>(
+  const thread = await queryOne<
+    { id: number; gmail_thread_id: string; subject: string; workspace_id: number }
+  >(
     "SELECT id, gmail_thread_id, subject, workspace_id FROM threads WHERE id = $1",
     [run.thread_id],
   );
@@ -114,7 +123,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
   // Load messages
   const messages = await query<RunMessage>(
-    "SELECT id, from_address, body_plain, direction, received_at, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
+    "SELECT id, from_address, body_plain, body_html, direction, received_at, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
     [run.thread_id],
   );
 
@@ -135,8 +144,9 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   const storeProfile = await getStoreProfile(run.workspace_id);
 
   // Build context
-  const variables: Record<string, unknown> =
-    typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+  const variables: Record<string, unknown> = typeof run.context === "string"
+    ? JSON.parse(run.context)
+    : { ...run.context };
 
   let currentStepId = run.current_step_id;
   let status = run.status;
@@ -200,7 +210,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3 WHERE id = $4",
         ["failed", currentStepId, JSON.stringify(variables), runId],
       );
-  logger.error("playbook.step_not_found", { run_id: runId, step_id: currentStepId });
+      logger.error("playbook.step_not_found", { run_id: runId, step_id: currentStepId });
       break;
     }
 
@@ -265,9 +275,17 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         runId,
         threadId: run.thread_id,
         execution: {
-          id: execId, run_id: runId, step_id: step.id, step_type: step.type,
-          status: "failed", input: step, output: null, error: String(err),
-          ai_calls: null, created_at: new Date(), completed_at: new Date(),
+          id: execId,
+          run_id: runId,
+          step_id: step.id,
+          step_type: step.type,
+          status: "failed",
+          input: step,
+          output: null,
+          error: String(err),
+          ai_calls: null,
+          created_at: new Date(),
+          completed_at: new Date(),
         },
       });
 
@@ -283,7 +301,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
           type: "run_updated",
           workspaceId: run.workspace_id,
           threadId: run.thread_id,
-          run: { ...run, status: "retrying", current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+          run: {
+            ...run,
+            status: "retrying",
+            current_step_id: currentStepId,
+            context: variables,
+            playbook_name: playbook.name,
+          },
         });
         logger.warn("playbook.step_retry_scheduled", {
           run_id: runId,
@@ -306,7 +330,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         type: "run_updated",
         workspaceId: run.workspace_id,
         threadId: run.thread_id,
-        run: { ...run, status: "failed", current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+        run: {
+          ...run,
+          status: "failed",
+          current_step_id: currentStepId,
+          context: variables,
+          playbook_name: playbook.name,
+        },
       });
       logger.error("playbook.step_threw", { run_id: runId, step_id: step.id, error: String(err) });
       break;
@@ -336,10 +366,17 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       runId,
       threadId: run.thread_id,
       execution: {
-        id: execId, run_id: runId, step_id: step.id, step_type: step.type,
+        id: execId,
+        run_id: runId,
+        step_id: step.id,
+        step_type: step.type,
         status: result.decision.action === "fail" ? "failed" : "success",
-        input: step, output: result.output ?? null, error: null,
-        ai_calls: result.aiCalls ?? null, created_at: new Date(), completed_at: new Date(),
+        input: step,
+        output: result.output ?? null,
+        error: null,
+        ai_calls: result.aiCalls ?? null,
+        created_at: new Date(),
+        completed_at: new Date(),
       },
     });
 
@@ -365,10 +402,9 @@ export async function advanceRun(runId: number): Promise<RunResult> {
 
       case "pause": {
         status = result.decision.status;
-        const sendAfter =
-          result.decision.delaySec
-            ? new Date(Date.now() + result.decision.delaySec * 1000)
-            : null;
+        const sendAfter = result.decision.delaySec
+          ? new Date(Date.now() + result.decision.delaySec * 1000)
+          : null;
         // Persist and stop the loop; write send_after when delay is present
         await execute(
           "UPDATE playbook_runs SET status = $1, current_step_id = $2, context = $3, send_after = $4 WHERE id = $5",
@@ -386,11 +422,21 @@ export async function advanceRun(runId: number): Promise<RunResult> {
           type: "run_updated",
           workspaceId: run.workspace_id,
           threadId: run.thread_id,
-          run: { ...run, status, current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+          run: {
+            ...run,
+            status,
+            current_step_id: currentStepId,
+            context: variables,
+            playbook_name: playbook.name,
+          },
         });
         const pausedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
         if (pausedThreadItem) {
-          publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: pausedThreadItem as unknown as Record<string, unknown> });
+          publish({
+            type: "thread_updated",
+            workspaceId: run.workspace_id,
+            thread: pausedThreadItem as unknown as Record<string, unknown>,
+          });
         }
         logger.info("playbook.run_paused", { run_id: runId, step_id: currentStepId, status });
         return { runId, status, currentStepId, context: variables };
@@ -415,7 +461,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
             type: "run_updated",
             workspaceId: run.workspace_id,
             threadId: run.thread_id,
-            run: { ...run, status: "retrying", current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+            run: {
+              ...run,
+              status: "retrying",
+              current_step_id: currentStepId,
+              context: variables,
+              playbook_name: playbook.name,
+            },
           });
           logger.warn("playbook.step_retry_scheduled", {
             run_id: runId,
@@ -446,7 +498,13 @@ export async function advanceRun(runId: number): Promise<RunResult> {
       type: "run_updated",
       workspaceId: run.workspace_id,
       threadId: run.thread_id,
-      run: { ...run, status, current_step_id: currentStepId, context: variables, playbook_name: playbook.name },
+      run: {
+        ...run,
+        status,
+        current_step_id: currentStepId,
+        context: variables,
+        playbook_name: playbook.name,
+      },
     });
 
     // If run is no longer running, stop
@@ -470,14 +528,21 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   } else if (status === "escalated" || status === "failed") {
     await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
     if (status === "escalated") {
-      await sendAlert(run.workspace_id, "run_escalated", { run_id: runId, thread_id: run.thread_id }).catch(() => {});
+      await sendAlert(run.workspace_id, "run_escalated", {
+        run_id: runId,
+        thread_id: run.thread_id,
+      }).catch(() => {});
     }
   }
   // retrying: don't change thread status - the run will resume automatically
 
   const threadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
   if (threadItem) {
-    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: threadItem as unknown as Record<string, unknown> });
+    publish({
+      type: "thread_updated",
+      workspaceId: run.workspace_id,
+      thread: threadItem as unknown as Record<string, unknown>,
+    });
   }
 
   logger.info("playbook.run_finished", { run_id: runId, status });
@@ -502,8 +567,9 @@ export async function resumeRun(runId: number): Promise<RunResult> {
   );
   if (!playbook) throw new Error(`Playbook ${run.playbook_id} not found`);
 
-  const steps: PlaybookStep[] =
-    typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+  const steps: PlaybookStep[] = typeof playbook.steps === "string"
+    ? JSON.parse(playbook.steps)
+    : playbook.steps;
 
   if (run.status === "waiting_for_customer") {
     // Find the current ask_customer step to get on_reply_goto
@@ -528,10 +594,13 @@ export async function resumeRun(runId: number): Promise<RunResult> {
     // resumeRun should NOT be called for waiting_for_human runs - approval routing
     // is handled by POST /runs/:id/approve and /reject. If called anyway (e.g. by
     // mistake), log a warning and do nothing rather than advancing to the wrong step.
-    logger.warn("resumeRun called on waiting_for_human run - approval endpoints should handle this", {
-      run_id: runId,
-      current_step_id: run.current_step_id,
-    });
+    logger.warn(
+      "resumeRun called on waiting_for_human run - approval endpoints should handle this",
+      {
+        run_id: runId,
+        current_step_id: run.current_step_id,
+      },
+    );
     const context = typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
     return { runId, status: run.status, currentStepId: run.current_step_id, context };
   }
@@ -553,8 +622,9 @@ export async function startRun(
   );
   if (!playbook) throw new Error(`Playbook ${playbookId} not found`);
 
-  const steps: PlaybookStep[] =
-    typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+  const steps: PlaybookStep[] = typeof playbook.steps === "string"
+    ? JSON.parse(playbook.steps)
+    : playbook.steps;
 
   const firstStepId = steps.length > 0 ? steps[0].id : null;
 
@@ -567,6 +637,11 @@ export async function startRun(
 
   if (!row) throw new Error("Failed to create playbook run");
 
-  logger.info("playbook.run_created", { run_id: row.id, thread_id: threadId, playbook_name: playbook.name, version: playbook.version });
+  logger.info("playbook.run_created", {
+    run_id: row.id,
+    thread_id: threadId,
+    playbook_name: playbook.name,
+    version: playbook.version,
+  });
   return advanceRun(row.id);
 }

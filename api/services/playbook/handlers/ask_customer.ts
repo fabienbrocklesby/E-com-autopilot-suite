@@ -2,10 +2,17 @@
  * Ask customer handler - AI-driven contextual message to gather missing info.
  * Falls back to literal message for backward compatibility.
  */
-import type { StepHandler, StepResult, RunContext, PlaybookStep, AskCustomerStep } from "../types.ts";
+import type {
+  AskCustomerStep,
+  PlaybookStep,
+  RunContext,
+  StepHandler,
+  StepResult,
+} from "../types.ts";
 import { sendReply } from "../../gmail.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { query } from "../../../db/client.ts";
+import { formatTranscript } from "../../email-text.ts";
 
 export const askCustomerHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -22,10 +29,13 @@ export const askCustomerHandler: StepHandler = {
     // Backward compat: if no goal, send the literal message
     if (!askStep.goal) {
       const message = askStep.message ?? "";
-      const requireApprovalLegacy = askStep.require_approval === true || ctx.playbook.reply_mode === "draft_only";
+      const requireApprovalLegacy = askStep.require_approval === true ||
+        ctx.playbook.reply_mode === "draft_only";
 
       if (requireApprovalLegacy) {
-        console.log(`[playbook] ask_customer (legacy): reply held for approval for run ${ctx.run.id}`);
+        console.log(
+          `[playbook] ask_customer (legacy): reply held for approval for run ${ctx.run.id}`,
+        );
         return {
           decision: { action: "pause", status: "waiting_for_human" },
           output: {
@@ -70,10 +80,16 @@ export const askCustomerHandler: StepHandler = {
     // 1. Deterministic pre-check: do we already have all required vars?
     const missing = requiredContext.filter((v) => ctx.variables[v] == null);
     if (missing.length === 0) {
-      console.log(`[playbook] ask_customer: all required context present, skipping send for run ${ctx.run.id}`);
+      console.log(
+        `[playbook] ask_customer: all required context present, skipping send for run ${ctx.run.id}`,
+      );
       return {
         decision: { action: "advance" },
-        output: { action: "skipped", reason: "all required context present", skipped_message_send: true },
+        output: {
+          action: "skipped",
+          reason: "all required context present",
+          skipped_message_send: true,
+        },
       };
     }
 
@@ -93,9 +109,7 @@ export const askCustomerHandler: StepHandler = {
 
     // 4. Recent conversation thread (last 5)
     const recentMessages = ctx.messages.slice(-5);
-    const transcript = recentMessages
-      .map((m) => `${m.direction === "inbound" ? "CUSTOMER" : "US"}: ${m.body_plain.trim()}`)
-      .join("\n\n");
+    const transcript = formatTranscript(recentMessages);
 
     // 5. Format context
     const haveContext: Record<string, unknown> = {};
@@ -105,13 +119,18 @@ export const askCustomerHandler: StepHandler = {
 
     const model = await getModel(ctx.workspaceId);
 
-    const systemPrompt = `You are helping a support agent handle an email thread. You write the next message to send to the customer.
+    const systemPrompt =
+      `You are helping a support agent handle an email thread. You write the next message to send to the customer.
 
 TASK: ${askStep.goal}
 
 VOICE: ${voice}
 ${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
-${ctx.storeProfile ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}` : ""}
+${
+        ctx.storeProfile
+          ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}`
+          : ""
+      }
 
 WHAT WE KNOW:
 ${JSON.stringify(haveContext, null, 2)}
@@ -134,7 +153,11 @@ RULES:
 - Do not repeat a question that appears in PREVIOUS MESSAGES WE ALREADY SENT.
 - Acknowledge the customer's most recent message before asking for anything.
 - Keep it brief - one short paragraph.
-- Match the VOICE.${ctx.senderName ? `\n- Sign off using the exact name: ${ctx.senderName}` : "\n- Do not include a name placeholder."}
+- Match the VOICE.${
+        ctx.senderName
+          ? `\n- Sign off using the exact name: ${ctx.senderName}`
+          : "\n- Do not include a name placeholder."
+      }
 - NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
 - Output JSON only. No preamble, no markdown.`;
 
@@ -149,7 +172,13 @@ RULES:
 
     const aiCalls = [{ model, prompt: systemPrompt, response, tokens: undefined }];
 
-    let parsed: { action?: string; extracted?: Record<string, unknown>; reasoning?: string; reason?: string; message?: string };
+    let parsed: {
+      action?: string;
+      extracted?: Record<string, unknown>;
+      reasoning?: string;
+      reason?: string;
+      message?: string;
+    };
     try {
       parsed = JSON.parse(response);
     } catch {
@@ -160,7 +189,9 @@ RULES:
     }
 
     if (parsed.action === "skip") {
-      console.log(`[playbook] ask_customer: AI skipped (${parsed.reasoning}) for run ${ctx.run.id}`);
+      console.log(
+        `[playbook] ask_customer: AI skipped (${parsed.reasoning}) for run ${ctx.run.id}`,
+      );
       return {
         decision: { action: "advance" },
         contextUpdates: parsed.extracted ?? {},
@@ -183,7 +214,8 @@ RULES:
     }
 
     if (parsed.action === "ask" && parsed.message) {
-      const requireApproval = askStep.require_approval === true || ctx.playbook.reply_mode === "draft_only";
+      const requireApproval = askStep.require_approval === true ||
+        ctx.playbook.reply_mode === "draft_only";
 
       if (requireApproval) {
         console.log(`[playbook] ask_customer: reply held for approval for run ${ctx.run.id}`);
@@ -222,7 +254,10 @@ RULES:
     }
 
     return {
-      decision: { action: "fail", error: `ask_customer AI returned unexpected action: ${parsed.action}` },
+      decision: {
+        action: "fail",
+        error: `ask_customer AI returned unexpected action: ${parsed.action}`,
+      },
       aiCalls,
     };
   },

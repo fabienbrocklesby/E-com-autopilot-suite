@@ -1,23 +1,25 @@
 /**
  * Extract handler - uses AI to pull named variables from the thread messages.
  */
-import type { StepHandler, StepResult, RunContext, PlaybookStep, ExtractStep } from "../types.ts";
+import type { ExtractStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
+import { formatTranscript } from "../../email-text.ts";
 
 export const extractHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
     const extractStep = step as ExtractStep;
     const variables = extractStep.variables;
 
-    // Build the thread transcript from messages
-    const transcript = ctx.messages
-      .map((m) => `[${m.direction}] ${m.from_address}: ${m.body_plain}`)
-      .join("\n---\n");
+    const transcript = formatTranscript(ctx.messages);
 
     const model = await getModel(ctx.workspaceId);
 
     const prompt = `You are extracting specific pieces of information from an email thread.
-${ctx.storeProfile ? `\nStore context for interpreting domain-specific terms:\n${ctx.storeProfile}\n` : ""}
+${
+      ctx.storeProfile
+        ? `\nStore context for interpreting domain-specific terms:\n${ctx.storeProfile}\n`
+        : ""
+    }
 Extract the following variables from the thread: ${variables.join(", ")}
 
 Thread transcript:

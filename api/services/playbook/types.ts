@@ -193,6 +193,7 @@ export interface RunContext {
     id: number;
     from_address: string;
     body_plain: string;
+    body_html: string;
     direction: "inbound" | "outbound";
     received_at: Date;
     message_id_header: string | null;
@@ -212,7 +213,11 @@ export interface RunContext {
 export type StepDecision =
   | { action: "advance" }
   | { action: "advance_to"; stepId: string }
-  | { action: "pause"; status: "waiting_for_customer" | "waiting_for_human" | "waiting_to_send"; delaySec?: number }
+  | {
+    action: "pause";
+    status: "waiting_for_customer" | "waiting_for_human" | "waiting_to_send";
+    delaySec?: number;
+  }
   | { action: "complete" }
   | { action: "fail"; error: string; retriable?: boolean };
 

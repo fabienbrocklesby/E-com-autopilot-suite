@@ -13,6 +13,7 @@ import { logger } from "./logger.ts";
 import { rateLimitedCall } from "./rate_limit.ts";
 import { publish } from "./event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
+import { getReadableEmailText } from "./email-text.ts";
 
 const GMAIL_BASE = "https://www.googleapis.com/gmail/v1/users";
 
@@ -339,6 +340,7 @@ function parseGmailMessageForIngest(
 ): ParsedGmailMessage {
   const from = headerValue(gmailMsg, "From") ?? "";
   const { plain, html } = extractBody(gmailMsg);
+  const readablePlain = getReadableEmailText({ body_plain: plain, body_html: html });
   const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
   const fromNormalised = from.toLowerCase();
   const accountNormalised = accountEmail.toLowerCase();
@@ -347,7 +349,7 @@ function parseGmailMessageForIngest(
     gmailMessageId: gmailMsg.id,
     subject: headerValue(gmailMsg, "Subject") ?? "(no subject)",
     from,
-    plain,
+    plain: readablePlain,
     html,
     receivedAt: new Date(parseInt(gmailMsg.internalDate)).toISOString(),
     direction: hasSentLabel || fromNormalised.includes(accountNormalised) ? "outbound" : "inbound",

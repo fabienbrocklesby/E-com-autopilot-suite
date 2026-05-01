@@ -4,11 +4,18 @@
  * context and advances. If no attempt matches, writes row_number = null and
  * advances so the playbook can branch on the result.
  */
-import type { StepHandler, StepResult, RunContext, PlaybookStep, FindSheetRowStep } from "../types.ts";
+import type {
+  FindSheetRowStep,
+  PlaybookStep,
+  RunContext,
+  StepHandler,
+  StepResult,
+} from "../types.ts";
 import { queryOne } from "../../../db/client.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { getGoogleAccessToken } from "../../google-auth.ts";
 import { AppError } from "../../../types/index.ts";
+import { formatTranscript } from "../../email-text.ts";
 
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 
@@ -26,9 +33,7 @@ export const findSheetRowHandler: StepHandler = {
     }
 
     const model = await getModel(ctx.workspaceId);
-    const transcript = ctx.messages
-      .map((m) => `From: ${m.from_address}\n${m.body_plain}`)
-      .join("\n\n---\n\n");
+    const transcript = formatTranscript(ctx.messages);
 
     for (const attempt of findStep.match_attempts) {
       const contextValue = ctx.variables[attempt.context_var];
@@ -44,7 +49,9 @@ export const findSheetRowHandler: StepHandler = {
         [ctx.workspaceId, attempt.column],
       );
       if (!colRow) {
-        console.warn(`[playbook] find_sheet_row: column "${attempt.column}" not in sheet_columns for workspace ${ctx.workspaceId}`);
+        console.warn(
+          `[playbook] find_sheet_row: column "${attempt.column}" not in sheet_columns for workspace ${ctx.workspaceId}`,
+        );
         continue;
       }
 
@@ -113,10 +120,17 @@ async function findMatchingRow(
   searchValue: string,
   candidates: Array<{ row: number; value: string }>,
   model: string,
-): Promise<{ match: { rowNumber: number; matchedValue: string } | null; aiPrompt: string; aiResponse: string }> {
+): Promise<
+  {
+    match: { rowNumber: number; matchedValue: string } | null;
+    aiPrompt: string;
+    aiResponse: string;
+  }
+> {
   const candidateList = candidates.map((c) => `Row ${c.row}: "${c.value}"`).join("\n");
 
-  const prompt = `You are a data matching assistant. Identify which spreadsheet row corresponds to the entity described in this email thread.
+  const prompt =
+    `You are a data matching assistant. Identify which spreadsheet row corresponds to the entity described in this email thread.
 
 Search value: ${searchValue}
 

@@ -9,8 +9,9 @@
  * context bag so it can judge whether the info is already present (just not
  * extracted) or truly absent, and whether the conversation is stuck.
  */
-import type { StepHandler, StepResult, RunContext, PlaybookStep, EvaluateStep } from "../types.ts";
+import type { EvaluateStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
+import { formatTranscript } from "../../email-text.ts";
 
 export const evaluateHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -45,13 +46,12 @@ export const evaluateHandler: StepHandler = {
     // free-text reply that wasn't formally extracted).
     // No GOAL string - the AI's job is variable presence/validity, not intent.
     const recentMessages = ctx.messages.slice(-3);
-    const recentMessagesText = recentMessages
-      .map((m) => `${m.direction === "inbound" ? "CUSTOMER" : "US"}: ${m.body_plain.trim()}`)
-      .join("\n\n");
+    const recentMessagesText = formatTranscript(recentMessages);
 
     const model = await getModel(ctx.workspaceId);
 
-    const systemPrompt = `You are checking whether a customer support workflow has everything it needs to proceed to the next step.
+    const systemPrompt =
+      `You are checking whether a customer support workflow has everything it needs to proceed to the next step.
 ${ctx.storeProfile ? `\nStore context:\n${ctx.storeProfile}\n` : ""}
 REQUIRED VARIABLES (all must be present and valid for the workflow to continue):
 ${requiredContext.map((key) => `- ${key}: ${ctx.variables[key] ?? "(MISSING)"}`).join("\n")}

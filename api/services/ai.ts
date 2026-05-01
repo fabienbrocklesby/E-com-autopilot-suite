@@ -3,11 +3,12 @@
  * Uses raw fetch against the /v1/chat/completions endpoint.
  * Reference: https://platform.openai.com/docs/api-reference/chat/create
  */
-import { AppError, CategorisationResult, Category, Thread, Message } from "../types/index.ts";
-import { queryOne, query } from "../db/client.ts";
-import { Setting, Interaction } from "../types/index.ts";
+import { AppError, CategorisationResult, Category, Message, Thread } from "../types/index.ts";
+import { query, queryOne } from "../db/client.ts";
+import { Interaction, Setting } from "../types/index.ts";
 import { logger } from "./logger.ts";
 import { getStoreProfile } from "./store-profile.ts";
+import { formatTranscript } from "./email-text.ts";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
@@ -39,12 +40,12 @@ interface OpenAIResponse {
 }
 
 // ── Circuit breaker ────────────────────────────────────────────────────────────
-const CB_WINDOW_MS = 60_000;   // 60 seconds
-const CB_THRESHOLD = 5;        // failures before opening
-const CB_COOL_MS   = 120_000;  // 2 minutes cool-off
+const CB_WINDOW_MS = 60_000; // 60 seconds
+const CB_THRESHOLD = 5; // failures before opening
+const CB_COOL_MS = 120_000; // 2 minutes cool-off
 
 const cbFailures: number[] = []; // epoch ms of recent failures
-let cbOpenedAt = 0;              // 0 = closed
+let cbOpenedAt = 0; // 0 = closed
 
 function cbRecord(): void {
   const now = Date.now();
@@ -77,7 +78,11 @@ function cbSuccess(): void {
   cbFailures.length = 0;
 }
 
-export function getCircuitBreakerState(): { open: boolean; openedAt: number | null; failureCount: number } {
+export function getCircuitBreakerState(): {
+  open: boolean;
+  openedAt: number | null;
+  failureCount: number;
+} {
   const open = cbOpenedAt > 0 && Date.now() - cbOpenedAt <= CB_COOL_MS;
   return {
     open,
@@ -197,7 +202,7 @@ async function getFewShotExamples(
   workspaceId: number,
   limit = 5,
 ): Promise<Interaction[]> {
-  return query<Interaction>(
+  return await query<Interaction>(
     `SELECT * FROM interactions
      WHERE workspace_id = $1
        AND outcome IN ('approved', 'edited')
@@ -237,9 +242,7 @@ export async function categoriseEmail(
     )
     .join("\n\n---\n\n");
 
-  const messageHistory = messages
-    .map((m) => `From: ${m.from_address}\n${m.body_plain}`)
-    .join("\n\n---\n\n");
+  const messageHistory = formatTranscript(messages);
 
   const exampleMessages: ChatMessage[] = examples.flatMap((ex) => [
     {
@@ -256,14 +259,19 @@ export async function categoriseEmail(
     },
   ]);
 
-  const systemPrompt = `You are an email categorisation assistant. Analyse the email thread and choose the most appropriate category from the list provided. Return a JSON object with these exact fields:
+  const systemPrompt =
+    `You are an email categorisation assistant. Analyse the email thread and choose the most appropriate category from the list provided. Return a JSON object with these exact fields:
 - categoryId: number (the ID of the best matching category) or null if none fits
 - confidence: number between 0.0 and 1.0
 - reasoning: string (one sentence explaining the choice)
-${storeProfile ? `
+${
+      storeProfile
+        ? `
 Store context (use for understanding the business domain when categorising):
 ${storeProfile}
-` : ""}
+`
+        : ""
+    }
 Available categories:
 ${categoryDescriptions}`;
 

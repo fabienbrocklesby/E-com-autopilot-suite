@@ -11,6 +11,33 @@ Each entry:
 
 ---
 
+## 2026-05-01 - HTML-only email text for playbook context
+
+**Problem:** Production thread 821 had `body_plain = ''` while `body_html` contained the quoted prior conversation and order `#4593`. Playbook prompts only used `body_plain`, so extraction saw a blank customer message, set `order_number = null`, and drafted a bad request asking for the order number again.
+
+**Changes made:**
+- `api/services/email-text.ts`: added shared email text normalisation. It prefers plain text, converts HTML-only bodies with `html-to-text`, removes invisible/preheader noise, and preserves quoted reply content.
+- `api/services/gmail.ts`: stores HTML-derived readable text into `messages.body_plain` during ingestion when Gmail provides no plain body.
+- Playbook and categorisation prompts now use the shared transcript formatter and include message timestamp, speaker, sender, and HTML-derived body text.
+- `api/scripts/backfill_html_email_text.ts`: dry-run/apply script to backfill existing HTML-only messages.
+- `api/scripts/rerun_draft_only_playbook_run.ts`: safe draft-only rerun script for replacing bad pending drafts after backfill.
+- `api/services/email-text_test.ts`: regression tests for HTML-only quoted replies containing `Order number #4593`.
+
+**Validation:**
+- `deno fmt` applied to changed backend files.
+- `deno check main.ts` passes.
+- Targeted `deno check` on changed services/scripts passes.
+- Targeted `deno lint` on changed services/scripts passes.
+- `deno test --allow-env --allow-net services/email-text_test.ts` passes: 4 tests.
+- Local dry-run of Tracking playbook with the Kadin email routes `extract_1 -> evaluate_1 -> send_1 -> complete` and extracts `order_number: "#4593"`.
+- Backfill script dry-run against local Postgres found 4 HTML-only rows and made no changes without `--apply`.
+
+**Production action after deploy:**
+- Run `cd api && DATABASE_URL=... deno run --allow-net --allow-env scripts/backfill_html_email_text.ts --apply`.
+- Then run `cd api && DATABASE_URL=... deno run --allow-net --allow-env --allow-read scripts/rerun_draft_only_playbook_run.ts --run-id=302 --apply` to replace the known bad pending draft.
+
+---
+
 ## 2026-04-30 - Backfill Gmail thread context during ingestion
 
 **Problem:** When a customer replied to a Gmail conversation that existed before the dashboard saw it, the webhook only stored the newest Gmail message. Categorisation and playbooks then saw that reply as a contextless new thread.

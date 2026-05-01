@@ -3,9 +3,10 @@
  * Preferred path: AI-drafted from goal + reference_context.
  * Fallback: literal message string (backward compat).
  */
-import type { StepHandler, StepResult, RunContext, PlaybookStep, SendReplyStep } from "../types.ts";
+import type { PlaybookStep, RunContext, SendReplyStep, StepHandler, StepResult } from "../types.ts";
 import { sendReply } from "../../gmail.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
+import { formatTranscript } from "../../email-text.ts";
 
 export const sendReplyHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -20,7 +21,9 @@ export const sendReplyHandler: StepHandler = {
     }
 
     let body: string;
-    let aiCalls: Array<{ model: string; prompt: string; response: string; tokens: undefined }> | undefined;
+    let aiCalls:
+      | Array<{ model: string; prompt: string; response: string; tokens: undefined }>
+      | undefined;
 
     const hasLiteralMessage = typeof sendStep.message === "string";
     const hasGoal = !!sendStep.goal;
@@ -28,11 +31,17 @@ export const sendReplyHandler: StepHandler = {
     if (hasLiteralMessage && !hasGoal) {
       // Backward compat: literal template with variable interpolation
       body = interpolateTemplate(sendStep.message as string, ctx.variables);
-    } else if (hasGoal || (sendStep.message && typeof sendStep.message === "object" && "ai_generate_using_category_voice" in (sendStep.message as object))) {
+    } else if (
+      hasGoal ||
+      (sendStep.message && typeof sendStep.message === "object" &&
+        "ai_generate_using_category_voice" in (sendStep.message as object))
+    ) {
       // AI-drafted path
       // Resolve writing voice: step-level override → playbook default → fallback
-      const voice = sendStep.voice_hint ?? (ctx.playbook.writing_style || "friendly and professional");
-      const goal = sendStep.goal ?? "Write a helpful and contextual reply to close out this interaction";
+      const voice = sendStep.voice_hint ??
+        (ctx.playbook.writing_style || "friendly and professional");
+      const goal = sendStep.goal ??
+        "Write a helpful and contextual reply to close out this interaction";
 
       // Build reference context values
       const refs: Record<string, unknown> = {};
@@ -41,9 +50,7 @@ export const sendReplyHandler: StepHandler = {
       }
 
       const recentMessages = ctx.messages.slice(-3);
-      const transcript = recentMessages
-        .map((m) => `${m.direction === "inbound" ? "CUSTOMER" : "US"}: ${m.body_plain.trim()}`)
-        .join("\n\n");
+      const transcript = formatTranscript(recentMessages);
 
       const model = await getModel(ctx.workspaceId);
 
@@ -53,7 +60,11 @@ GOAL: ${goal}
 
 VOICE: ${voice}
 ${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
-${ctx.storeProfile ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}` : ""}
+${
+        ctx.storeProfile
+          ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}`
+          : ""
+      }
 
 MUST REFERENCE NATURALLY (do not list robotically - weave into the message):
 ${Object.keys(refs).length > 0 ? JSON.stringify(refs, null, 2) : "no specific values required"}
@@ -68,7 +79,11 @@ RULES:
 - Brief. One short paragraph unless the customer asked multiple things.
 - Match the VOICE. Don't sound corporate unless the voice says so.
 - Reference facts from context naturally (e.g. the amount, order number) - don't list them like a form.
-- Don't start with "Thank you for" unless the voice specifically calls for it.${ctx.senderName ? `\n- Sign off using the exact name: ${ctx.senderName}` : "\n- Do not include a sign-off or name placeholder."}
+- Don't start with "Thank you for" unless the voice specifically calls for it.${
+        ctx.senderName
+          ? `\n- Sign off using the exact name: ${ctx.senderName}`
+          : "\n- Do not include a sign-off or name placeholder."
+      }
 - NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
 - Return ONLY the message body. No JSON, no subject line, no surrounding quotes.`;
 
@@ -100,7 +115,8 @@ RULES:
       };
     }
 
-    const requireApproval = sendStep.require_approval === true || ctx.playbook.reply_mode === "draft_only";
+    const requireApproval = sendStep.require_approval === true ||
+      ctx.playbook.reply_mode === "draft_only";
 
     if (requireApproval) {
       console.log(`[playbook] send_reply: reply held for approval for run ${ctx.run.id}`);
