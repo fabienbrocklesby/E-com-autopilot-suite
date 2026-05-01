@@ -10,7 +10,7 @@ import { categoriseEmail } from "./ai.ts";
 import { applyLabel } from "./gmail.ts";
 import { evaluateRules } from "./sheet-rules.ts";
 import { startRun } from "./playbook/executor.ts";
-import type { Playbook } from "./playbook/types.ts";
+import type { Playbook, PlaybookRun } from "./playbook/types.ts";
 import { publish } from "./event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
 
@@ -194,6 +194,8 @@ async function routeThreadToCategory(
     throw new AppError(404, "Category not found for workspace");
   }
 
+  await cancelActiveRunsForRecategorisation(workspaceId, threadId);
+
   // Phase 2: If the chosen category has an active playbook, route to the playbook engine
   // instead of the legacy draft flow.
   if (categoryId) {
@@ -287,4 +289,38 @@ async function routeThreadToCategory(
   }
 
   return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated: false };
+}
+
+async function cancelActiveRunsForRecategorisation(
+  workspaceId: number,
+  threadId: number,
+): Promise<void> {
+  const cancellationContext = JSON.stringify({
+    _cancelled_reason: "Superseded by recategorisation.",
+    _cancelled_at: new Date().toISOString(),
+  });
+
+  const cancelledRuns = await transaction(async (tx) => {
+    const result = await tx.queryObject<PlaybookRun>({
+      text: `UPDATE playbook_runs
+             SET status = 'cancelled',
+                 context = context || $1::jsonb,
+                 updated_at = NOW()
+             WHERE workspace_id = $2
+               AND thread_id = $3
+               AND status IN ('running', 'waiting_for_customer', 'waiting_for_human', 'waiting_to_send', 'retrying')
+             RETURNING *`,
+      args: [cancellationContext, workspaceId, threadId],
+    });
+    return result.rows;
+  });
+
+  for (const run of cancelledRuns) {
+    publish({
+      type: "run_updated",
+      workspaceId,
+      threadId,
+      run,
+    });
+  }
 }

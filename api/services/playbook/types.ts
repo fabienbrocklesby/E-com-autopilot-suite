@@ -164,6 +164,7 @@ export interface PlaybookRun {
   thread_id: number;
   playbook_id: number;
   playbook_version: number;
+  steps_snapshot?: PlaybookStep[] | string | null;
   current_step_id: string | null;
   status: RunStatus;
   context: Record<string, unknown>;

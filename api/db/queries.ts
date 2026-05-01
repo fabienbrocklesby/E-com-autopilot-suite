@@ -12,7 +12,15 @@ export async function fetchThreadListItem(
        COUNT(d.id)::int AS draft_count,
        EXISTS(
          SELECT 1 FROM playbook_runs r
-         WHERE r.thread_id = t.id AND r.status = 'waiting_for_human'
+         JOIN playbooks rp ON rp.id = r.playbook_id
+         WHERE r.thread_id = t.id
+           AND r.workspace_id = t.workspace_id
+           AND r.status = 'waiting_for_human'
+           AND EXISTS (
+             SELECT 1
+             FROM jsonb_array_elements(COALESCE(r.steps_snapshot, rp.steps)) AS step
+             WHERE step->>'id' = r.current_step_id
+           )
        ) AS has_pending_action,
        lr.id AS latest_run_id,
        lr.status AS latest_run_status,

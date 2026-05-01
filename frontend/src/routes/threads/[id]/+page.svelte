@@ -32,8 +32,18 @@
   let runs = $state<PlaybookRun[]>([]);
   let runDetails = $state<Record<number, { run: PlaybookRun; executions: StepExecution[] }>>({});
 
+  function isActionableWaitingRun(run: PlaybookRun): boolean {
+    if (run.status !== "waiting_for_human" || run.step_missing) return false;
+    if (run.step_type === "manual_approval") return true;
+    return (
+      (run.step_type === "send_reply" || run.step_type === "ask_customer") &&
+      typeof run.step_pending_send === "string" &&
+      run.step_pending_send.length > 0
+    );
+  }
+
   // Active run waiting for human action - drives the banner.
-  let waitingRun = $derived(runs.find((r) => r.status === "waiting_for_human") ?? null);
+  let waitingRun = $derived(runs.find(isActionableWaitingRun) ?? null);
 
   let sheetRowUrl = $derived.by(() => {
     const sheetId = workspace?.sheet_id;

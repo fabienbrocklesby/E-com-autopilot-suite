@@ -3,16 +3,25 @@
  * CRUD, parser, dry-run, run management, and manual approval.
  */
 import { Hono } from "hono";
-import { query, queryOne, execute } from "../db/client.ts";
+import { execute, query, queryOne } from "../db/client.ts";
 import { AppError } from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 import { parsePlaybook, parsePlaybookStep } from "../services/playbook/parser.ts";
 import { dryRunPlaybook } from "../services/playbook/dry-run.ts";
 import { advanceRun } from "../services/playbook/mod.ts";
+import { getRunSteps } from "../services/playbook/executor.ts";
 import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
 import { publish } from "../services/event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
-import type { Playbook, PlaybookRun, StepExecution, ManualApprovalStep, PlaybookStep, AskCustomerStep, SendReplyStep } from "../services/playbook/types.ts";
+import type {
+  AskCustomerStep,
+  ManualApprovalStep,
+  Playbook,
+  PlaybookRun,
+  PlaybookStep,
+  SendReplyStep,
+  StepExecution,
+} from "../services/playbook/types.ts";
 
 export const playbooksRouter = new Hono();
 
@@ -81,20 +90,24 @@ playbooksRouter.get("/runs", async (c) => {
 
   const where = conditions.join(" AND ");
 
-  const runs = await query<PlaybookRun & {
-    playbook_name: string;
-    step_reason: string | null;
-    step_capture_input: boolean;
-    step_input_prompt: string | null;
-    step_type: string | null;
-    step_pending_send: string | null;
-  }>(
+  const runs = await query<
+    PlaybookRun & {
+      playbook_name: string;
+      step_reason: string | null;
+      step_capture_input: boolean;
+      step_input_prompt: string | null;
+      step_reference_context: string[] | null;
+      step_type: string | null;
+      step_pending_send: string | null;
+      step_missing: boolean;
+    }
+  >(
     `SELECT pr.*, p.name AS playbook_name,
       -- manual_approval: reason, capture_input, input_prompt, reference_context
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
           SELECT (step->>'reason')
-          FROM jsonb_array_elements(p.steps) AS step
+          FROM jsonb_array_elements(COALESCE(pr.steps_snapshot, p.steps)) AS step
           WHERE step->>'id' = pr.current_step_id
             AND step->>'type' = 'manual_approval'
           LIMIT 1
@@ -104,7 +117,7 @@ playbooksRouter.get("/runs", async (c) => {
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
           SELECT (step->>'capture_input')::boolean
-          FROM jsonb_array_elements(p.steps) AS step
+          FROM jsonb_array_elements(COALESCE(pr.steps_snapshot, p.steps)) AS step
           WHERE step->>'id' = pr.current_step_id
             AND step->>'type' = 'manual_approval'
           LIMIT 1
@@ -114,7 +127,7 @@ playbooksRouter.get("/runs", async (c) => {
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
           SELECT step->>'input_prompt'
-          FROM jsonb_array_elements(p.steps) AS step
+          FROM jsonb_array_elements(COALESCE(pr.steps_snapshot, p.steps)) AS step
           WHERE step->>'id' = pr.current_step_id
             AND step->>'type' = 'manual_approval'
           LIMIT 1
@@ -124,7 +137,7 @@ playbooksRouter.get("/runs", async (c) => {
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
           SELECT step->'reference_context'
-          FROM jsonb_array_elements(p.steps) AS step
+          FROM jsonb_array_elements(COALESCE(pr.steps_snapshot, p.steps)) AS step
           WHERE step->>'id' = pr.current_step_id
             AND step->>'type' = 'manual_approval'
           LIMIT 1
@@ -134,10 +147,15 @@ playbooksRouter.get("/runs", async (c) => {
       -- current step type (for frontend to know if it's a pending send vs manual approval)
       (
         SELECT step->>'type'
-        FROM jsonb_array_elements(p.steps) AS step
+        FROM jsonb_array_elements(COALESCE(pr.steps_snapshot, p.steps)) AS step
         WHERE step->>'id' = pr.current_step_id
         LIMIT 1
       ) AS step_type,
+      CASE WHEN pr.current_step_id IS NULL THEN false ELSE NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(COALESCE(pr.steps_snapshot, p.steps)) AS step
+        WHERE step->>'id' = pr.current_step_id
+      ) END AS step_missing,
       -- pending send body from last step execution (for send_reply/ask_customer require_approval)
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
@@ -184,6 +202,44 @@ playbooksRouter.get("/runs/:runId", async (c) => {
   return c.json({ run, executions });
 });
 
+async function cancelStaleWaitingRun(
+  run: PlaybookRun,
+  reason: string,
+): Promise<PlaybookRun | null> {
+  const currentContext = typeof run.context === "string"
+    ? JSON.parse(run.context)
+    : { ...run.context };
+  currentContext._cancelled_reason = reason;
+  currentContext._cancelled_at = new Date().toISOString();
+
+  const updated = await queryOne<PlaybookRun>(
+    `UPDATE playbook_runs
+     SET status = 'cancelled', context = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [JSON.stringify(currentContext), run.id],
+  );
+
+  if (updated) {
+    publish({
+      type: "run_updated",
+      workspaceId: run.workspace_id,
+      threadId: run.thread_id,
+      run: updated,
+    });
+    const threadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
+    if (threadItem) {
+      publish({
+        type: "thread_updated",
+        workspaceId: run.workspace_id,
+        thread: threadItem as unknown as Record<string, unknown>,
+      });
+    }
+  }
+
+  return updated;
+}
+
 // POST /playbooks/runs/:runId/approve
 playbooksRouter.post("/runs/:runId/approve", async (c) => {
   const runId = parseInt(c.req.param("runId"));
@@ -204,11 +260,18 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
   );
   if (!playbook) throw new AppError(404, "Playbook not found");
 
-  const steps: PlaybookStep[] =
-    typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+  const steps = getRunSteps(run, playbook);
 
   const currentStep = steps.find((s) => s.id === run.current_step_id);
-  if (!currentStep) throw new AppError(409, "Current step not found in playbook");
+  if (!currentStep) {
+    const updated = await cancelStaleWaitingRun(
+      run,
+      `Current step ${
+        run.current_step_id ?? "(none)"
+      } no longer exists in this run's playbook snapshot.`,
+    );
+    return c.json({ run: updated, result: { action: "cancelled", reason: "stale_current_step" } });
+  }
 
   // Accept optional human input / edited reply body
   let body: { input?: string; body?: string } = {};
@@ -233,7 +296,9 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
 
     if (output?.action === "pending_approval" && typeof output.pending_send === "string") {
       // Use human-edited body if provided, otherwise use the AI-drafted body
-      const sendBody = (typeof body.body === "string" && body.body.trim()) ? body.body.trim() : output.pending_send as string;
+      const sendBody = (typeof body.body === "string" && body.body.trim())
+        ? body.body.trim()
+        : output.pending_send as string;
       await sendApprovedReply(run, sendBody);
 
       const stepType = currentStep.type;
@@ -260,7 +325,9 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
           run: { ...run, status: "running", current_step_id: nextStepId },
         });
         const result = await advanceRun(runId);
-        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
+          runId,
+        ]);
         return c.json({ run: updated, result, sent: true });
       } else if (nextStepId && newStatus === "waiting_for_customer") {
         await execute(
@@ -273,7 +340,9 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
           threadId: run.thread_id,
           run: { ...run, status: "waiting_for_customer", current_step_id: nextStepId },
         });
-        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
+          runId,
+        ]);
         return c.json({ run: updated, sent: true });
       } else {
         await execute(
@@ -289,9 +358,15 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
         });
         const completedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
         if (completedThreadItem) {
-          publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: completedThreadItem as unknown as Record<string, unknown> });
+          publish({
+            type: "thread_updated",
+            workspaceId: run.workspace_id,
+            thread: completedThreadItem as unknown as Record<string, unknown>,
+          });
         }
-        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+        const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
+          runId,
+        ]);
         return c.json({ run: updated, sent: true });
       }
     }
@@ -306,8 +381,9 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
 
   if (body.input !== undefined && body.input !== null) {
     const contextKey = approvalStep.input_context_key ?? "human_notes";
-    const currentContext =
-      typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+    const currentContext = typeof run.context === "string"
+      ? JSON.parse(run.context)
+      : { ...run.context };
     currentContext[contextKey] = body.input;
     await execute(
       "UPDATE playbook_runs SET context = $1 WHERE id = $2",
@@ -330,7 +406,11 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
   });
   const approvedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
   if (approvedThreadItem) {
-    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: approvedThreadItem as unknown as Record<string, unknown> });
+    publish({
+      type: "thread_updated",
+      workspaceId: run.workspace_id,
+      thread: approvedThreadItem as unknown as Record<string, unknown>,
+    });
   }
 
   const result = await advanceRun(runId);
@@ -358,12 +438,17 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   );
   if (!playbook) throw new AppError(404, "Playbook not found");
 
-  const steps: PlaybookStep[] =
-    typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+  const steps = getRunSteps(run, playbook);
 
   const currentStep = steps.find((s) => s.id === run.current_step_id);
   if (!currentStep) {
-    throw new AppError(409, "Current step not found in playbook");
+    const updated = await cancelStaleWaitingRun(
+      run,
+      `Current step ${
+        run.current_step_id ?? "(none)"
+      } no longer exists in this run's playbook snapshot.`,
+    );
+    return c.json({ run: updated, result: { action: "cancelled", reason: "stale_current_step" } });
   }
 
   // For pending_send approvals (ask_customer/send_reply with require_approval),
@@ -373,7 +458,9 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
       "UPDATE playbook_runs SET status = 'escalated', updated_at = NOW() WHERE id = $1",
       [runId],
     );
-    const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
+    const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
+      runId,
+    ]);
     publish({
       type: "run_updated",
       workspaceId: run.workspace_id,
@@ -382,7 +469,11 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
     });
     const rejEscThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
     if (rejEscThreadItem) {
-      publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: rejEscThreadItem as unknown as Record<string, unknown> });
+      publish({
+        type: "thread_updated",
+        workspaceId: run.workspace_id,
+        thread: rejEscThreadItem as unknown as Record<string, unknown>,
+      });
     }
     return c.json({ run: updated, result: { action: "escalated" } });
   }
@@ -397,8 +488,9 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   // Record rejection metadata in context so the downstream escalate step can log
   // the real reason ("Rejected by human: approval_1 (Process refund in Stripe)")
   // rather than its own static config string ("Could not find order in sheet").
-  const rejectionContext =
-    typeof run.context === "string" ? JSON.parse(run.context) : { ...run.context };
+  const rejectionContext = typeof run.context === "string"
+    ? JSON.parse(run.context)
+    : { ...run.context };
   rejectionContext._rejection_source = `${currentStep.id} (${approvalStep.reason})`;
 
   await execute(
@@ -414,7 +506,11 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   });
   const rejectedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
   if (rejectedThreadItem) {
-    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: rejectedThreadItem as unknown as Record<string, unknown> });
+    publish({
+      type: "thread_updated",
+      workspaceId: run.workspace_id,
+      thread: rejectedThreadItem as unknown as Record<string, unknown>,
+    });
   }
 
   const result = await advanceRun(runId);
@@ -452,7 +548,11 @@ playbooksRouter.post("/runs/:runId/cancel", async (c) => {
   });
   const cancelledThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
   if (cancelledThreadItem) {
-    publish({ type: "thread_updated", workspaceId: run.workspace_id, thread: cancelledThreadItem as unknown as Record<string, unknown> });
+    publish({
+      type: "thread_updated",
+      workspaceId: run.workspace_id,
+      thread: cancelledThreadItem as unknown as Record<string, unknown>,
+    });
   }
   return c.json({ run: updated });
 });
@@ -572,9 +672,9 @@ playbooksRouter.put("/:id", async (c) => {
   );
   if (!existing) throw new AppError(404, "Playbook not found");
 
-  const newSteps = body.steps !== undefined
-    ? JSON.stringify(body.steps)
-    : JSON.stringify(typeof existing.steps === "string" ? JSON.parse(existing.steps) : existing.steps);
+  const newSteps = body.steps !== undefined ? JSON.stringify(body.steps) : JSON.stringify(
+    typeof existing.steps === "string" ? JSON.parse(existing.steps) : existing.steps,
+  );
   const targetCategoryId = body.category_id !== undefined ? body.category_id : existing.category_id;
 
   if (targetCategoryId !== null) {
@@ -616,10 +716,14 @@ playbooksRouter.put("/:id", async (c) => {
         : existing.plain_language_description,
       newSteps,
       body.is_active !== undefined ? body.is_active : existing.is_active,
-      body.customer_silence_hours !== undefined ? body.customer_silence_hours : existing.customer_silence_hours,
+      body.customer_silence_hours !== undefined
+        ? body.customer_silence_hours
+        : existing.customer_silence_hours,
       body.writing_style !== undefined ? body.writing_style : existing.writing_style,
       body.reply_mode !== undefined ? body.reply_mode : existing.reply_mode,
-      body.confidence_threshold !== undefined ? body.confidence_threshold : existing.confidence_threshold,
+      body.confidence_threshold !== undefined
+        ? body.confidence_threshold
+        : existing.confidence_threshold,
       id,
     ],
   );
@@ -647,8 +751,9 @@ playbooksRouter.post("/:id/activate", async (c) => {
   if (!playbook) throw new AppError(404, "Playbook not found");
 
   if (playbook.steps) {
-    const steps: PlaybookStep[] =
-      typeof playbook.steps === "string" ? JSON.parse(playbook.steps) : playbook.steps;
+    const steps: PlaybookStep[] = typeof playbook.steps === "string"
+      ? JSON.parse(playbook.steps)
+      : playbook.steps;
     if (steps.length === 0) {
       throw new AppError(422, "Cannot activate a playbook with no steps");
     }

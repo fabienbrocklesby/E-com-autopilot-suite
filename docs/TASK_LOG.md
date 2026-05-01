@@ -1637,3 +1637,28 @@ Anti-patterns section with concrete WRONG vs RIGHT pairs.
 - Phase 1 cleanup
 
 ---
+## 2026-05-01 - Make recategorised playbook runs resilient to stale approval steps
+
+**Problem:** A thread could be recategorised and completed by a newer playbook run while an older `waiting_for_human` run still existed. The stale run kept the thread in the "Action required" UI. If the live playbook had since been edited, the stale run's `current_step_id` could no longer be found, so Done/Skip returned "Current step not found in playbook".
+
+**Changes:**
+- Added migration `027_playbook_run_steps_snapshot.sql`.
+  - Adds `playbook_runs.steps_snapshot`.
+  - Backfills existing runs from their current playbook.
+  - Cancels active runs whose `current_step_id` is missing from the snapshot.
+- New playbook runs now store an immutable copy of their starting steps.
+- `advanceRun`, `resumeRun`, approval actions, and delayed-send worker now read from the run snapshot instead of the mutable live playbook.
+- Recategorisation now cancels any active runs for that thread before routing to the newly selected category/playbook.
+- Thread list `has_pending_action` now only counts `waiting_for_human` runs whose current step exists in the run snapshot.
+- Thread detail banner ignores stale waiting runs with missing steps.
+- Approve/reject on an already-stale waiting run now cancels the run and returns a normal response instead of a 409.
+
+**Validation:**
+- `deno check main.ts` passed.
+- `deno test --allow-net --allow-env --allow-read` passed: 11 tests.
+- `npm run check` passed with 0 errors and existing Svelte warnings.
+- Local Postgres has migration `027_playbook_run_steps_snapshot.sql` applied; existing runs have snapshots populated.
+- API smoke check showed recent closed/completed threads have `has_pending_action: false`.
+- Playwright smoke on host dev server `127.0.0.1:5174` for thread `116`: closed thread rendered with 0 "Action required" banners and 0 "Current step not found in playbook" messages.
+
+---

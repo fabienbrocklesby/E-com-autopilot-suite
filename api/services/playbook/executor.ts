@@ -52,6 +52,17 @@ export interface RunResult {
   context: Record<string, unknown>;
 }
 
+export function parsePlaybookSteps(
+  source: PlaybookStep[] | string | null | undefined,
+): PlaybookStep[] {
+  if (!source) return [];
+  return typeof source === "string" ? JSON.parse(source) : source;
+}
+
+export function getRunSteps(run: PlaybookRun, playbook: Playbook): PlaybookStep[] {
+  return parsePlaybookSteps(run.steps_snapshot ?? playbook.steps);
+}
+
 /**
  * Mark a run as escalated due to loop detection or other structural errors.
  * Inserts a sentinel step execution record for visibility in the review queue.
@@ -107,10 +118,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   );
   if (!playbook) throw new Error(`Playbook ${run.playbook_id} not found`);
 
-  // Parse steps from JSONB if needed
-  const steps: PlaybookStep[] = typeof playbook.steps === "string"
-    ? JSON.parse(playbook.steps)
-    : playbook.steps;
+  const steps = getRunSteps(run, playbook);
 
   // Load the thread
   const thread = await queryOne<
@@ -567,9 +575,7 @@ export async function resumeRun(runId: number): Promise<RunResult> {
   );
   if (!playbook) throw new Error(`Playbook ${run.playbook_id} not found`);
 
-  const steps: PlaybookStep[] = typeof playbook.steps === "string"
-    ? JSON.parse(playbook.steps)
-    : playbook.steps;
+  const steps = getRunSteps(run, playbook);
 
   if (run.status === "waiting_for_customer") {
     // Find the current ask_customer step to get on_reply_goto
@@ -629,10 +635,10 @@ export async function startRun(
   const firstStepId = steps.length > 0 ? steps[0].id : null;
 
   const row = await queryOne<{ id: number }>(
-    `INSERT INTO playbook_runs (workspace_id, thread_id, playbook_id, playbook_version, current_step_id, status, context)
-     VALUES ($1, $2, $3, $4, $5, 'running', '{}')
+    `INSERT INTO playbook_runs (workspace_id, thread_id, playbook_id, playbook_version, steps_snapshot, current_step_id, status, context)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'running', '{}')
      RETURNING id`,
-    [workspaceId, threadId, playbookId, playbook.version, firstStepId],
+    [workspaceId, threadId, playbookId, playbook.version, JSON.stringify(steps), firstStepId],
   );
 
   if (!row) throw new Error("Failed to create playbook run");

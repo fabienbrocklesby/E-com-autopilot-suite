@@ -8,34 +8,25 @@
  *
  * Runs every 60 seconds.
  */
-import { query, execute } from "../../db/client.ts";
+import { execute, query } from "../../db/client.ts";
 import { logger } from "../logger.ts";
 import { sendApprovedReply } from "./approval-sender.ts";
-import { advanceRun } from "./executor.ts";
-import type { PlaybookRun } from "./types.ts";
+import { advanceRun, parsePlaybookSteps } from "./executor.ts";
+import type { Playbook, PlaybookRun } from "./types.ts";
 
-interface DelayRun {
-  id: number;
-  thread_id: number;
-  workspace_id: number;
-  current_step_id: string | null;
-  playbook_id: number;
-}
+type DelayRun = PlaybookRun & { playbook_steps: Playbook["steps"] };
 
 interface StepExecRow {
   output: Record<string, unknown> | null;
 }
 
-interface PlaybookRow {
-  steps: Array<{ id: string; type: string }>;
-}
-
 async function processDelayedSends(): Promise<void> {
   const runs = await query<DelayRun>(
-    `SELECT id, thread_id, workspace_id, current_step_id, playbook_id
-     FROM playbook_runs
-     WHERE status = 'waiting_to_send'
-       AND send_after <= NOW()`,
+    `SELECT r.*, p.steps AS playbook_steps
+     FROM playbook_runs r
+     JOIN playbooks p ON p.id = r.playbook_id
+     WHERE r.status = 'waiting_to_send'
+       AND r.send_after <= NOW()`,
     [],
   );
 
@@ -65,13 +56,9 @@ async function processDelayedSends(): Promise<void> {
         continue;
       }
 
-      // Find the next step in the playbook so we advance past the send_reply step
-      const playbookRows = await query<PlaybookRow>(
-        "SELECT steps FROM playbooks WHERE id = $1",
-        [run.playbook_id],
-      );
-
-      const steps = playbookRows[0]?.steps ?? [];
+      // Find the next step in the run's playbook snapshot so edits to the live
+      // playbook cannot move a paused delayed send onto the wrong cursor.
+      const steps = parsePlaybookSteps(run.steps_snapshot ?? run.playbook_steps);
       const currentIdx = steps.findIndex((s) => s.id === run.current_step_id);
       const nextStep = currentIdx >= 0 ? steps[currentIdx + 1] : undefined;
       const nextStepId = nextStep?.id ?? null;

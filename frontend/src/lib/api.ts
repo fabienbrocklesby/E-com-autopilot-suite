@@ -490,6 +490,8 @@ export interface PlaybookRun {
         step_type?: string | null;
         // AI-drafted body waiting for human approval (set when step_type is send_reply or ask_customer)
         step_pending_send?: string | null;
+        // True when an old run points at a step that no longer exists in its playbook snapshot.
+        step_missing?: boolean | null;
 }
 
 export interface StepExecution {
