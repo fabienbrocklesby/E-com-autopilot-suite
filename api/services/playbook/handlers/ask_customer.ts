@@ -13,6 +13,7 @@ import { sendReply } from "../../gmail.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { query } from "../../../db/client.ts";
 import { formatTranscript } from "../../email-text.ts";
+import { resolveReplyAddress } from "../../reply-address.ts";
 
 export const askCustomerHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -25,6 +26,7 @@ export const askCustomerHandler: StepHandler = {
         decision: { action: "fail", error: "No inbound message found to reply to" },
       };
     }
+    const replyAddress = resolveReplyAddress(lastInbound);
 
     // Backward compat: if no goal, send the literal message
     if (!askStep.goal) {
@@ -51,7 +53,7 @@ export const askCustomerHandler: StepHandler = {
         ctx.email,
         ctx.gmailThreadId,
         ctx.subject,
-        lastInbound.from_address,
+        replyAddress.address,
         message,
         lastInbound.message_id_header,
         ctx.threadId,
@@ -226,6 +228,8 @@ RULES:
             pending_send: parsed.message,
             on_reply_goto: askStep.on_reply_goto,
             step_type: "ask_customer",
+            reply_to: replyAddress.address,
+            reply_to_source: replyAddress.source,
           },
           aiCalls,
         };
@@ -235,7 +239,7 @@ RULES:
         ctx.email,
         ctx.gmailThreadId,
         ctx.subject,
-        lastInbound.from_address,
+        replyAddress.address,
         parsed.message,
         lastInbound.message_id_header,
         ctx.threadId,
@@ -248,6 +252,8 @@ RULES:
           action: "asked",
           message_sent: parsed.message,
           on_reply_goto: askStep.on_reply_goto,
+          reply_to: replyAddress.address,
+          reply_to_source: replyAddress.source,
         },
         aiCalls,
       };

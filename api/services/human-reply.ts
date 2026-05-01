@@ -8,11 +8,12 @@
  *
  * No AI calls. No new OAuth path. Reuses sendReply() and resumeRun() as-is.
  */
-import { queryOne, execute, transaction } from "../db/client.ts";
+import { queryOne, transaction } from "../db/client.ts";
 import { sendReply } from "./gmail.ts";
 import { resumeRun } from "./playbook/mod.ts";
 import { AppError } from "../types/index.ts";
 import { logger } from "./logger.ts";
+import { resolveReplyAddress } from "./reply-address.ts";
 import type { PlaybookRun } from "./playbook/mod.ts";
 
 export interface HumanReplyResult {
@@ -33,6 +34,8 @@ type ThreadRow = {
 
 type MessageRow = {
   from_address: string;
+  body_plain: string;
+  body_html: string;
   message_id_header: string | null;
 };
 
@@ -62,7 +65,7 @@ export async function sendHumanReply(
 
   // ── 3. Find the last inbound message for reply threading ───────────────────
   const lastInbound = await queryOne<MessageRow>(
-    `SELECT from_address, message_id_header
+    `SELECT from_address, body_plain, body_html, message_id_header
      FROM messages
      WHERE thread_id = $1 AND direction = 'inbound'
      ORDER BY received_at DESC
@@ -72,6 +75,7 @@ export async function sendHumanReply(
   if (!lastInbound) {
     throw new AppError(422, "No inbound message to reply to on this thread");
   }
+  const replyAddress = resolveReplyAddress(lastInbound);
 
   // ── 4. Send via Gmail (external call - happens before DB transaction) ───────
   // sendReply() also writes the outbound row to messages via ON CONFLICT DO NOTHING
@@ -80,14 +84,18 @@ export async function sendHumanReply(
     tokenRow.email,
     thread.gmail_thread_id,
     thread.subject,
-    lastInbound.from_address,
+    replyAddress.address,
     body,
     lastInbound.message_id_header,
     thread.id,
     workspaceId,
   );
 
-  logger.info("human_reply.gmail_sent", { thread_id: threadId, workspace_id: workspaceId });
+  logger.info("human_reply.gmail_sent", {
+    thread_id: threadId,
+    workspace_id: workspaceId,
+    reply_to_source: replyAddress.source,
+  });
 
   // ── 5. DB writes: thread timestamp + optional run context ──────────────────
   // Find the most recent active run before opening the transaction so we can

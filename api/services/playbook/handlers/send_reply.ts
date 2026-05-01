@@ -7,6 +7,7 @@ import type { PlaybookStep, RunContext, SendReplyStep, StepHandler, StepResult }
 import { sendReply } from "../../gmail.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { formatTranscript } from "../../email-text.ts";
+import { resolveReplyAddress } from "../../reply-address.ts";
 
 export const sendReplyHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -19,6 +20,7 @@ export const sendReplyHandler: StepHandler = {
         decision: { action: "fail", error: "No inbound message found to reply to" },
       };
     }
+    const replyAddress = resolveReplyAddress(lastInbound);
 
     let body: string;
     let aiCalls:
@@ -126,6 +128,8 @@ RULES:
           action: "pending_approval",
           pending_send: body,
           step_type: "send_reply",
+          reply_to: replyAddress.address,
+          reply_to_source: replyAddress.source,
         },
         aiCalls,
       };
@@ -135,7 +139,7 @@ RULES:
       ctx.email,
       ctx.gmailThreadId,
       ctx.subject,
-      lastInbound.from_address,
+      replyAddress.address,
       body,
       lastInbound.message_id_header,
       ctx.threadId,
@@ -146,7 +150,11 @@ RULES:
 
     return {
       decision: { action: "advance" },
-      output: { message_sent: body },
+      output: {
+        message_sent: body,
+        reply_to: replyAddress.address,
+        reply_to_source: replyAddress.source,
+      },
       aiCalls,
     };
   },

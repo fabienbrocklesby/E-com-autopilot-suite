@@ -4,8 +4,16 @@
  * All SQL lives in this file's query helpers keeping routes thin.
  */
 import { Hono } from "hono";
-import { query, queryOne, execute } from "../db/client.ts";
-import { AppError, Thread, ThreadListItem, ThreadDetail, Draft, Message, UpdateDraftStatusPayload } from "../types/index.ts";
+import { execute, query, queryOne } from "../db/client.ts";
+import {
+  AppError,
+  Draft,
+  Message,
+  Thread,
+  ThreadDetail,
+  ThreadListItem,
+  UpdateDraftStatusPayload,
+} from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 import { categoriseAndDraft } from "../services/categorisation.ts";
 import { sendReply } from "../services/gmail.ts";
@@ -13,6 +21,7 @@ import { recordInteraction } from "../services/learning.ts";
 import { sendHumanReply } from "../services/human-reply.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
 import { publish } from "../services/event-bus.ts";
+import { resolveReplyAddress } from "../services/reply-address.ts";
 
 export const threadsRouter = new Hono();
 
@@ -118,7 +127,13 @@ threadsRouter.patch("/:id/status", async (c) => {
   const updated = await queryOne<Thread>("SELECT * FROM threads WHERE id = $1", [id]);
   if (updated) {
     const threadItem = await fetchThreadListItem(id, updated.workspace_id);
-    if (threadItem) publish({ type: "thread_updated", workspaceId: updated.workspace_id, thread: threadItem as unknown as Record<string, unknown> });
+    if (threadItem) {
+      publish({
+        type: "thread_updated",
+        workspaceId: updated.workspace_id,
+        thread: threadItem as unknown as Record<string, unknown>,
+      });
+    }
   }
   return c.json({ thread: updated });
 });
@@ -171,6 +186,7 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
       [threadId],
     );
     if (!lastInbound) throw new AppError(422, "No inbound message to reply to");
+    const replyAddress = resolveReplyAddress(lastInbound);
 
     const tokenRow = await queryOne<{ email: string }>(
       "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
@@ -188,7 +204,7 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
       tokenRow.email,
       thread.gmail_thread_id,
       thread.subject,
-      lastInbound.from_address,
+      replyAddress.address,
       finalBody,
       lastInbound.message_id_header,
       thread.id,
@@ -238,7 +254,13 @@ threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
 
   const draft = await queryOne("SELECT * FROM drafts WHERE id = $1", [draftId]);
   const threadItem = await fetchThreadListItem(threadId, thread.workspace_id);
-  if (threadItem) publish({ type: "thread_updated", workspaceId: thread.workspace_id, thread: threadItem as unknown as Record<string, unknown> });
+  if (threadItem) {
+    publish({
+      type: "thread_updated",
+      workspaceId: thread.workspace_id,
+      thread: threadItem as unknown as Record<string, unknown>,
+    });
+  }
   return c.json({ draft });
 });
 

@@ -11,6 +11,24 @@ Each entry:
 
 ---
 
+## 2026-05-01 - Reply to customer email from contact form notifications
+
+**Problem:** Shopify/contact form notifications arrive from an automated store sender, but the real customer email is inside the form body. Approving a draft or sending a manual reply would address the platform sender instead of the customer.
+
+**Changes made:**
+- `api/services/reply-address.ts`: added shared reply address resolver. It only overrides the sender when the inbound message looks like a contact/form notification and contains a labelled `Email:` field.
+- Wired the resolver into all reply send paths: playbook auto-send, draft-only approval send, ask-customer send, manual replies, and legacy draft approval.
+- Pending-send step outputs include `reply_to` and `reply_to_source` for visibility in execution history.
+- `api/services/reply-address_test.ts`: added regression coverage for Shopify-style forms, HTML-only forms, and normal customer emails that mention another email address.
+
+**Validation:**
+- `deno fmt` applied to changed backend files.
+- `deno check main.ts services/reply-address_test.ts` passes.
+- Targeted `deno lint` on changed reply-address/send files passes.
+- `deno test --allow-env --allow-net services/reply-address_test.ts services/email-text_test.ts` passes: 8 tests.
+
+---
+
 ## 2026-05-01 - HTML-only email text for playbook context
 
 **Problem:** Production thread 821 had `body_plain = ''` while `body_html` contained the quoted prior conversation and order `#4593`. Playbook prompts only used `body_plain`, so extraction saw a blank customer message, set `order_number = null`, and drafted a bad request asking for the order number again.

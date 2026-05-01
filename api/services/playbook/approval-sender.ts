@@ -5,6 +5,7 @@
  */
 import { query, queryOne } from "../../db/client.ts";
 import { sendReply } from "../gmail.ts";
+import { resolveReplyAddress } from "../reply-address.ts";
 import type { PlaybookRun } from "./types.ts";
 
 interface ThreadRow {
@@ -16,6 +17,8 @@ interface ThreadRow {
 interface MessageRow {
   direction: string;
   from_address: string;
+  body_plain: string;
+  body_html: string;
   message_id_header: string | null;
 }
 
@@ -35,14 +38,17 @@ export async function sendApprovedReply(run: PlaybookRun, body: string): Promise
   if (!thread) throw new Error(`Thread ${run.thread_id} not found for run ${run.id}`);
 
   const messages = await query<MessageRow>(
-    "SELECT direction, from_address, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
+    "SELECT direction, from_address, body_plain, body_html, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
     [run.thread_id],
   );
 
   const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound") ?? null;
   if (!lastInbound?.from_address) {
-    throw new Error(`No inbound message found for thread ${run.thread_id} - cannot determine reply address`);
+    throw new Error(
+      `No inbound message found for thread ${run.thread_id} - cannot determine reply address`,
+    );
   }
+  const replyAddress = resolveReplyAddress(lastInbound);
 
   const tokenRow = await queryOne<OAuthRow>(
     "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
@@ -54,7 +60,7 @@ export async function sendApprovedReply(run: PlaybookRun, body: string): Promise
     tokenRow.email,
     thread.gmail_thread_id,
     thread.subject,
-    lastInbound.from_address,
+    replyAddress.address,
     body,
     lastInbound.message_id_header,
     run.thread_id,
