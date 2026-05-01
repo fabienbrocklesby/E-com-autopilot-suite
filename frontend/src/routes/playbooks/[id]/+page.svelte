@@ -67,6 +67,7 @@
     update_sheet:    { icon: Pencil,                label: "Update Sheet",    color: "#0ea5e9" },
     ask_customer:    { icon: MessageCircleQuestion, label: "Ask Customer",    color: "#f59e0b" },
     evaluate:        { icon: Scale,                 label: "Evaluate",        color: "#8b5cf6" },
+    triage:          { icon: GitBranch,             label: "Triage",          color: "#14b8a6" },
     branch:          { icon: GitBranch,             label: "Branch",          color: "#a78bfa" },
     manual_approval: { icon: Hand,                  label: "Manual Approval", color: "#f97316" },
     send_reply:      { icon: Send,                  label: "Send Reply",      color: "#10b981" },
@@ -98,17 +99,27 @@
         const goal = (step.goal as string | undefined) ?? "-";
         return `Evaluate: ${goal.slice(0, 70)}${goal.length > 70 ? "…" : ""}`;
       }
+      case "triage": {
+        const goal = (step.goal as string | undefined) ?? "Choose the next route";
+        const routes = (step.routes as Array<{ label?: string; goto?: string }> | undefined) ?? [];
+        const routeSummary = routes.length > 0
+          ? routes.map((route) => `${route.label ?? "route"} → ${route.goto ?? "?"}`).join(" · ")
+          : "no routes";
+        const fallback = step.fallback_goto as string | undefined;
+        return `Triage: ${goal.slice(0, 54)}${goal.length > 54 ? "…" : ""} · ${routeSummary}${fallback ? ` · fallback → ${fallback}` : ""}`;
+      }
       case "branch": return `If ${step.condition} → ${step.if_true} / ${step.if_false}`;
       case "manual_approval": return `Hold for approval: "${(step.reason as string | undefined)?.slice(0, 50) ?? "-"}"`;
       case "send_reply": {
         const goal = step.goal as string | undefined;
         const delaySec = step.delay_seconds as number | undefined;
         const delayStr = delaySec ? ` · ⏱ ${formatDelay(delaySec)}` : "";
-        if (goal) return `Reply (AI): "${goal.slice(0, 55)}${goal.length > 55 ? "\u2026" : ""}"${delayStr}`;
+        const approvalStr = step.require_approval ? " · approval required" : "";
+        if (goal) return `Reply (AI): "${goal.slice(0, 55)}${goal.length > 55 ? "\u2026" : ""}"${approvalStr}${delayStr}`;
         const msg = step.message;
-        if (typeof msg === "string") return `Reply: "${msg.slice(0, 55)}"${delayStr}`;
-        if (typeof msg === "object" && msg !== null && "ai_generate_using_category_voice" in (msg as object)) return `Reply: [AI generated]${delayStr}`;
-        return `Reply: [template]${delayStr}`;
+        if (typeof msg === "string") return `Reply: "${msg.slice(0, 55)}"${approvalStr}${delayStr}`;
+        if (typeof msg === "object" && msg !== null && "ai_generate_using_category_voice" in (msg as object)) return `Reply: [AI generated]${approvalStr}${delayStr}`;
+        return `Reply: [template]${approvalStr}${delayStr}`;
       }
       case "complete": return "End run successfully";
       case "escalate": return `Escalate: "${(step.reason as string | undefined)?.slice(0, 60) ?? "-"}"`;
@@ -325,6 +336,24 @@
     setDraft("updates", updates);
   }
 
+  function draftTriageRoutes(): string {
+    const routes = (editDraft.routes as Array<{label:string;description:string;goto:string}> | undefined) ?? [];
+    return routes.map((route) => `${route.label} -> ${route.goto}: ${route.description}`).join("\n");
+  }
+
+  function setDraftTriageRoutes(val: string) {
+    const routes = val.split("\n").map((line) => {
+      const [left, ...descriptionParts] = line.split(":");
+      const [label, goto] = (left ?? "").split("->").map((part) => part.trim());
+      return {
+        label: label ?? "",
+        goto: goto ?? "",
+        description: descriptionParts.join(":").trim(),
+      };
+    }).filter((route) => route.label && route.goto);
+    setDraft("routes", routes);
+  }
+
   function draftSendMessage(): string {
     const msg = editDraft.message;
     if (typeof msg === "string") return msg;
@@ -463,7 +492,7 @@
                 <div class="step-body">
                   <div class="step-type">{meta(step.type).label}</div>
                   <div class="step-id">id: {step.id}</div>
-                  <div class="step-summary">{stepSummary(step)}</div>
+                  <div class="step-summary" title={stepSummary(step)}>{stepSummary(step)}</div>
                 </div>
                 <div class="step-actions">
                   <button class="step-btn" onclick={() => moveStep(i, -1)} disabled={i === 0} title="Move up"><ChevronUp size={14} /></button>
@@ -611,6 +640,32 @@
           <div class="field">
             <label>If escalate - go to step ID</label>
             <input type="text" value={draftStr("if_escalate_goto")} oninput={(e) => setDraft("if_escalate_goto", (e.target as HTMLInputElement).value)} />
+          </div>
+
+        <!-- triage -->
+        {:else if editingStep.type === "triage"}
+          <div class="field">
+            <label>Goal <span class="hint">What kind of email is this step deciding between?</span></label>
+            <input type="text" value={draftStr("goal")} oninput={(e) => setDraft("goal", (e.target as HTMLInputElement).value)} placeholder="Decide whether this Shopify email is informational only or needs a response" />
+          </div>
+          <div class="field">
+            <label>Routes <span class="hint">(one per line: label -> step_id: when to use this route)</span></label>
+            <textarea rows={6} value={draftTriageRoutes()} oninput={(e) => setDraftTriageRoutes((e.target as HTMLTextAreaElement).value)} placeholder={"no_action -> complete_1: Automated order notification, receipt, invoice, payment notice, or no-reply update with no requested task\nneeds_response -> send_1: Customer question, supplier issue, complaint, exception, or action request"}></textarea>
+          </div>
+          <div class="field">
+            <label>Fallback step <span class="hint">Used when the AI is unsure or below confidence</span></label>
+            <input type="text" value={draftStr("fallback_goto")} oninput={(e) => setDraft("fallback_goto", (e.target as HTMLInputElement).value)} placeholder="send_1" />
+          </div>
+          <div class="field">
+            <label>Confidence threshold</label>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.05"
+              value={typeof editDraft.confidence_threshold === "number" ? editDraft.confidence_threshold as number : 0.7}
+              oninput={(e) => setDraft("confidence_threshold", Number((e.target as HTMLInputElement).value))}
+            />
           </div>
 
         <!-- branch -->

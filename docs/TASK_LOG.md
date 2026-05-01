@@ -11,6 +11,19 @@ Each entry:
 
 ---
 
+## 2026-05-01 - Show triage playbook steps clearly in editor
+
+**Problem:** Newly generated Shopify notification playbooks used the new `triage` step correctly, but the playbook editor did not recognise the type and displayed it as "Unknown" with almost no context.
+
+**Changes made:**
+- `frontend/src/routes/playbooks/[id]/+page.svelte`: added `triage` metadata so cards and dry-run traces show "Triage" instead of "Unknown".
+- Step cards now summarise triage goal, route labels/gotos, and fallback step, with the full summary available via hover title.
+- Step edit modal now supports triage configuration: goal, route definitions, fallback step, and confidence threshold.
+- `send_reply` summaries now show when approval is required, since approval can be built into that step without a separate `manual_approval` card.
+
+**Validation:**
+- `npm run check` in `frontend/` passes with 0 errors. Existing Svelte warnings remain.
+
 ## 2026-05-01 - Triage step for automated Shopify no-action emails
 
 **Problem:** A production Shopify new-order notification was categorised into the Shopify/order category and ran the associated playbook even though it was informational only. The playbook prompt asked the AI to "evaluate whether the email is worth replying to", but the existing `evaluate` step is a variable-presence gate, not an intent/actionability router.
