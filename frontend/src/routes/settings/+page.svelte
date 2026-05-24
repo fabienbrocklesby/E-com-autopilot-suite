@@ -54,6 +54,8 @@
     connected: boolean;
     email: string | null;
     expiry: string | null;
+    needs_reauth: boolean;
+    error: string | null;
   } | null>(null);
   let loadingOauth = $state(true);
 
@@ -100,7 +102,13 @@
     try {
       oauthStatus = await authApi.status();
     } catch {
-      oauthStatus = { connected: false, email: null, expiry: null };
+      oauthStatus = {
+        connected: false,
+        email: null,
+        expiry: null,
+        needs_reauth: false,
+        error: null,
+      };
     } finally {
       loadingOauth = false;
     }
@@ -281,6 +289,31 @@
 
   {#if loadingOauth}
     <div class="status-row loading-text">Checking connection…</div>
+  {:else if oauthStatus?.needs_reauth}
+    <div class="status-row reconnect-required">
+      <span class="status-dot warning"></span>
+      <span>
+        Reconnect required
+        {#if oauthStatus.email}
+          for <strong>{oauthStatus.email}</strong>
+        {/if}
+      </span>
+      {#if oauthStatus.expiry}
+        <span class="expiry"
+          >Last token expired: {new Date(oauthStatus.expiry).toLocaleString()}</span
+        >
+      {/if}
+    </div>
+    {#if oauthStatus.error}
+      <p class="oauth-warning">{oauthStatus.error}</p>
+    {/if}
+    <a
+      href={authApi.startOAuthUrl()}
+      class="btn btn-primary"
+      style="margin-top: 12px"
+    >
+      Reconnect Google Account
+    </a>
   {:else if oauthStatus?.connected}
     <div class="status-row connected">
       <span class="status-dot connected"></span>
@@ -628,6 +661,18 @@
   }
   .status-dot.disconnected {
     background: var(--color-text-muted);
+  }
+  .status-dot.warning {
+    background: var(--color-warning, #f59e0b);
+    box-shadow: 0 0 0 2px rgba(245 158 11 / 0.2);
+  }
+  .reconnect-required {
+    color: var(--color-warning, #f59e0b);
+  }
+  .oauth-warning {
+    color: var(--color-text-muted);
+    font-size: 13px;
+    margin: 8px 0 0;
   }
 
   .expiry {

@@ -4,10 +4,14 @@
  * Reference: https://developers.google.com/identity/protocols/oauth2/web-server
  */
 import { Hono } from "hono";
-import { queryOne, execute } from "../db/client.ts";
+import { execute, queryOne } from "../db/client.ts";
 import { AppError, OAuthToken } from "../types/index.ts";
 import { setupGmailWatch, syncLabels } from "../services/gmail.ts";
-import { encryptToken } from "../services/google-auth.ts";
+import {
+  encryptToken,
+  getGoogleAccessToken,
+  isGoogleReconnectRequiredError,
+} from "../services/google-auth.ts";
 
 export const authRouter = new Hono();
 
@@ -116,7 +120,9 @@ authRouter.get("/google/callback", async (c) => {
 
     if (!tokens.refresh_token) {
       return c.redirect(
-        `${FRONTEND_ORIGIN}/settings?oauth_error=${encodeURIComponent("no_refresh_token__revoke_app_access_and_retry")}`,
+        `${FRONTEND_ORIGIN}/settings?oauth_error=${
+          encodeURIComponent("no_refresh_token__revoke_app_access_and_retry")
+        }`,
       );
     }
 
@@ -183,9 +189,44 @@ authRouter.get("/status", async (c) => {
     "SELECT email, expiry FROM oauth_tokens ORDER BY id DESC LIMIT 1",
   );
 
+  if (!token) {
+    return c.json({
+      connected: false,
+      email: null,
+      expiry: null,
+      needs_reauth: false,
+      error: null,
+    });
+  }
+
+  let expiry = token.expiry;
+  if (new Date(token.expiry).getTime() <= Date.now() + 60_000) {
+    try {
+      await getGoogleAccessToken(token.email);
+      const refreshed = await queryOne<Pick<OAuthToken, "expiry">>(
+        "SELECT expiry FROM oauth_tokens WHERE email = $1",
+        [token.email],
+      );
+      expiry = refreshed?.expiry ?? token.expiry;
+    } catch (err) {
+      if (isGoogleReconnectRequiredError(err)) {
+        return c.json({
+          connected: false,
+          email: token.email,
+          expiry: token.expiry,
+          needs_reauth: true,
+          error: "Google account needs to be reconnected",
+        });
+      }
+      throw err;
+    }
+  }
+
   return c.json({
-    connected: token !== null,
-    email: token?.email ?? null,
-    expiry: token?.expiry ?? null,
+    connected: true,
+    email: token.email,
+    expiry,
+    needs_reauth: false,
+    error: null,
   });
 });

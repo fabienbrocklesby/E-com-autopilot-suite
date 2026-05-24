@@ -8,10 +8,32 @@
  * To generate a key:
  *   openssl rand -base64 32
  */
-import { queryOne, execute } from "../db/client.ts";
+import { execute, queryOne } from "../db/client.ts";
 import { AppError } from "../types/index.ts";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+/**
+ * Google returns invalid_grant when a refresh token can no longer be used.
+ * The description is not stable enough to key on; production has returned
+ * only "Bad Request" while still setting error=invalid_grant.
+ */
+export function isGoogleRefreshGrantInvalid(detail: string | undefined): boolean {
+  if (!detail) return false;
+
+  try {
+    const parsed = JSON.parse(detail) as { error?: unknown };
+    return parsed.error === "invalid_grant";
+  } catch {
+    return detail.includes('"invalid_grant"') || detail.includes("invalid_grant");
+  }
+}
+
+export function isGoogleReconnectRequiredError(err: unknown): boolean {
+  return err instanceof AppError &&
+    err.statusCode === 401 &&
+    isGoogleRefreshGrantInvalid(err.detail);
+}
 
 // ─── Encryption helpers ───────────────────────────────────────────────────────
 
@@ -22,7 +44,10 @@ async function loadEncryptionKey(): Promise<CryptoKey> {
 
   const keyB64 = Deno.env.get("ENCRYPTION_KEY");
   if (!keyB64) {
-    throw new AppError(500, "ENCRYPTION_KEY is not configured - run `openssl rand -base64 32` and add to .env");
+    throw new AppError(
+      500,
+      "ENCRYPTION_KEY is not configured - run `openssl rand -base64 32` and add to .env",
+    );
   }
 
   const raw = Uint8Array.from(atob(keyB64), (c) => c.charCodeAt(0));
@@ -146,6 +171,13 @@ async function refreshAndPersist(email: string, refreshToken: string): Promise<s
 
   if (!res.ok) {
     const detail = await res.text();
+    if (isGoogleRefreshGrantInvalid(detail)) {
+      throw new AppError(
+        401,
+        `Google account ${email} needs to be reconnected`,
+        detail,
+      );
+    }
     throw new AppError(502, "Failed to refresh Google access token", detail);
   }
 

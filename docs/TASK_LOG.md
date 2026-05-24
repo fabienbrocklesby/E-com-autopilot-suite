@@ -11,6 +11,30 @@ Each entry:
 
 ---
 
+## 2026-05-24 - Production Google OAuth invalid_grant incident
+
+**Problem:** Production polling for `exclusivemotors12@gmail.com` failed with Google OAuth `invalid_grant` during refresh. Production `/auth/status` showed the stored access token expired at `2026-05-07T01:20:13.475Z`, so the app had been unable to refresh Gmail access for weeks.
+
+**Root cause found so far:**
+- Google rejected the stored refresh token. Per Google OAuth docs, refresh tokens can stop working when access is revoked, the account password changes for Gmail-scoped tokens, the OAuth app is in External/Testing mode, time-based access expires, admin/session policies apply, or refresh-token limits are exceeded.
+- The app treated the refresh failure as a generic upstream `502` and the Settings page could still show the account as connected because `/auth/status` only checked whether a token row existed.
+
+**Changes made:**
+- `api/services/google-auth.ts`: classifies `invalid_grant` by JSON `error` field and throws a reconnect-required `401` instead of a vague refresh `502`.
+- `api/routes/auth.ts`: `/auth/status` now attempts a refresh when the token is expired, returns `needs_reauth` when Google rejects it, and returns the updated expiry when refresh succeeds.
+- `api/services/watch.ts`: background watch renewal and fallback polling back off reconnect-required accounts for 15 minutes and clear the backoff if the token row is updated by a new OAuth connection.
+- `frontend/src/lib/api.ts` and `frontend/src/routes/settings/+page.svelte`: Settings now displays a reconnect-required state instead of showing an expired token as healthy.
+- `api/services/google-auth_test.ts`: added tests for `invalid_grant` classification.
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: 14 passed.
+- `npm run check` in `frontend/`: 0 errors, existing warnings remain.
+- `deno lint` still fails on pre-existing unrelated lint issues in `db/queries.ts`, `middleware/*`, playbook handlers, `seed_playbook.ts`, `sheet-rules.ts`, and `routes/playbooks.ts`.
+
+**Production follow-up:**
+- User must reconnect Google in production with `exclusivemotors12@gmail.com` via `https://api.exclusivemotorsdashboard.com/auth/google/start`.
+- Confirm Google Cloud OAuth consent screen is not External/Testing if this is intended to run longer than 7 days.
+
 ## 2026-05-01 - Show triage playbook steps clearly in editor
 
 **Problem:** Newly generated Shopify notification playbooks used the new `triage` step correctly, but the playbook editor did not recognise the type and displayed it as "Unknown" with almost no context.

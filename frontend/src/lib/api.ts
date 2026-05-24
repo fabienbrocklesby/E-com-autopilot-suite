@@ -220,9 +220,13 @@ export const settingsApi = {
 
 export const authApi = {
 	status() {
-		return request<{ connected: boolean; email: string | null; expiry: string | null }>(
-			'/auth/status'
-		);
+		return request<{
+			connected: boolean;
+			email: string | null;
+			expiry: string | null;
+			needs_reauth: boolean;
+			error: string | null;
+		}>('/auth/status');
 	},
 
 	/** Returns the OAuth start URL the user should be redirected to. */
