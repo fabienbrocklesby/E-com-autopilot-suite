@@ -431,16 +431,28 @@ async function attachMessageToWaitingRun(
   });
 }
 
-async function requeuePendingSend(run: PlaybookRun): Promise<void> {
+export async function requeuePendingSend(run: PlaybookRun): Promise<void> {
   // current_step_id already points at the send_reply step - a paused
   // waiting_to_send run never advances its cursor (see executor.ts's pause
   // case). Clearing send_after and setting the run back to running re-enters
   // that same step, which reloads the full transcript (including this new
   // message) and re-queues the delayed send.
-  await execute(
-    "UPDATE playbook_runs SET status = 'running', send_after = NULL WHERE id = $1",
-    [run.id],
-  );
+  //
+  // A customer-driven requeue is external progress, not a spin loop, so the
+  // stale pending-send execution rows for this step are deleted here: they are
+  // superseded pending-send attempts (the new message means the reply gets
+  // recomposed), and clearing them stops repeated legitimate requeues from
+  // accumulating toward the loop detector's 3-strikes escalation.
+  await transaction(async (tx) => {
+    await tx.queryArray(
+      "DELETE FROM playbook_step_executions WHERE run_id = $1 AND step_id = $2",
+      [run.id, run.current_step_id],
+    );
+    await tx.queryArray(
+      "UPDATE playbook_runs SET status = 'running', send_after = NULL WHERE id = $1",
+      [run.id],
+    );
+  });
   logger.info("gmail.inbound_during_waiting_to_send", { run_id: run.id, thread_id: run.thread_id });
   try {
     await advanceRun(run.id);
