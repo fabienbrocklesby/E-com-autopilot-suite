@@ -4,6 +4,7 @@
 import type { ExtractStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { formatTranscript } from "../../email-text.ts";
+import { logger } from "../../logger.ts";
 import { mergeBriefFacts } from "../brief.ts";
 
 export const extractHandler: StepHandler = {
@@ -66,7 +67,15 @@ Example response for variables ["order_number", "customer_name"]:
     const knownFacts = Object.fromEntries(
       Object.entries(contextUpdates).filter(([, value]) => value !== null && value !== undefined),
     );
-    await mergeBriefFacts(ctx.threadId, knownFacts);
+    // Best-effort: the extraction itself already succeeded and its variables
+    // are already in contextUpdates for this run to use. A transient failure
+    // to durably persist those facts to the brief must not fail the step -
+    // it only means a later run on this thread won't have them pre-seeded.
+    try {
+      await mergeBriefFacts(ctx.threadId, knownFacts);
+    } catch (err) {
+      logger.warn("playbook.brief_merge_failed", { thread_id: ctx.threadId, error: String(err) });
+    }
 
     return {
       decision: { action: "advance" },
