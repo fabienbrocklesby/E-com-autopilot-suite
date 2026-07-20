@@ -291,6 +291,16 @@ async function routeThreadToCategory(
   return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated: false };
 }
 
+/**
+ * Cancels any active run before a fresh category assignment. Reachable from two
+ * places: the explicit "recategorise this thread" route (a deliberate human
+ * override - always allowed to cancel) and this file's own routeThreadToCategory,
+ * called from the automatic ingest pipeline in gmail.ts. As of the inbound-run
+ * lifecycle rework (design doc 3.2), gmail.ts's ingestMessage only reaches
+ * routeThreadToCategory when resolveInboundRunAction returns "none" - i.e. there
+ * is no active run left to cancel - so this function is structurally a no-op on
+ * the automatic path and only ever does real work on the explicit route.
+ */
 async function cancelActiveRunsForRecategorisation(
   workspaceId: number,
   threadId: number,
