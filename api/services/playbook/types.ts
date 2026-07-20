@@ -58,7 +58,10 @@ export interface EvaluateStep {
   if_satisfied_goto: string;
   /** Step to jump to when required info is missing */
   if_missing_goto: string;
-  /** Step to jump to when AI detects something wrong even with info present */
+  /** Step to jump to when AI detects something wrong even with info present.
+   *  @deprecated no longer read by the evaluate handler's AI escalate path, which now
+   *  returns an `escalate` decision directly with the AI's real reason. Kept so already-
+   *  parsed playbooks with this field configured don't lose data. */
   if_escalate_goto: string;
   optional_context?: string[];
 }
@@ -238,6 +241,7 @@ export type StepDecision =
     delaySec?: number;
   }
   | { action: "complete" }
+  | { action: "escalate"; reason: string }
   | { action: "fail"; error: string; retriable?: boolean };
 
 export interface StepResult {
