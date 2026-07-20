@@ -11,6 +11,57 @@ Each entry:
 
 ---
 
+## 2026-07-20 - AI layer: thread brief memory and a unified reply composer
+
+**Problem:** `ask_customer` and `send_reply` each built their own prompt context and had quietly
+drifted (different transcript windows, different presence checks), and neither `evaluate` nor
+`triage` saw any durable memory of a thread, so a second run on the same thread (recategorised,
+or the customer returning weeks later) started from an empty context bag. Long threads also sent
+their full transcript on every AI call with no cap.
+
+**Changes made:**
+- `api/db/migrations/028_thread_brief_and_streaks.sql`: added `threads.brief JSONB` (durable
+  per-thread facts plus a lazily regenerated summary) and two playbook trust-ramp columns used by
+  a later phase.
+- `api/services/playbook/brief.ts`: `getThreadBrief`, `mergeBriefFacts`, `ensureBriefSummary`
+  (regenerates the summary only past 8 messages and only when the brief predates the latest
+  message) and the pure `shouldRegenerateSummary` decision behind it.
+- `api/services/playbook/context-utils.ts`: `isPresent` (one presence check replacing two that
+  used to disagree), `formatCappedTranscript` (full transcript at or under 30 messages, summary
+  plus the last 10 messages beyond that), and `formatBriefBlock` (renders a thread's facts and
+  summary as a THREAD BRIEF prompt section).
+- `api/services/playbook/composer.ts`: new `assembleComposerContext`/`buildComposerContext`,
+  `composeAskDecision`, `composeReplyBody` - the single place `ask_customer.ts` and
+  `send_reply.ts` now build their prompts, replacing their divergent copies.
+- `api/services/playbook/handlers/evaluate.ts` and `handlers/triage.ts`: switched from a
+  hardcoded last-3-messages window (evaluate) and the uncapped full transcript (triage) to
+  `formatCappedTranscript`, and both now prepend `formatBriefBlock`'s THREAD BRIEF section so
+  these routing decisions see the same facts/summary the composer sees for customer-facing
+  replies. `evaluate.ts`'s REQUIRED VARIABLES prompt line also moved off `?? "(MISSING)"` onto
+  `isPresent`, so an empty-string variable is no longer shown as a real value there while also
+  being flagged missing elsewhere in the same prompt.
+- `api/services/playbook/types.ts` / `executor.ts`: `RunContext.messages` widened to the
+  canonical `Message` type (landed slightly earlier than this entry, as part of the thread-brief
+  work, since `ensureBriefSummary` needed it).
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: `ok | 32 passed | 0 failed`
+  (brief_test.ts, context-utils_test.ts, composer_test.ts, plus the pre-existing 29).
+- `deno check main.ts` passes.
+- `deno lint` shows the same 11 pre-existing problems as before this change, none in the files
+  touched here.
+- Manual verification: `dry-run.ts` (the playbook sandbox route) turned out to be a fully
+  separate hardcoded simulator that never calls `composer.ts`/`brief.ts`/the real handlers, so it
+  could not be used to observe the composed prompt as originally planned. Ran
+  `assembleComposerContext` directly instead against a synthetic 35-message thread: confirmed the
+  output contains a `THREAD BRIEF` block, an `EARLIER CONVERSATION (summary):` line, and only the
+  last 10 messages, matching what `ask_customer`/`send_reply` now send. `evaluate`/`triage`'s
+  capped-transcript and brief-block behaviour is covered by `context-utils_test.ts` plus code
+  review of both handlers, since exercising them live needs Postgres and a real thread brief
+  that this repo has no fixture/mocking layer for yet.
+
+---
+
 ## 2026-05-24 - Production Google OAuth invalid_grant incident
 
 **Problem:** Production polling for `exclusivemotors12@gmail.com` failed with Google OAuth `invalid_grant` during refresh. Production `/auth/status` showed the stored access token expired at `2026-05-07T01:20:13.475Z`, so the app had been unable to refresh Gmail access for weeks.
