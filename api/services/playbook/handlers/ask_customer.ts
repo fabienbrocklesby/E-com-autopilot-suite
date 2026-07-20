@@ -14,6 +14,7 @@ import { chatCompletion, getModel } from "../../ai.ts";
 import { query } from "../../../db/client.ts";
 import { formatTranscript } from "../../email-text.ts";
 import { resolveReplyAddress } from "../../reply-address.ts";
+import { isPresent } from "../context-utils.ts";
 
 export const askCustomerHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -80,7 +81,7 @@ export const askCustomerHandler: StepHandler = {
     // We must advance sequentially so that downstream steps (evaluate, etc.) execute.
 
     // 1. Deterministic pre-check: do we already have all required vars?
-    const missing = requiredContext.filter((v) => ctx.variables[v] == null);
+    const missing = requiredContext.filter((v) => !isPresent(ctx.variables[v]));
     if (missing.length === 0) {
       console.log(
         `[playbook] ask_customer: all required context present, skipping send for run ${ctx.run.id}`,

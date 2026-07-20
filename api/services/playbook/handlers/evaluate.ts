@@ -12,6 +12,7 @@
 import type { EvaluateStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { formatTranscript } from "../../email-text.ts";
+import { isPresent } from "../context-utils.ts";
 
 export const evaluateHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -21,10 +22,7 @@ export const evaluateHandler: StepHandler = {
     // ── Deterministic pre-check ─────────────────────────────────────────────
     // If every required variable has a non-null, non-empty value, skip the AI
     // call entirely. Zero tokens, zero risk of goal-string misinterpretation.
-    const missing = requiredContext.filter((key) => {
-      const val = ctx.variables[key];
-      return val === null || val === undefined || val === "";
-    });
+    const missing = requiredContext.filter((key) => !isPresent(ctx.variables[key]));
 
     if (missing.length === 0) {
       console.log(
