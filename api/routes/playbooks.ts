@@ -10,6 +10,7 @@ import { parsePlaybook, parsePlaybookStep } from "../services/playbook/parser.ts
 import { dryRunPlaybook } from "../services/playbook/dry-run.ts";
 import { advanceRun } from "../services/playbook/mod.ts";
 import { finalizeEscalation, getRunSteps } from "../services/playbook/executor.ts";
+import { regeneratePendingDraft } from "../services/playbook/regenerate.ts";
 import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
 import { publish } from "../services/event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
@@ -516,6 +517,14 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   const result = await advanceRun(runId);
   const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
   return c.json({ run: updated, result });
+});
+
+// POST /playbooks/runs/:runId/regenerate-draft
+playbooksRouter.post("/runs/:runId/regenerate-draft", async (c) => {
+  const runId = parseInt(c.req.param("runId"));
+  if (isNaN(runId)) throw new AppError(400, "Invalid run ID");
+  const result = await regeneratePendingDraft(runId);
+  return c.json(result);
 });
 
 // POST /playbooks/runs/:runId/cancel

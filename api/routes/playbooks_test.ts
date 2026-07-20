@@ -164,3 +164,17 @@ Deno.test({
     }
   },
 });
+
+Deno.test("POST /runs/:id/regenerate-draft rejects when the run is not waiting_for_human [DB+AUTH]", async () => {
+  const steps: PlaybookStep[] = [{ id: "complete_1", type: "complete" } satisfies CompleteStep];
+  const fixture = await createTestFixture(steps);
+  try {
+    const started = await startRun(fixture.workspaceId, fixture.threadId, fixture.playbookId);
+    assertEquals(started.status, "complete");
+
+    const res = await authedRequest(`/runs/${started.runId}/regenerate-draft`, { method: "POST" });
+    assertEquals(res.status, 409);
+  } finally {
+    await cleanupFixture(fixture.workspaceId);
+  }
+});
