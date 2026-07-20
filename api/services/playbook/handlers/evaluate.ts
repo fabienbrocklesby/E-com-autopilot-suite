@@ -129,12 +129,23 @@ Output JSON only. No markdown, no explanation outside the JSON.`;
     }
 
     if (parsed.action === "escalate") {
+      // The AI found something wrong even with the info present: a fake/placeholder
+      // value, or the conversation has gone off the rails. Return an escalate
+      // decision directly so the executor lands the run 'escalated' with the AI's
+      // real reason (which flows into the escalate handler's reason precedence and
+      // the run_escalated alert). Routing to if_escalate_goto instead would only
+      // escalate if the author wired that field to a real escalate step, and would
+      // otherwise advance to a stale step and fail. if_escalate_goto is kept on the
+      // type for backward data compat only, not read here.
+      const reason = isPresent(parsed.reason)
+        ? parsed.reason as string
+        : "AI flagged the conversation for human review";
       console.log(
-        `[playbook] evaluate: AI escalated - ${parsed.reason} for run ${ctx.run.id}`,
+        `[playbook] evaluate: AI escalated - ${reason} for run ${ctx.run.id}`,
       );
       return {
-        decision: { action: "advance_to", stepId: evalStep.if_escalate_goto },
-        output: { action: "escalated", reason: parsed.reason },
+        decision: { action: "escalate", reason },
+        output: { action: "escalated", reason },
         aiCalls,
       };
     }
