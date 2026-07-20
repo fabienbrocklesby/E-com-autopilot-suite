@@ -7,6 +7,7 @@ import { logger } from "./logger.ts";
 
 export type AlertEvent =
   | "run_escalated"
+  | "run_failed"
   | "ingestion_failed_permanently"
   | "circuit_breaker_opened"
   | "rate_limit_sustained";
