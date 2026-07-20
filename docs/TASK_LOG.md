@@ -11,6 +11,65 @@ Each entry:
 
 ---
 
+## 2026-07-20 - Reliability layer: escalation taxonomy, inbound-during-run survival, wedge-proofing
+
+**Problem:** Runs could wedge in `running` forever on a structural failure (missing thread, no
+OAuth token, a deleted playbook) with nothing visible to a human. Escalation reasons were
+frequently wrong (a hardcoded step string, not the real cause), and the two reject flows
+(pending-send vs `manual_approval`) didn't converge, so one of them recorded no reason, never
+moved the thread to `in_review`, and never alerted. An inbound customer message during an active
+run (`waiting_for_human`, `waiting_to_send`) would destroy that run and start a fresh one,
+silently discarding a pending draft or a customer's reply. Timeout and retry workers hand-rolled
+their own "mark escalated" logic and never published `run_updated` over SSE.
+
+**Changes made:**
+- `api/services/playbook/executor.ts`: added `finalizeEscalation` as the single code path that
+  ever writes `status = 'escalated'` (real reason recorded, thread moved to `in_review`, alert
+  fired, SSE published) and `failRun`/`loadRunSetup`/`buildRunContext` as the equivalent
+  containment for genuine structural failures (`status = 'failed'`), so `advanceRun` never leaves
+  a run wedged with nothing surfaced. Every escalation path - loop detection, the 50-step cap,
+  the new `escalate` step decision, both human-reject flows in `routes/playbooks.ts`, and the
+  timeout/retry workers - now goes through one of these two functions.
+- `api/services/playbook/handlers/escalate.ts`, `ask_customer.ts`, `evaluate.ts`: escalation
+  reason precedence is now `_rejection_source` (explicit human rejection) over
+  `_escalation_reason` (a dynamic reason an upstream step already computed) over the step's own
+  static config reason, so "Could not find order in sheet" no longer shows up when the real cause
+  was something else. `evaluate.ts`'s AI escalate path no longer routes through
+  `if_escalate_goto` (a step with a hardcoded reason) - it returns the `escalate` decision
+  directly with the AI's real stated reason.
+- `api/services/gmail.ts`: `resolveInboundRunAction` maps a thread's active run status to what an
+  inbound message should do to it - resume a `waiting_for_customer` run, attach the message to a
+  `waiting_for_human` run's context (`_messages_since_draft`) instead of cancelling it, requeue a
+  `waiting_to_send` run's delayed send, or leave a `running`/`retrying` run alone. A new message
+  never destroys an active run; only a thread with no active (or a terminal) run falls through to
+  recategorisation.
+- `api/services/categorisation.ts`: `handleStartRunFailure` surfaces the thread for review and
+  alerts when `startRun` throws, instead of a bare `console.error` that left the thread wherever
+  it was with nobody notified.
+- `api/services/alerts.ts`: added the `run_failed` alert event alongside the existing
+  `run_escalated`.
+- `api/services/playbook/regenerate.ts`: `regeneratePendingDraft`/`applyRegeneratedDraft` let a
+  stale `waiting_for_human` draft (one where the customer replied again before it was approved)
+  be re-composed against the current transcript and replaced in place, clearing
+  `_messages_since_draft` and appending the regeneration's AI call onto the step execution's
+  existing `ai_calls` audit trail rather than replacing it.
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: all tests pass, including
+  `escalate_test.ts`, `ask_customer_test.ts`, `evaluate_test.ts`, `executor_test.ts`,
+  `timeout_worker_test.ts`, `retry_worker_test.ts`, `playbooks_test.ts`, `gmail_test.ts`,
+  `categorisation_test.ts`, and `regenerate_test.ts` (run against a real local Postgres per this
+  phase's `[DB]`/`[DB+AUTH]` convention).
+- `deno check main.ts` passes.
+- Manual verification (Task 6 and Task 8's manual-verification sections above): PENDING. Both an
+  inbound message surviving `waiting_for_human`/`waiting_to_send` without cancelling the run, and
+  `regenerate-draft` replacing a stale pending send without advancing or re-pausing it, rely on a
+  real Gmail/OpenAI call with no mock seam in this codebase, so neither has actually been run
+  through the manual steps yet. This is a human ops gate that still needs to happen before the
+  reliability layer is considered fully verified end to end.
+
+---
+
 ## 2026-07-20 - AI layer: thread brief memory and a unified reply composer
 
 **Problem:** `ask_customer` and `send_reply` each built their own prompt context and had quietly
