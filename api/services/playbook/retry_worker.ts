@@ -12,7 +12,7 @@
 import { query, execute } from "../../db/client.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
-import { advanceRun } from "./executor.ts";
+import { advanceRun, finalizeEscalation } from "./executor.ts";
 import { retryIngest } from "../gmail.ts";
 
 const MAX_RETRIES = 5;
@@ -23,6 +23,8 @@ interface RetryRun {
   thread_id: number;
   workspace_id: number;
   retry_count: number;
+  current_step_id: string | null;
+  context: Record<string, unknown> | string;
 }
 
 interface FailedIngestion {
@@ -33,9 +35,11 @@ interface FailedIngestion {
   attempt_count: number;
 }
 
-async function processRetryRuns(): Promise<void> {
+/** Exported for retry_worker_test.ts - not meant to be called outside the
+ *  worker's own tick except by tests. */
+export async function processRetryRuns(): Promise<void> {
   const runs = await query<RetryRun>(
-    `SELECT id, thread_id, workspace_id, retry_count
+    `SELECT id, thread_id, workspace_id, retry_count, current_step_id, context
      FROM playbook_runs
      WHERE status = 'retrying'
        AND next_retry_at <= NOW()
@@ -50,21 +54,18 @@ async function processRetryRuns(): Promise<void> {
     } catch (err) {
       logger.error("retry_worker.advance_failed", { run_id: run.id, error: String(err) });
 
-      // If retry_count has hit max, escalate
       if (run.retry_count >= MAX_RETRIES - 1) {
-        await execute(
-          `UPDATE playbook_runs SET status = 'escalated' WHERE id = $1`,
-          [run.id],
+        const variables = typeof run.context === "string"
+          ? JSON.parse(run.context)
+          : { ...run.context };
+        await finalizeEscalation(
+          run.id,
+          run.thread_id,
+          run.workspace_id,
+          variables,
+          run.current_step_id,
+          `Exhausted ${MAX_RETRIES} retries: ${String(err)}`,
         );
-        await execute(
-          "UPDATE threads SET status = 'in_review' WHERE id = $1",
-          [run.thread_id],
-        );
-        await sendAlert(run.workspace_id, "run_escalated", {
-          run_id: run.id,
-          thread_id: run.thread_id,
-          reason: `Exhausted ${MAX_RETRIES} retries`,
-        }).catch(() => {});
       }
     }
   }

@@ -3,20 +3,24 @@
  * reply longer than the playbook's configured customer_silence_hours.
  * Runs every 30 minutes.
  */
-import { query, execute } from "../../db/client.ts";
+import { query } from "../../db/client.ts";
 import { logger } from "../logger.ts";
-import { sendAlert } from "../alerts.ts";
+import { finalizeEscalation } from "./executor.ts";
 
 interface SilentRun {
   id: number;
   thread_id: number;
   workspace_id: number;
+  current_step_id: string | null;
+  context: Record<string, unknown> | string;
   customer_silence_hours: number;
 }
 
-async function checkSilentRuns(): Promise<void> {
+/** Exported for the timeout_worker_test.ts integration test - not meant to be
+ *  called outside the worker's own tick except by tests. */
+export async function checkSilentRuns(): Promise<void> {
   const runs = await query<SilentRun>(
-    `SELECT r.id, r.thread_id, r.workspace_id, p.customer_silence_hours
+    `SELECT r.id, r.thread_id, r.workspace_id, r.current_step_id, r.context, p.customer_silence_hours
      FROM playbook_runs r
      JOIN playbooks p ON p.id = r.playbook_id
      WHERE r.status = 'waiting_for_customer'
@@ -30,33 +34,18 @@ async function checkSilentRuns(): Promise<void> {
 
   for (const run of runs) {
     const reason = `Customer silence timeout after ${run.customer_silence_hours} hours`;
+    const variables = typeof run.context === "string"
+      ? JSON.parse(run.context)
+      : { ...run.context };
 
-    await execute(
-      `UPDATE playbook_runs SET status = 'escalated' WHERE id = $1`,
-      [run.id],
-    );
-    await execute(
-      `INSERT INTO playbook_step_executions (run_id, step_id, step_type, status, output, completed_at)
-       VALUES ($1, '_silence_timeout', '_silence_timeout', 'failed', $2, NOW())`,
-      [run.id, JSON.stringify({ reason })],
-    );
-    await execute(
-      "UPDATE threads SET status = 'in_review' WHERE id = $1",
-      [run.thread_id],
-    );
-
-    logger.warn("timeout_worker.run_escalated", {
-      run_id: run.id,
-      thread_id: run.thread_id,
-      workspace_id: run.workspace_id,
-      silence_hours: run.customer_silence_hours,
-    });
-
-    await sendAlert(run.workspace_id, "run_escalated", {
-      run_id: run.id,
-      thread_id: run.thread_id,
+    await finalizeEscalation(
+      run.id,
+      run.thread_id,
+      run.workspace_id,
+      variables,
+      run.current_step_id,
       reason,
-    }).catch(() => {});
+    );
   }
 }
 
