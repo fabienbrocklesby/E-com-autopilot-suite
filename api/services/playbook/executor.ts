@@ -9,6 +9,7 @@ import { AppError, Message } from "../../types/index.ts";
 import { publish } from "../event-bus.ts";
 import { fetchThreadListItem } from "../../db/queries.ts";
 import { getStoreProfile } from "../store-profile.ts";
+import { getThreadBrief } from "./brief.ts";
 import type {
   AskCustomerStep,
   Playbook,
@@ -626,11 +627,24 @@ export async function startRun(
 
   const firstStepId = steps.length > 0 ? steps[0].id : null;
 
+  // Seed the run's context bag from the thread's brief facts. A thread that
+  // gets a second run - recategorised, or the customer returns weeks later -
+  // starts already knowing what an earlier run learned, instead of from '{}'.
+  const brief = await getThreadBrief(threadId);
+
   const row = await queryOne<{ id: number }>(
     `INSERT INTO playbook_runs (workspace_id, thread_id, playbook_id, playbook_version, steps_snapshot, current_step_id, status, context)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'running', '{}')
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, 'running', $7::jsonb)
      RETURNING id`,
-    [workspaceId, threadId, playbookId, playbook.version, JSON.stringify(steps), firstStepId],
+    [
+      workspaceId,
+      threadId,
+      playbookId,
+      playbook.version,
+      JSON.stringify(steps),
+      firstStepId,
+      JSON.stringify(brief.facts),
+    ],
   );
 
   if (!row) throw new Error("Failed to create playbook run");

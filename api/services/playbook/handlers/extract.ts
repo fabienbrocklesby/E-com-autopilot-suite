@@ -4,6 +4,7 @@
 import type { ExtractStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
 import { formatTranscript } from "../../email-text.ts";
+import { mergeBriefFacts } from "../brief.ts";
 
 export const extractHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -56,6 +57,16 @@ Example response for variables ["order_number", "customer_name"]:
         contextUpdates[v] = extracted[v];
       }
     }
+
+    // Persist known facts to the thread's brief so they outlive this run - a
+    // later run on the same thread seeds its context from brief.facts via
+    // startRun. Only genuinely-found values are written: a null here means
+    // "not found in this run's messages", not "this fact no longer holds",
+    // and must not overwrite something an earlier run already established.
+    const knownFacts = Object.fromEntries(
+      Object.entries(contextUpdates).filter(([, value]) => value !== null && value !== undefined),
+    );
+    await mergeBriefFacts(ctx.threadId, knownFacts);
 
     return {
       decision: { action: "advance" },
