@@ -7,8 +7,8 @@ import { execute, query, queryOne, transaction } from "../db/client.ts";
 import { AppError, Category, GmailMessage, GmailThread, Message, Setting } from "../types/index.ts";
 import { categoriseAndDraft, categoriseFromGmailLabels } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
-import { resumeRun } from "./playbook/executor.ts";
-import type { PlaybookRun } from "./playbook/types.ts";
+import { advanceRun, resumeRun } from "./playbook/executor.ts";
+import type { PlaybookRun, RunStatus } from "./playbook/types.ts";
 import { logger } from "./logger.ts";
 import { rateLimitedCall } from "./rate_limit.ts";
 import { publish } from "./event-bus.ts";
@@ -320,6 +320,102 @@ async function ingestMessage(
 
   // Run the AI categorisation pipeline (which may route to a playbook for new threads).
   await categoriseAndDraft(threadRow.id);
+}
+
+export type InboundRunAction =
+  | "resume"
+  | "attach_to_waiting_human"
+  | "requeue_send"
+  | "store_only"
+  | "none";
+
+/**
+ * Maps a thread's active playbook run status to what an inbound customer
+ * message should do to it. The rule behind every branch (design doc 3.2): a
+ * new message never destroys an active run. Only "none" (no active run, or a
+ * terminal one) allows the thread to fall through to recategorisation.
+ */
+export function resolveInboundRunAction(runStatus: RunStatus | null): InboundRunAction {
+  switch (runStatus) {
+    case "waiting_for_customer":
+      return "resume";
+    case "waiting_for_human":
+      return "attach_to_waiting_human";
+    case "waiting_to_send":
+      return "requeue_send";
+    case "running":
+    case "retrying":
+      return "store_only";
+    default:
+      // null (no active run), complete, failed, escalated, cancelled.
+      return "none";
+  }
+}
+
+/**
+ * Appends a newly-arrived message marker to a waiting_for_human run's context
+ * so the approval UI can show "customer replied since this draft was written"
+ * and offer regeneration (Task 8). Pure so the append logic is unit-testable
+ * without a database round trip.
+ */
+export function appendMessageToWaitingRun(
+  context: Record<string, unknown>,
+  entry: { message_id: number | null; received_at: string },
+): Record<string, unknown> {
+  const existing = Array.isArray(context._messages_since_draft)
+    ? context._messages_since_draft
+    : [];
+  return { ...context, _messages_since_draft: [...existing, entry] };
+}
+
+async function attachMessageToWaitingRun(
+  run: PlaybookRun,
+  messageId: number | null,
+  receivedAt: string,
+): Promise<void> {
+  const currentContext = typeof run.context === "string"
+    ? JSON.parse(run.context)
+    : { ...run.context };
+  const updatedContext = appendMessageToWaitingRun(currentContext, {
+    message_id: messageId,
+    received_at: receivedAt,
+  });
+  const updatedRun = await queryOne<PlaybookRun & { playbook_name: string }>(
+    `UPDATE playbook_runs pr SET context = $1
+     FROM playbooks p WHERE pr.playbook_id = p.id AND pr.id = $2
+     RETURNING pr.*, p.name AS playbook_name`,
+    [JSON.stringify(updatedContext), run.id],
+  );
+  if (updatedRun) {
+    publish({
+      type: "run_updated",
+      workspaceId: run.workspace_id,
+      threadId: run.thread_id,
+      run: updatedRun,
+    });
+  }
+  logger.info("gmail.inbound_during_waiting_for_human", {
+    run_id: run.id,
+    thread_id: run.thread_id,
+  });
+}
+
+async function requeuePendingSend(run: PlaybookRun): Promise<void> {
+  // current_step_id already points at the send_reply step - a paused
+  // waiting_to_send run never advances its cursor (see executor.ts's pause
+  // case). Clearing send_after and setting the run back to running re-enters
+  // that same step, which reloads the full transcript (including this new
+  // message) and re-queues the delayed send.
+  await execute(
+    "UPDATE playbook_runs SET status = 'running', send_after = NULL WHERE id = $1",
+    [run.id],
+  );
+  logger.info("gmail.inbound_during_waiting_to_send", { run_id: run.id, thread_id: run.thread_id });
+  try {
+    await advanceRun(run.id);
+  } catch (err) {
+    logger.error("gmail.requeue_send_failed", { run_id: run.id, error: String(err) });
+  }
 }
 
 interface ParsedGmailMessage {
