@@ -216,9 +216,20 @@ export function buildRunContext(
 /**
  * The other terminal write path alongside finalizeEscalation: for genuine
  * structural failures (missing thread, no OAuth token, a playbook removed
- * out from under a run) rather than a deliberate escalation. Same shape -
- * real reason recorded, thread surfaced, alert fired, SSE published - so a
- * run never wedges in 'running' with nothing visible to a human.
+ * out from under a run) rather than a deliberate escalation. Real reason
+ * recorded, thread surfaced, alert fired, SSE published - so a run never
+ * wedges in 'running' with nothing visible to a human.
+ *
+ * The run UPDATE and the thread UPDATE are wrapped in one transaction() per
+ * this repo's hard rule that multi-statement DB writes must be transactional -
+ * same tx.queryObject/queryArray pattern as finalizeEscalation. Unlike
+ * finalizeEscalation, the run UPDATE is keyed by primary key only, not a JOIN
+ * to playbooks: this path fires for a playbook that was deleted out from
+ * under the run (loadRunSetup's "Playbook not found"), and a JOIN would then
+ * match zero rows and leave the run wedged in 'running' - the exact case this
+ * function exists to prevent. COALESCE guards a NULL context so
+ * _failure_reason is never lost. The playbook name is fetched separately
+ * after commit, tolerating a missing playbook, so the event still publishes.
  */
 async function failRun(
   runId: number,
@@ -226,20 +237,34 @@ async function failRun(
   workspaceId: number,
   reason: string,
 ): Promise<RunResult> {
-  const updatedRun = await queryOne<PlaybookRun & { playbook_name: string }>(
-    `UPDATE playbook_runs pr
-     SET status = 'failed', context = pr.context || $1::jsonb
-     FROM playbooks p
-     WHERE pr.playbook_id = p.id AND pr.id = $2
-     RETURNING pr.*, p.name AS playbook_name`,
-    [JSON.stringify({ _failure_reason: reason }), runId],
-  );
-  await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  const updatedRun = await transaction(async (tx) => {
+    const runResult = await tx.queryObject<PlaybookRun>({
+      text: `UPDATE playbook_runs
+             SET status = 'failed', context = COALESCE(context, '{}'::jsonb) || $1::jsonb
+             WHERE id = $2
+             RETURNING *`,
+      args: [JSON.stringify({ _failure_reason: reason }), runId],
+    });
+    await tx.queryArray("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+    return runResult.rows[0] ?? null;
+  });
+
   logger.error("playbook.run_failed", { run_id: runId, thread_id: threadId, reason });
   await sendAlert(workspaceId, "run_failed", { run_id: runId, thread_id: threadId, reason })
     .catch(() => {});
   if (updatedRun) {
-    publish({ type: "run_updated", workspaceId, threadId, run: updatedRun });
+    // The playbook may be gone; tolerate a missing name rather than dropping
+    // the event entirely.
+    const playbookRow = await queryOne<{ name: string }>(
+      "SELECT name FROM playbooks WHERE id = $1",
+      [updatedRun.playbook_id],
+    );
+    publish({
+      type: "run_updated",
+      workspaceId,
+      threadId,
+      run: { ...updatedRun, playbook_name: playbookRow?.name ?? undefined },
+    });
   }
   const threadItem = await fetchThreadListItem(threadId, workspaceId);
   if (threadItem) {

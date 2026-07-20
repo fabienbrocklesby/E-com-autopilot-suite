@@ -50,7 +50,7 @@ Deno.test({
   },
 });
 
-Deno.test("processFailedIngestions alerts exactly once when attempt_count exhausts at 3 [DB]", async () => {
+Deno.test("processFailedIngestions marks a row resolved and records the give-up error when attempt_count reaches 3 [DB]", async () => {
   const fixture = await createTestFixture([], { withOAuthToken: false });
   const ingestion = await queryOne<{ id: number }>(
     `INSERT INTO failed_ingestions (workspace_id, gmail_message_id, gmail_thread_id, error, attempt_count)
