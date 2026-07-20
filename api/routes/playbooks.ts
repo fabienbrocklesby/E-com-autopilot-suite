@@ -9,7 +9,7 @@ import { authMiddleware } from "../middleware/auth.ts";
 import { parsePlaybook, parsePlaybookStep } from "../services/playbook/parser.ts";
 import { dryRunPlaybook } from "../services/playbook/dry-run.ts";
 import { advanceRun } from "../services/playbook/mod.ts";
-import { getRunSteps } from "../services/playbook/executor.ts";
+import { finalizeEscalation, getRunSteps } from "../services/playbook/executor.ts";
 import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
 import { publish } from "../services/event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
@@ -452,30 +452,18 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   }
 
   // For pending_send approvals (ask_customer/send_reply with require_approval),
-  // rejection means "don't send this" — escalate the run.
+  // rejection means "don't send this": escalate directly via the shared helper,
+  // since there is no on_reject step to route to (that wiring only exists on
+  // manual_approval steps, handled below).
   if (currentStep.type === "ask_customer" || currentStep.type === "send_reply") {
-    await execute(
-      "UPDATE playbook_runs SET status = 'escalated', updated_at = NOW() WHERE id = $1",
-      [runId],
-    );
+    const reason = `Rejected by human: ${currentStep.id} (rejected ${currentStep.type})`;
+    await finalizeEscalation(runId, run.thread_id, run.workspace_id, reason, {
+      currentStepId: run.current_step_id,
+    });
     const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
       runId,
     ]);
-    publish({
-      type: "run_updated",
-      workspaceId: run.workspace_id,
-      threadId: run.thread_id,
-      run: { ...run, status: "escalated" },
-    });
-    const rejEscThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
-    if (rejEscThreadItem) {
-      publish({
-        type: "thread_updated",
-        workspaceId: run.workspace_id,
-        thread: rejEscThreadItem as unknown as Record<string, unknown>,
-      });
-    }
-    return c.json({ run: updated, result: { action: "escalated" } });
+    return c.json({ run: updated, result: { action: "escalated", reason } });
   }
 
   if (currentStep.type !== "manual_approval") {

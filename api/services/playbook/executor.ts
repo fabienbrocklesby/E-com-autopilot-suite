@@ -1,7 +1,7 @@
 /**
  * Playbook executor - the dispatch loop that advances a run through its steps.
  */
-import { execute, query, queryOne } from "../../db/client.ts";
+import { execute, query, queryOne, transaction } from "../../db/client.ts";
 import { getHandler } from "./registry.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
@@ -55,30 +55,72 @@ export function getRunSteps(run: PlaybookRun, playbook: Playbook): PlaybookStep[
 }
 
 /**
- * Mark a run as escalated due to loop detection or other structural errors.
- * Inserts a sentinel step execution record for visibility in the review queue.
+ * Escalate a run directly: set status='escalated', merge the reason into the
+ * run's context, insert a sentinel step-execution row (there is no live running
+ * step-execution to update when escalating outside the normal step loop, so this
+ * is what makes the reason visible in the review queue), flip the thread to
+ * in_review, fire the alert, and publish. This is the single implementation of
+ * "escalate a run directly" - used by loop detection below and by the
+ * pending-send reject path in routes/playbooks.ts, which has no on_reject step
+ * to route through via advanceRun.
  */
-async function escalateRunDueToLoop(
+export async function finalizeEscalation(
   runId: number,
   threadId: number,
   workspaceId: number,
-  variables: Record<string, unknown>,
-  currentStepId: string | null,
   reason: string,
+  opts: { sentinelStepId?: string; currentStepId?: string | null } = {},
 ): Promise<RunResult> {
-  await execute(
-    "UPDATE playbook_runs SET status = 'escalated', current_step_id = $1, context = $2 WHERE id = $3",
-    [currentStepId, JSON.stringify(variables), runId],
-  );
-  await execute(
-    `INSERT INTO playbook_step_executions (run_id, step_id, step_type, status, output, completed_at)
-     VALUES ($1, '_loop_detected', '_loop_detected', 'failed', $2, NOW())`,
-    [runId, JSON.stringify({ reason })],
-  );
-  await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  const sentinelStepId = opts.sentinelStepId ?? "_rejected";
+  // Only touch current_step_id when the caller passed it explicitly (including
+  // null): omitting it from the SET list leaves the column as-is for callers
+  // that don't have a meaningful step to record (or want to preserve it).
+  const setsCurrentStep = opts.currentStepId !== undefined;
+  // JSONB || merge so existing context keys (e.g. _rejection_source) survive -
+  // same pattern as the human-reply context injection in human-reply.ts.
+  const escalationPayload = JSON.stringify({ _escalation_reason: reason });
+
+  await transaction(async (tx) => {
+    if (setsCurrentStep) {
+      await tx.queryArray(
+        `UPDATE playbook_runs
+         SET status = 'escalated', current_step_id = $1, context = context || $2::jsonb, updated_at = NOW()
+         WHERE id = $3`,
+        [opts.currentStepId, escalationPayload, runId],
+      );
+    } else {
+      await tx.queryArray(
+        `UPDATE playbook_runs
+         SET status = 'escalated', context = context || $1::jsonb, updated_at = NOW()
+         WHERE id = $2`,
+        [escalationPayload, runId],
+      );
+    }
+    await tx.queryArray(
+      `INSERT INTO playbook_step_executions (run_id, step_id, step_type, status, output, completed_at)
+       VALUES ($1, $2, $3, 'failed', $4, NOW())`,
+      [runId, sentinelStepId, sentinelStepId, JSON.stringify({ reason })],
+    );
+    await tx.queryArray("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  });
+
+  // Side effects (logging, alerting, publishing) happen after the transaction
+  // commits, not inside it.
   logger.error("playbook.run_escalated", { run_id: runId, reason });
   await sendAlert(workspaceId, "run_escalated", { run_id: runId, thread_id: threadId, reason })
     .catch(() => {});
+
+  const freshRun = await queryOne<PlaybookRun>(
+    "SELECT * FROM playbook_runs WHERE id = $1",
+    [runId],
+  );
+  const context = freshRun
+    ? (typeof freshRun.context === "string" ? JSON.parse(freshRun.context) : freshRun.context)
+    : {};
+
+  if (freshRun) {
+    publish({ type: "run_updated", workspaceId, threadId, run: freshRun });
+  }
   const threadItem = await fetchThreadListItem(threadId, workspaceId);
   if (threadItem) {
     publish({
@@ -87,7 +129,31 @@ async function escalateRunDueToLoop(
       thread: threadItem as unknown as Record<string, unknown>,
     });
   }
-  return { runId, status: "escalated", currentStepId, context: variables };
+
+  return {
+    runId,
+    status: "escalated",
+    currentStepId: freshRun?.current_step_id ?? null,
+    context,
+  };
+}
+
+/**
+ * Mark a run as escalated due to loop detection or other structural errors.
+ * Delegates to finalizeEscalation, the shared "escalate a run directly" helper.
+ */
+async function escalateRunDueToLoop(
+  runId: number,
+  threadId: number,
+  workspaceId: number,
+  _variables: Record<string, unknown>,
+  currentStepId: string | null,
+  reason: string,
+): Promise<RunResult> {
+  return await finalizeEscalation(runId, threadId, workspaceId, reason, {
+    sentinelStepId: "_loop_detected",
+    currentStepId,
+  });
 }
 
 /**
