@@ -15,6 +15,21 @@ import { resolveReplyAddress } from "../../reply-address.ts";
 import { composeAskDecision } from "../composer.ts";
 import { isPresent } from "../context-utils.ts";
 
+/**
+ * Maps the AI's raw escalate reason to the text that becomes the run's
+ * escalation_reason. Extracted as a pure function so it is unit-testable
+ * without the chatCompletion call that produces `decision` in the first
+ * place. composeAskDecision's AskDecision escalate variant already types
+ * `reason` as a required string (it defaults malformed AI responses to a
+ * fallback message itself), so this is a second, defensive layer that only
+ * bites if that string is present but blank.
+ */
+export function resolveAskCustomerEscalateReason(reason: string | undefined): string {
+  return reason && reason.trim()
+    ? reason
+    : "ask_customer AI escalated without a stated reason";
+}
+
 export const askCustomerHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
     const askStep = step as AskCustomerStep;
@@ -135,12 +150,11 @@ export const askCustomerHandler: StepHandler = {
     }
 
     if (decision.action === "escalate") {
-      console.log(
-        `[playbook] ask_customer: AI escalated - ${decision.reason} for run ${ctx.run.id}`,
-      );
+      const reason = resolveAskCustomerEscalateReason(decision.reason);
+      console.log(`[playbook] ask_customer: AI escalated - ${reason} for run ${ctx.run.id}`);
       return {
-        decision: { action: "fail", error: `ask_customer escalated: ${decision.reason}` },
-        output: { action: "escalated", reason: decision.reason },
+        decision: { action: "escalate", reason },
+        output: { action: "escalated", reason },
         aiCalls,
       };
     }
