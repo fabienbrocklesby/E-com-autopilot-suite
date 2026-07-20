@@ -6,7 +6,8 @@
  */
 import type { PlaybookStep, RunContext, StepHandler, StepResult, TriageStep } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
-import { formatTranscript } from "../../email-text.ts";
+import { ensureBriefSummary, getThreadBrief } from "../brief.ts";
+import { formatBriefBlock, formatCappedTranscript } from "../context-utils.ts";
 
 interface ParsedTriageResponse {
   route?: string;
@@ -84,7 +85,10 @@ export const triageHandler: StepHandler = {
     const routeLines = triageStep.routes
       .map((route) => `- ${route.label}: ${route.description}`)
       .join("\n");
-    const transcript = formatTranscript(ctx.messages);
+    const brief = await getThreadBrief(ctx.threadId);
+    const summary = await ensureBriefSummary(ctx.workspaceId, ctx.threadId, ctx.messages);
+    const transcript = formatCappedTranscript(ctx.messages, summary);
+    const briefBlock = formatBriefBlock(brief);
     const model = await getModel(ctx.workspaceId);
 
     const systemPrompt =
@@ -101,7 +105,7 @@ ${routeLines}
 
 FULL WORKFLOW CONTEXT:
 ${JSON.stringify(ctx.variables, null, 2)}
-
+${briefBlock ? `\n${briefBlock}\n` : ""}
 THREAD TRANSCRIPT:
 ${transcript}
 

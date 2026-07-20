@@ -11,8 +11,8 @@
  */
 import type { EvaluateStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
-import { formatTranscript } from "../../email-text.ts";
-import { isPresent } from "../context-utils.ts";
+import { ensureBriefSummary, getThreadBrief } from "../brief.ts";
+import { formatBriefBlock, formatCappedTranscript, isPresent } from "../context-utils.ts";
 
 export const evaluateHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -41,10 +41,15 @@ export const evaluateHandler: StepHandler = {
     // ── AI path: something is missing ──────────────────────────────────────
     // Show the AI the FULL context bag so it can spot info that the extract
     // step may have missed (e.g. the customer quoted their order number in a
-    // free-text reply that wasn't formally extracted).
+    // free-text reply that wasn't formally extracted). Uses the same capped
+    // transcript and thread-brief block the composer builds for customer-
+    // facing replies, instead of a hardcoded last-3-messages window, so a
+    // long thread's earlier facts and summary are visible here too.
     // No GOAL string - the AI's job is variable presence/validity, not intent.
-    const recentMessages = ctx.messages.slice(-3);
-    const recentMessagesText = formatTranscript(recentMessages);
+    const brief = await getThreadBrief(ctx.threadId);
+    const summary = await ensureBriefSummary(ctx.workspaceId, ctx.threadId, ctx.messages);
+    const transcriptText = formatCappedTranscript(ctx.messages, summary);
+    const briefBlock = formatBriefBlock(brief);
 
     const model = await getModel(ctx.workspaceId);
 
@@ -52,13 +57,17 @@ export const evaluateHandler: StepHandler = {
       `You are checking whether a customer support workflow has everything it needs to proceed to the next step.
 ${ctx.storeProfile ? `\nStore context:\n${ctx.storeProfile}\n` : ""}
 REQUIRED VARIABLES (all must be present and valid for the workflow to continue):
-${requiredContext.map((key) => `- ${key}: ${ctx.variables[key] ?? "(MISSING)"}`).join("\n")}
+${
+        requiredContext.map((key) =>
+          `- ${key}: ${isPresent(ctx.variables[key]) ? ctx.variables[key] : "(MISSING)"}`
+        ).join("\n")
+      }
 
 FULL CONTEXT (everything we know so far):
 ${JSON.stringify(ctx.variables, null, 2)}
-
-RECENT CONVERSATION (last 3 messages):
-${recentMessagesText}
+${briefBlock ? `\n${briefBlock}\n` : ""}
+THREAD TRANSCRIPT:
+${transcriptText}
 
 YOUR TASK:
 Check each REQUIRED VARIABLE:
