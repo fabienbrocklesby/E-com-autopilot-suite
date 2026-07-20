@@ -9,7 +9,7 @@
  *
  * Runs every 5 minutes.
  */
-import { query, execute } from "../../db/client.ts";
+import { execute, query } from "../../db/client.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
 import { advanceRun, finalizeEscalation } from "./executor.ts";
@@ -71,7 +71,7 @@ export async function processRetryRuns(): Promise<void> {
   }
 }
 
-async function processFailedIngestions(): Promise<void> {
+export async function processFailedIngestions(): Promise<void> {
   const ingestions = await query<FailedIngestion>(
     `SELECT id, workspace_id, gmail_message_id, gmail_thread_id, attempt_count
      FROM failed_ingestions

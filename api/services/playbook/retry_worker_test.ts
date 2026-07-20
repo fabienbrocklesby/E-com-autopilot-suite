@@ -6,7 +6,7 @@
 import { assertEquals, assertExists } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { execute, queryOne } from "../../db/client.ts";
 import type { EscalateStep } from "./types.ts";
-import { processRetryRuns } from "./retry_worker.ts";
+import { processFailedIngestions, processRetryRuns } from "./retry_worker.ts";
 import { cleanupFixture, createTestFixture, createTestRun } from "./test-helpers.ts";
 
 // sanitizeResources/Ops are disabled because these integration tests use the
@@ -48,4 +48,30 @@ Deno.test({
       await cleanupFixture(fixture.workspaceId);
     }
   },
+});
+
+Deno.test("processFailedIngestions alerts exactly once when attempt_count exhausts at 3 [DB]", async () => {
+  const fixture = await createTestFixture([], { withOAuthToken: false });
+  const ingestion = await queryOne<{ id: number }>(
+    `INSERT INTO failed_ingestions (workspace_id, gmail_message_id, gmail_thread_id, error, attempt_count)
+     VALUES ($1, 'test-msg-1', 'test-thread-1', 'simulated failure', 2)
+     RETURNING id`,
+    [fixture.workspaceId],
+  );
+  try {
+    await processFailedIngestions();
+
+    const row = await queryOne<{ attempt_count: number; resolved: boolean; error: string }>(
+      "SELECT attempt_count, resolved, error FROM failed_ingestions WHERE id = $1",
+      [ingestion!.id],
+    );
+    assertEquals(row!.attempt_count, 3);
+    assertEquals(row!.resolved, true);
+    assertEquals(row!.error, "Gave up after 3 attempts");
+  } finally {
+    // failed_ingestions.workspace_id has no FK/cascade (migration 016) - clean
+    // up explicitly, cleanupFixture's workspace delete won't reach this row.
+    await execute("DELETE FROM failed_ingestions WHERE id = $1", [ingestion!.id]);
+    await cleanupFixture(fixture.workspaceId);
+  }
 });
