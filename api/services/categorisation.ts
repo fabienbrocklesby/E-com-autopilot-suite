@@ -4,7 +4,7 @@
  * has an active playbook. Without a playbook the thread is placed in_review
  * for manual handling. The legacy auto-draft flow is removed.
  */
-import { query, queryOne, transaction } from "../db/client.ts";
+import { execute, query, queryOne, transaction } from "../db/client.ts";
 import { AppError, Category, Message, OAuthToken, Setting, Thread } from "../types/index.ts";
 import { categoriseEmail } from "./ai.ts";
 import { applyLabel } from "./gmail.ts";
@@ -13,6 +13,7 @@ import { startRun } from "./playbook/executor.ts";
 import type { Playbook, PlaybookRun } from "./playbook/types.ts";
 import { publish } from "./event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
+import { sendAlert } from "./alerts.ts";
 
 /**
  * Categorise a thread and route it to the appropriate playbook.
@@ -232,6 +233,7 @@ async function routeThreadToCategory(
           await startRun(workspaceId, threadId, playbook.id);
         } catch (err) {
           console.error(`[categorisation] Playbook run failed for thread ${threadId}:`, err);
+          await handleStartRunFailure(workspaceId, threadId, err);
         }
       }
 
@@ -289,6 +291,25 @@ async function routeThreadToCategory(
   }
 
   return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated: false };
+}
+
+/**
+ * startRun can still throw outside advanceRun's own containment (executor.ts's
+ * loadRunSetup/failRun) - e.g. the playbook row disappearing between
+ * validation and the INSERT here. Previously this was a bare console.error
+ * with no DB write at all: the thread stayed wherever it was and nobody was
+ * ever alerted. Exported for categorisation_test.ts.
+ */
+export async function handleStartRunFailure(
+  workspaceId: number,
+  threadId: number,
+  err: unknown,
+): Promise<void> {
+  await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  await sendAlert(workspaceId, "run_failed", {
+    thread_id: threadId,
+    reason: `startRun failed: ${String(err)}`,
+  }).catch(() => {});
 }
 
 /**
