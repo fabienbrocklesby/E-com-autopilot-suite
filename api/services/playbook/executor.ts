@@ -5,7 +5,7 @@ import { execute, query, queryOne, transaction } from "../../db/client.ts";
 import { getHandler } from "./registry.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
-import { AppError, Message } from "../../types/index.ts";
+import { AppError, type Message } from "../../types/index.ts";
 import { publish } from "../event-bus.ts";
 import { fetchThreadListItem } from "../../db/queries.ts";
 import { getStoreProfile } from "../store-profile.ts";
@@ -16,6 +16,7 @@ import type {
   PlaybookRun,
   PlaybookStep,
   RunContext,
+  RunStatus,
   StepExecution,
   StepResult,
 } from "./types.ts";
@@ -129,6 +130,131 @@ async function escalateRunDueToLoop(
   return finalizeEscalation(runId, threadId, workspaceId, variables, currentStepId, reason);
 }
 
+export interface RunSetup {
+  playbook: Playbook;
+  steps: PlaybookStep[];
+  thread: { id: number; gmail_thread_id: string; subject: string; workspace_id: number };
+  messages: Message[];
+  tokenRow: { email: string };
+  senderName: string | null;
+  storeProfile: string | null;
+}
+
+/**
+ * Everything advanceRun needs besides the run row itself and the dynamic
+ * per-iteration state (variables/currentStepId/status). Extracted so the
+ * caller can wrap it in one try/catch (advanceRun) and so regenerate.ts
+ * (Task 8) can build the same RunContext outside the run loop without
+ * duplicating these seven queries.
+ */
+export async function loadRunSetup(run: PlaybookRun): Promise<RunSetup> {
+  const playbook = await queryOne<Playbook>(
+    "SELECT * FROM playbooks WHERE id = $1",
+    [run.playbook_id],
+  );
+  if (!playbook) throw new Error(`Playbook ${run.playbook_id} not found`);
+
+  const steps = getRunSteps(run, playbook);
+
+  const thread = await queryOne<
+    { id: number; gmail_thread_id: string; subject: string; workspace_id: number }
+  >(
+    "SELECT id, gmail_thread_id, subject, workspace_id FROM threads WHERE id = $1",
+    [run.thread_id],
+  );
+  if (!thread) throw new Error(`Thread ${run.thread_id} not found`);
+
+  // Full Message shape (Phase 1 widened this query to include thread_id and
+  // gmail_message_id so RunContext.messages: Message[] is satisfied end to end).
+  const messages = await query<Message>(
+    "SELECT id, thread_id, gmail_message_id, from_address, body_plain, body_html, direction, received_at, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
+    [run.thread_id],
+  );
+
+  const tokenRow = await queryOne<{ email: string }>(
+    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
+    [run.workspace_id],
+  );
+  if (!tokenRow) throw new Error(`No OAuth token for workspace ${run.workspace_id}`);
+
+  const senderNameRow = await queryOne<{ value: string }>(
+    "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'sender_name'",
+    [run.workspace_id],
+  );
+  const senderName = senderNameRow?.value ?? null;
+
+  const storeProfile = await getStoreProfile(run.workspace_id);
+
+  return { playbook, steps, thread, messages, tokenRow, senderName, storeProfile };
+}
+
+/** Pure - builds the per-step RunContext from a loaded setup plus the loop's
+ *  dynamic state. No I/O, so both advanceRun's loop and regenerate.ts's
+ *  one-shot context build (Task 8) can call it. */
+export function buildRunContext(
+  run: PlaybookRun,
+  setup: RunSetup,
+  variables: Record<string, unknown>,
+  currentStepId: string | null,
+  status: RunStatus,
+): RunContext {
+  return {
+    run: { ...run, context: variables, current_step_id: currentStepId, status },
+    playbook: { ...setup.playbook, steps: setup.steps },
+    threadId: setup.thread.id,
+    workspaceId: run.workspace_id,
+    variables,
+    messages: setup.messages,
+    email: setup.tokenRow.email,
+    gmailThreadId: setup.thread.gmail_thread_id,
+    subject: setup.thread.subject,
+    senderName: setup.senderName,
+    storeProfile: setup.storeProfile,
+  };
+}
+
+/**
+ * The other terminal write path alongside finalizeEscalation: for genuine
+ * structural failures (missing thread, no OAuth token, a playbook removed
+ * out from under a run) rather than a deliberate escalation. Same shape -
+ * real reason recorded, thread surfaced, alert fired, SSE published - so a
+ * run never wedges in 'running' with nothing visible to a human.
+ */
+async function failRun(
+  runId: number,
+  threadId: number,
+  workspaceId: number,
+  reason: string,
+): Promise<RunResult> {
+  const updatedRun = await queryOne<PlaybookRun & { playbook_name: string }>(
+    `UPDATE playbook_runs pr
+     SET status = 'failed', context = pr.context || $1::jsonb
+     FROM playbooks p
+     WHERE pr.playbook_id = p.id AND pr.id = $2
+     RETURNING pr.*, p.name AS playbook_name`,
+    [JSON.stringify({ _failure_reason: reason }), runId],
+  );
+  await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  logger.error("playbook.run_failed", { run_id: runId, thread_id: threadId, reason });
+  await sendAlert(workspaceId, "run_failed", { run_id: runId, thread_id: threadId, reason })
+    .catch(() => {});
+  if (updatedRun) {
+    publish({ type: "run_updated", workspaceId, threadId, run: updatedRun });
+  }
+  const threadItem = await fetchThreadListItem(threadId, workspaceId);
+  if (threadItem) {
+    publish({
+      type: "thread_updated",
+      workspaceId,
+      thread: threadItem as unknown as Record<string, unknown>,
+    });
+  }
+  const context = updatedRun
+    ? (typeof updatedRun.context === "string" ? JSON.parse(updatedRun.context) : updatedRun.context)
+    : {};
+  return { runId, status: "failed", currentStepId: updatedRun?.current_step_id ?? null, context };
+}
+
 /**
  * Advance a playbook run from its current step. Loops until the run pauses,
  * completes, or fails. All state changes are persisted per-step.
@@ -141,47 +267,18 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   );
   if (!run) throw new Error(`Playbook run ${runId} not found`);
 
-  // Load the playbook
-  const playbook = await queryOne<Playbook>(
-    "SELECT * FROM playbooks WHERE id = $1",
-    [run.playbook_id],
-  );
-  if (!playbook) throw new Error(`Playbook ${run.playbook_id} not found`);
-
-  const steps = getRunSteps(run, playbook);
-
-  // Load the thread
-  const thread = await queryOne<
-    { id: number; gmail_thread_id: string; subject: string; workspace_id: number }
-  >(
-    "SELECT id, gmail_thread_id, subject, workspace_id FROM threads WHERE id = $1",
-    [run.thread_id],
-  );
-  if (!thread) throw new Error(`Thread ${run.thread_id} not found`);
-
-  // Load messages. RunContext.messages is typed as the canonical Message[]
-  // (see types.ts) so the brief service can take ctx.messages directly -
-  // select every column that type declares, not just the ones this file uses.
-  const messages = await query<Message>(
-    "SELECT id, thread_id, gmail_message_id, from_address, body_plain, body_html, direction, received_at, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
-    [run.thread_id],
-  );
-
-  // Get connected email
-  const tokenRow = await queryOne<{ email: string }>(
-    "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
-    [run.workspace_id],
-  );
-  if (!tokenRow) throw new Error(`No OAuth token for workspace ${run.workspace_id}`);
-
-  // Load sender name from settings (used to sign replies)
-  const senderNameRow = await queryOne<{ value: string }>(
-    "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'sender_name'",
-    [run.workspace_id],
-  );
-  const senderName = senderNameRow?.value ?? null;
-
-  const storeProfile = await getStoreProfile(run.workspace_id);
+  // Everything else needed to execute a step can fail structurally - a
+  // deleted thread, a disconnected Gmail account, a playbook removed out
+  // from under a run. Contained here instead of propagating uncaught: the
+  // run is marked failed with the real error, alerted, and the thread is
+  // surfaced for review, instead of staying wedged in 'running' forever.
+  let setup: RunSetup;
+  try {
+    setup = await loadRunSetup(run);
+  } catch (err) {
+    return await failRun(runId, run.thread_id, run.workspace_id, String(err));
+  }
+  const { steps } = setup;
 
   // Build context
   const variables: Record<string, unknown> = typeof run.context === "string"
@@ -257,19 +354,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
     const handler = getHandler(step.type);
 
     // Build the run context for this step
-    const ctx: RunContext = {
-      run: { ...run, context: variables, current_step_id: currentStepId, status },
-      playbook: { ...playbook, steps },
-      threadId: thread.id,
-      workspaceId: run.workspace_id,
-      variables,
-      messages,
-      email: tokenRow.email,
-      gmailThreadId: thread.gmail_thread_id,
-      subject: thread.subject,
-      senderName,
-      storeProfile,
-    };
+    const ctx: RunContext = buildRunContext(run, setup, variables, currentStepId, status);
 
     // Record step execution start
     const execRow = await queryOne<{ id: number }>(
@@ -346,7 +431,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
             status: "retrying",
             current_step_id: currentStepId,
             context: variables,
-            playbook_name: playbook.name,
+            playbook_name: setup.playbook.name,
           },
         });
         logger.warn("playbook.step_retry_scheduled", {
@@ -375,7 +460,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
           status: "failed",
           current_step_id: currentStepId,
           context: variables,
-          playbook_name: playbook.name,
+          playbook_name: setup.playbook.name,
         },
       });
       logger.error("playbook.step_threw", { run_id: runId, step_id: step.id, error: String(err) });
@@ -467,7 +552,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
             status,
             current_step_id: currentStepId,
             context: variables,
-            playbook_name: playbook.name,
+            playbook_name: setup.playbook.name,
           },
         });
         const pausedThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
@@ -506,7 +591,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
               status: "retrying",
               current_step_id: currentStepId,
               context: variables,
-              playbook_name: playbook.name,
+              playbook_name: setup.playbook.name,
             },
           });
           logger.warn("playbook.step_retry_scheduled", {
@@ -554,7 +639,7 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         status,
         current_step_id: currentStepId,
         context: variables,
-        playbook_name: playbook.name,
+        playbook_name: setup.playbook.name,
       },
     });
 
@@ -577,11 +662,11 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   } else if (status === "waiting_for_customer" || status === "waiting_for_human") {
     await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
   } else if (status === "failed") {
-    // 'escalated' can no longer reach here - every escalation path returns
-    // early via finalizeEscalation now (loop detection, the 50-cap, and the
-    // escalate decision case above all do). Task 7 adds the run_failed alert
-    // here.
     await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [run.thread_id]);
+    await sendAlert(run.workspace_id, "run_failed", {
+      run_id: runId,
+      thread_id: run.thread_id,
+    }).catch(() => {});
   }
   // retrying: don't change thread status - the run will resume automatically
 

@@ -44,3 +44,33 @@ Deno.test({
     }
   },
 });
+
+Deno.test("advanceRun contains a structural setup failure instead of wedging the run [DB]", async () => {
+  const steps: EscalateStep[] = [{ id: "step_1", type: "escalate", reason: "unused" }];
+  // No OAuth token for this workspace - loadRunSetup's tokenRow check fails
+  // deterministically, no network call involved.
+  const fixture = await createTestFixture(steps, { withOAuthToken: false });
+  try {
+    const result = await startRun(fixture.workspaceId, fixture.threadId, fixture.playbookId);
+    assertEquals(result.status, "failed");
+    assertExists(result.context._failure_reason);
+
+    const run = await queryOne<{ status: string; context: Record<string, unknown> }>(
+      "SELECT status, context FROM playbook_runs WHERE id = $1",
+      [result.runId],
+    );
+    assertEquals(run!.status, "failed");
+    assertEquals(
+      run!.context._failure_reason,
+      `Error: No OAuth token for workspace ${fixture.workspaceId}`,
+    );
+
+    const thread = await queryOne<{ status: string }>(
+      "SELECT status FROM threads WHERE id = $1",
+      [fixture.threadId],
+    );
+    assertEquals(thread!.status, "in_review");
+  } finally {
+    await cleanupFixture(fixture.workspaceId);
+  }
+});
