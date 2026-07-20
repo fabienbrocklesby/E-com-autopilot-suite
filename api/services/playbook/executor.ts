@@ -487,6 +487,21 @@ export async function advanceRun(runId: number): Promise<RunResult> {
         );
         break;
       }
+
+      case "escalate": {
+        // A step or the AI decided this thread needs a human. Record the real
+        // cause on the run context so the UI, the escalate handler's reason
+        // precedence, and the run_escalated alert all reflect the true reason.
+        // Setting status to "escalated" breaks the loop below; the post-loop
+        // tail then sets the thread to in_review and fires the alert.
+        status = "escalated";
+        variables._escalation_reason = result.decision.reason;
+        await execute(
+          "UPDATE playbook_step_executions SET error = $1 WHERE id = $2",
+          [result.decision.reason, execId],
+        );
+        break;
+      }
     }
 
     // Persist run state after each step
