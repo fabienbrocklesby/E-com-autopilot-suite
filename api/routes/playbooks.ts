@@ -456,14 +456,26 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   // since there is no on_reject step to route to (that wiring only exists on
   // manual_approval steps, handled below).
   if (currentStep.type === "ask_customer" || currentStep.type === "send_reply") {
-    const reason = `Rejected by human: ${currentStep.id} (rejected ${currentStep.type})`;
-    await finalizeEscalation(runId, run.thread_id, run.workspace_id, reason, {
-      currentStepId: run.current_step_id,
-    });
+    // Converges with the manual_approval reject flow below: both end up calling
+    // finalizeEscalation, so both record a real reason, surface the thread for
+    // review, fire the alert, and publish SSE the same way.
+    const currentContext = typeof run.context === "string"
+      ? JSON.parse(run.context)
+      : { ...run.context };
+    const rejectionReason =
+      `Rejected by human: draft for ${currentStep.type} step "${currentStep.id}" was not approved`;
+    await finalizeEscalation(
+      runId,
+      run.thread_id,
+      run.workspace_id,
+      currentContext,
+      run.current_step_id,
+      rejectionReason,
+    );
     const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
       runId,
     ]);
-    return c.json({ run: updated, result: { action: "escalated", reason } });
+    return c.json({ run: updated, result: { action: "escalated", reason: rejectionReason } });
   }
 
   if (currentStep.type !== "manual_approval") {
