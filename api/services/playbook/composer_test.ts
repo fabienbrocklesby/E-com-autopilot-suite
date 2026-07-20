@@ -91,7 +91,10 @@ Deno.test("assembleComposerContext includes the full transcript and sign-off for
   assertStringIncludes(result, "message body 5");
   assertStringIncludes(result, "SIGN OFF AS: Kieran");
   assertStringIncludes(result, "STORE CONTEXT");
-  assertStringIncludes(result, "THREAD BRIEF");
+  // Empty brief (no facts, no summary yet) - formatBriefBlock omits the
+  // section entirely, matching evaluate.ts/triage.ts's own THREAD BRIEF
+  // behaviour instead of a hand-rolled "(none yet)" placeholder.
+  assertEquals(result.includes("THREAD BRIEF"), false);
 });
 
 Deno.test("assembleComposerContext caps a long thread's transcript and surfaces the brief summary and facts", () => {

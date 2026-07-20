@@ -6,11 +6,10 @@
  * different presence checks) and produced inconsistent reply quality.
  */
 import type { RunContext } from "./types.ts";
-import { AppError } from "../../types/index.ts";
 import { chatCompletion, getModel } from "../ai.ts";
 import { ensureBriefSummary, getThreadBrief } from "./brief.ts";
 import type { ThreadBrief } from "./brief.ts";
-import { formatCappedTranscript, isPresent } from "./context-utils.ts";
+import { formatBriefBlock, formatCappedTranscript, isPresent } from "./context-utils.ts";
 
 export type ComposerInputs = {
   ctx: RunContext;
@@ -57,12 +56,14 @@ export function assembleComposerContext(
     );
   }
 
-  const briefLines: string[] = [];
-  if (Object.keys(brief.facts).length > 0) {
-    briefLines.push(`Facts:\n${JSON.stringify(brief.facts, null, 2)}`);
+  // Delegates to formatBriefBlock, the same renderer evaluate.ts and triage.ts
+  // use, instead of hand-rolling a second THREAD BRIEF format here - this was
+  // the exact prompt drift this composer exists to eliminate. Omits the
+  // block entirely when the brief has neither facts nor a summary yet.
+  const briefBlock = formatBriefBlock(brief);
+  if (briefBlock) {
+    sections.push(briefBlock);
   }
-  briefLines.push(`Summary: ${summary ?? "(none yet - early in the conversation)"}`);
-  sections.push(`THREAD BRIEF:\n${briefLines.join("\n\n")}`);
 
   const haveContext: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(ctx.variables)) {
@@ -77,7 +78,7 @@ export function assembleComposerContext(
     }`,
   );
 
-  sections.push(`FULL TRANSCRIPT:\n${formatCappedTranscript(ctx.messages, summary)}`);
+  sections.push(`THREAD TRANSCRIPT:\n${formatCappedTranscript(ctx.messages, summary)}`);
 
   sections.push(
     `PREVIOUS MESSAGES WE SENT (do NOT repeat these):\n${
@@ -161,7 +162,16 @@ RULES:
   try {
     parsed = JSON.parse(response);
   } catch {
-    throw new AppError(502, "composeAskDecision: AI returned invalid JSON", response);
+    // Malformed JSON goes to a human rather than throwing: a thrown AppError(502)
+    // would be picked up by the executor's retriable-error check and retried as
+    // if it were a transient upstream failure, when the real cause is a garbled
+    // model response that won't fix itself on retry. Returning here (instead of
+    // throwing) also keeps aiCall in the audit trail for the one response most
+    // worth inspecting.
+    return {
+      decision: { action: "escalate", reason: "The assistant returned an unreadable response" },
+      aiCall,
+    };
   }
 
   if (parsed.action === "skip") {
@@ -177,7 +187,13 @@ RULES:
     return { decision: { action: "ask", message: parsed.message }, aiCall };
   }
 
-  throw new AppError(502, `composeAskDecision: AI returned unexpected action: ${parsed.action}`);
+  // Unexpected/unrecognised action - same reasoning as the parse-failure case
+  // above: escalate to a human with the aiCall preserved, don't throw a
+  // retriable error for a response shape that retrying won't fix.
+  return {
+    decision: { action: "escalate", reason: "The assistant returned an unreadable response" },
+    aiCall,
+  };
 }
 
 /**
