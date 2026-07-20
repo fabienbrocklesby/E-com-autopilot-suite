@@ -254,6 +254,7 @@ async function ingestMessage(
 
   // Gmail gives us the whole conversation here. Store every missing message before
   // categorisation so AI/playbooks can see context from threads that existed pre-launch.
+  let currentInsertedMessageId: number | null = null;
   for (const parsedMessage of parsedMessages) {
     const insertedMsg = await queryOne<Message>(
       `INSERT INTO messages
@@ -280,6 +281,9 @@ async function ingestMessage(
         threadId: threadRow.id,
         message: insertedMsg,
       });
+      if (parsedMessage.gmailMessageId === currentMessage.gmailMessageId) {
+        currentInsertedMessageId = insertedMsg.id;
+      }
     }
   }
 
@@ -290,22 +294,49 @@ async function ingestMessage(
     return;
   }
 
-  // Phase 2: Check if this thread has an active playbook run waiting for customer reply.
+  // A thread with any non-terminal run is never recategorised (design doc 3.2) - a new
+  // inbound message must never destroy an active run. Recategorisation below only ever
+  // runs when there is no active run for this thread.
   const activeRun = await queryOne<PlaybookRun>(
     `SELECT * FROM playbook_runs
-     WHERE thread_id = $1 AND status = 'waiting_for_customer'
+     WHERE thread_id = $1
+       AND status IN ('running', 'waiting_for_customer', 'waiting_for_human', 'waiting_to_send', 'retrying')
      ORDER BY created_at DESC LIMIT 1`,
     [threadRow.id],
   );
 
-  if (activeRun) {
-    logger.info("gmail.resume_playbook_run", { thread_id: threadRow.id, run_id: activeRun.id });
-    try {
-      await resumeRun(activeRun.id);
-    } catch (err) {
-      logger.error("gmail.resume_run_failed", { run_id: activeRun.id, error: String(err) });
+  switch (resolveInboundRunAction(activeRun?.status ?? null)) {
+    case "resume": {
+      logger.info("gmail.resume_playbook_run", { thread_id: threadRow.id, run_id: activeRun!.id });
+      try {
+        await resumeRun(activeRun!.id);
+      } catch (err) {
+        logger.error("gmail.resume_run_failed", { run_id: activeRun!.id, error: String(err) });
+      }
+      return;
     }
-    return;
+    case "attach_to_waiting_human": {
+      await attachMessageToWaitingRun(
+        activeRun!,
+        currentInsertedMessageId,
+        currentMessage.receivedAt,
+      );
+      return;
+    }
+    case "requeue_send": {
+      await requeuePendingSend(activeRun!);
+      return;
+    }
+    case "store_only": {
+      logger.info("gmail.inbound_during_active_run", {
+        thread_id: threadRow.id,
+        run_id: activeRun!.id,
+        run_status: activeRun!.status,
+      });
+      return;
+    }
+    case "none":
+      break; // no active run - fall through to recategorisation
   }
 
   const gmailLabelsAuthoritative = await isGmailLabelsAuthoritative(workspaceId);
