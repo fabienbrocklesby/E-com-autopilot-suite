@@ -5,7 +5,7 @@ import { execute, query, queryOne } from "../../db/client.ts";
 import { getHandler } from "./registry.ts";
 import { logger } from "../logger.ts";
 import { sendAlert } from "../alerts.ts";
-import { AppError } from "../../types/index.ts";
+import { AppError, Message } from "../../types/index.ts";
 import { publish } from "../event-bus.ts";
 import { fetchThreadListItem } from "../../db/queries.ts";
 import { getStoreProfile } from "../store-profile.ts";
@@ -33,16 +33,6 @@ function isRetriableError(err: unknown): boolean {
     if (err.statusCode === 502) return true;
   }
   return false;
-}
-
-interface RunMessage {
-  id: number;
-  from_address: string;
-  body_plain: string;
-  body_html: string;
-  direction: "inbound" | "outbound";
-  received_at: Date;
-  message_id_header: string | null;
 }
 
 export interface RunResult {
@@ -129,9 +119,11 @@ export async function advanceRun(runId: number): Promise<RunResult> {
   );
   if (!thread) throw new Error(`Thread ${run.thread_id} not found`);
 
-  // Load messages
-  const messages = await query<RunMessage>(
-    "SELECT id, from_address, body_plain, body_html, direction, received_at, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
+  // Load messages. RunContext.messages is typed as the canonical Message[]
+  // (see types.ts) so the brief service can take ctx.messages directly -
+  // select every column that type declares, not just the ones this file uses.
+  const messages = await query<Message>(
+    "SELECT id, thread_id, gmail_message_id, from_address, body_plain, body_html, direction, received_at, message_id_header FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
     [run.thread_id],
   );
 

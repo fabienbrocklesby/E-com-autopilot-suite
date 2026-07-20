@@ -2,6 +2,7 @@
  * Playbook engine types.
  * Mirrors the data model from docs/PLAYBOOK_ENGINE.md.
  */
+import type { Message } from "../../types/index.ts";
 
 // ─── Step definitions (stored in playbooks.steps JSONB) ───────────────────────
 
@@ -209,16 +210,13 @@ export interface RunContext {
   workspaceId: number;
   /** The full context bag - handlers read and write to this */
   variables: Record<string, unknown>;
-  /** All messages on this thread, oldest first */
-  messages: Array<{
-    id: number;
-    from_address: string;
-    body_plain: string;
-    body_html: string;
-    direction: "inbound" | "outbound";
-    received_at: Date;
-    message_id_header: string | null;
-  }>;
+  /**
+   * All messages on this thread, oldest first. Widened to the canonical
+   * Message shape (rather than a hand-rolled subset) so the brief service's
+   * shouldRegenerateSummary/ensureBriefSummary (Message[]-typed) can take
+   * ctx.messages directly without every handler re-shaping it.
+   */
+  messages: Message[];
   /** The connected email address for sending */
   email: string;
   /** The Gmail thread ID */
