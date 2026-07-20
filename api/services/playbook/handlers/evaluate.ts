@@ -14,6 +14,15 @@ import { chatCompletion, getModel } from "../../ai.ts";
 import { ensureBriefSummary, getThreadBrief } from "../brief.ts";
 import { formatBriefBlock, formatCappedTranscript, isPresent } from "../context-utils.ts";
 
+/**
+ * Maps the AI's raw escalate reason to the run's escalation_reason. Pure,
+ * same reasoning as ask_customer's version - unit-testable without the
+ * chatCompletion call.
+ */
+export function resolveEvaluateEscalateReason(reason: string | undefined): string {
+  return reason && reason.trim() ? reason : "evaluate AI escalated without a stated reason";
+}
+
 export const evaluateHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
     const evalStep = step as EvaluateStep;
@@ -129,20 +138,13 @@ Output JSON only. No markdown, no explanation outside the JSON.`;
     }
 
     if (parsed.action === "escalate") {
-      // The AI found something wrong even with the info present: a fake/placeholder
-      // value, or the conversation has gone off the rails. Return an escalate
-      // decision directly so the executor lands the run 'escalated' with the AI's
-      // real reason (which flows into the escalate handler's reason precedence and
-      // the run_escalated alert). Routing to if_escalate_goto instead would only
-      // escalate if the author wired that field to a real escalate step, and would
-      // otherwise advance to a stale step and fail. if_escalate_goto is kept on the
-      // type for backward data compat only, not read here.
-      const reason = isPresent(parsed.reason)
-        ? parsed.reason as string
-        : "AI flagged the conversation for human review";
-      console.log(
-        `[playbook] evaluate: AI escalated - ${reason} for run ${ctx.run.id}`,
-      );
+      // Terminate directly with the AI's real reason instead of routing to
+      // if_escalate_goto - that field pointed at a step with a hardcoded reason
+      // string that didn't reflect what actually went wrong (see CLAUDE.md
+      // known issues). The field stays on the type for old playbooks; this
+      // handler just stops reading it.
+      const reason = resolveEvaluateEscalateReason(parsed.reason);
+      console.log(`[playbook] evaluate: AI escalated - ${reason} for run ${ctx.run.id}`);
       return {
         decision: { action: "escalate", reason },
         output: { action: "escalated", reason },
