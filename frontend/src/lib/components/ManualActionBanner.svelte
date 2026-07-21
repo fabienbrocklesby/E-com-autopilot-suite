@@ -33,6 +33,7 @@
   let humanInput = $state("");
   let draftBody = $state(untrack(() => run.step_pending_send ?? ""));
   let submitting = $state(false);
+  let regenerating = $state(false);
   let error = $state<string | null>(null);
 
   // True when this pause is for an ask_customer or send_reply step with require_approval.
@@ -58,6 +59,7 @@
 
   let canApprove = $derived(
     !submitting &&
+    !regenerating &&
     (isPendingSend
       ? draftBody.trim().length > 0
       : !captureInput || humanInput.trim().length > 0),
@@ -67,7 +69,6 @@
     const raw = run.context?._messages_since_draft;
     return Array.isArray(raw) ? (raw as Array<{ message_id: number | null; received_at: string }>) : [];
   });
-  let regenerating = $state(false);
 
   async function regenerateDraft() {
     regenerating = true;
@@ -268,8 +269,8 @@
     gap: 0.5rem;
     padding: 0.5rem 0.75rem;
     margin-bottom: 0.875rem;
-    background: rgba(245, 158, 11, 0.1);
-    border: 1px solid rgba(245, 158, 11, 0.35);
+    background: rgba(245 158 11 / 0.1);
+    border: 1px solid rgba(245 158 11 / 0.35);
     border-radius: calc(var(--radius, 8px) - 2px);
     color: var(--color-warning, #f59e0b);
     font-size: 0.8125rem;
@@ -283,7 +284,7 @@
 
   .regen-btn {
     background: transparent;
-    border: 1px solid rgba(245, 158, 11, 0.5);
+    border: 1px solid rgba(245 158 11 / 0.5);
     color: var(--color-warning, #f59e0b);
     padding: 0.3rem 0.75rem;
     border-radius: calc(var(--radius, 8px) - 2px);
@@ -294,7 +295,7 @@
   }
 
   .regen-btn:hover:not(:disabled) {
-    background: rgba(245, 158, 11, 0.15);
+    background: rgba(245 158 11 / 0.15);
   }
 
   .regen-btn:disabled {

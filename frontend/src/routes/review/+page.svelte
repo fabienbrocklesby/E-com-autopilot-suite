@@ -68,8 +68,8 @@
     }
   }
 
-  async function load() {
-    loading = true;
+  async function load(silent = false) {
+    if (!silent) loading = true;
     error = null;
     try {
       const [threadsRes, runsRes] = await Promise.all([
@@ -87,7 +87,7 @@
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load review queue";
     } finally {
-      loading = false;
+      if (!silent) loading = false;
     }
   }
 
@@ -189,11 +189,11 @@
     });
 
     es.addEventListener('thread_updated', () => {
-      load();
+      load(true);
     });
 
     es.addEventListener('run_updated', () => {
-      load();
+      load(true);
     });
 
     return () => es.close();
@@ -293,7 +293,7 @@
               <button
                 class="btn btn-primary"
                 onclick={() => approveRun(run.id, run.step_capture_input ?? false)}
-                disabled={runActioning === run.id}
+                disabled={runActioning === run.id || regeneratingRunId === run.id}
               >
                 {runActioning === run.id ? "…" : "Approve"}
               </button>
