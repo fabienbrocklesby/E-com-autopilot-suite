@@ -478,8 +478,11 @@ function parseGmailMessageForIngest(
   accountEmail: string,
 ): ParsedGmailMessage {
   const from = headerValue(gmailMsg, "From") ?? "";
-  const { plain, html } = extractBody(gmailMsg);
-  const readablePlain = getReadableEmailText({ body_plain: plain, body_html: html });
+  const { plain, html, attachmentFilenames } = extractBody(gmailMsg);
+  const readablePlain = appendAttachmentMarkers(
+    getReadableEmailText({ body_plain: plain, body_html: html }),
+    attachmentFilenames,
+  );
   const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
   const fromNormalised = from.toLowerCase();
   const accountNormalised = accountEmail.toLowerCase();
@@ -525,11 +528,17 @@ function headerValue(msg: GmailMessage, name: string): string | undefined {
 }
 
 /** Recursively extract plain text and HTML body from a Gmail message part. */
-function extractBody(msg: GmailMessage): { plain: string; html: string } {
+function extractBody(
+  msg: GmailMessage,
+): { plain: string; html: string; attachmentFilenames: string[] } {
   let plain = "";
   let html = "";
+  const attachmentFilenames: string[] = [];
 
   function walk(part: GmailMessage["payload"]): void {
+    if (part.filename && part.filename.trim().length > 0) {
+      attachmentFilenames.push(part.filename);
+    }
     if (part.mimeType === "text/plain" && part.body.data) {
       plain += decodeBase64Utf8(part.body.data);
     } else if (part.mimeType === "text/html" && part.body.data) {
@@ -541,7 +550,18 @@ function extractBody(msg: GmailMessage): { plain: string; html: string } {
   }
 
   walk(msg.payload);
-  return { plain, html };
+  return { plain, html, attachmentFilenames };
+}
+
+/**
+ * Appends one "[attachment: filename]" line per attachment so the stored
+ * transcript, and anything reading body_plain (composer, evaluate, triage),
+ * can acknowledge attachments even though their content is never read.
+ */
+export function appendAttachmentMarkers(text: string, filenames: string[]): string {
+  if (filenames.length === 0) return text;
+  const markers = filenames.map((name) => `[attachment: ${name}]`).join("\n");
+  return text ? `${text}\n\n${markers}` : markers;
 }
 
 function textToHtml(text: string): string {
@@ -550,6 +570,46 @@ function textToHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
   return `<html><body><p>${escaped.replace(/\n/g, "<br>")}</p></body></html>`;
+}
+
+/**
+ * Builds an RFC 5322 From header with an optional quoted display name.
+ * Ref: RFC 5322 section 3.4, https://www.rfc-editor.org/rfc/rfc5322#section-3.4
+ */
+export function formatFromHeader(storeName: string | null, email: string): string {
+  const trimmed = storeName?.trim();
+  if (!trimmed) return email;
+  const escaped = trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}" <${email}>`;
+}
+
+/**
+ * Deterministically appends the store's configured signature to a reply
+ * body. `senderName` is `settings.sender_name` (the only per-workspace
+ * "signature" this codebase has - there is no separate freeform
+ * signature-text setting, and the Settings page itself documents and
+ * previews this exact "Best regards,\n{name}" format to the merchant).
+ * Appends nothing when no name is configured.
+ *
+ * Idempotent, but not just against its own exact output: composer.ts's
+ * prompts already tell the AI to close the body with this same name in its
+ * own words ("Thanks, Kieran", "Cheers, Kieran", ...), so an exact-block
+ * match alone would almost never catch that and would double the sign-off
+ * on nearly every send. Instead this checks whether the sender's name
+ * already appears in the body's last line - true for any phrasing the AI
+ * used - and skips appending when it does.
+ */
+export function appendSignature(body: string, senderName: string | null): string {
+  const trimmedName = senderName?.trim();
+  if (!trimmedName) return body;
+
+  const trimmedBody = body.trimEnd();
+  const lines = trimmedBody.split("\n");
+  const lastLine = lines[lines.length - 1]?.trim() ?? "";
+  if (lastLine.includes(trimmedName)) return trimmedBody;
+
+  const signatureBlock = `Best regards,\n${trimmedName}`;
+  return `${trimmedBody}\n\n${signatureBlock}`;
 }
 
 /**
@@ -570,11 +630,29 @@ export async function sendReply(
   dbThreadId?: number,
   workspaceId = 1,
 ): Promise<void> {
+  // Look up the store display name and signature once, up front, so every
+  // reply path (playbook auto-send, draft approval, ask_customer, manual
+  // reply) gets the same human-looking From header and sign-off without
+  // each caller repeating the lookup.
+  const [workspaceRow, signatureRow] = await Promise.all([
+    queryOne<{ store_name: string | null }>(
+      "SELECT store_name FROM workspaces WHERE id = $1",
+      [workspaceId],
+    ),
+    queryOne<{ value: string }>(
+      "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'sender_name'",
+      [workspaceId],
+    ),
+  ]);
+
+  const fromHeader = formatFromHeader(workspaceRow?.store_name ?? null, email);
+  const signedBody = appendSignature(body, signatureRow?.value ?? null);
+
   // Build an RFC 2822 reply message.
   // If we have the original email's Message-ID, use it for proper threading.
   // The threadId in the API request also helps Gmail place the sent message.
   const headers = [
-    `From: ${email}`,
+    `From: ${fromHeader}`,
     `To: ${replyToAddress}`,
     `Subject: Re: ${subject.replace(/^Re:\s*/i, "")}`,
     "MIME-Version: 1.0",
@@ -588,7 +666,7 @@ export async function sendReply(
     headers.push(`References: ${mid}`);
   }
 
-  const rawMessage = [...headers, "", textToHtml(body)].join("\r\n");
+  const rawMessage = [...headers, "", textToHtml(signedBody)].join("\r\n");
 
   // base64url encode (no padding, URL-safe chars).
   const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
@@ -615,13 +693,15 @@ export async function sendReply(
   // without waiting for the Pub/Sub webhook (which can take minutes).
   // The webhook will hit ON CONFLICT DO NOTHING when it eventually fires.
   if (dbThreadId) {
+    // Store the signed body (what was actually sent), not the raw pre-signature
+    // body, so the dashboard's transcript matches what the customer received.
     const sentMsg = await queryOne<Message>(
       `INSERT INTO messages
          (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
        VALUES ($1, $2, $3, $4, $5, $6, 'outbound', NULL)
        ON CONFLICT (gmail_message_id) DO NOTHING
        RETURNING *`,
-      [dbThreadId, sent.id, email, body, "", new Date().toISOString()],
+      [dbThreadId, sent.id, email, signedBody, "", new Date().toISOString()],
     );
     if (sentMsg) {
       publish({ type: "message_created", workspaceId, threadId: dbThreadId, message: sentMsg });

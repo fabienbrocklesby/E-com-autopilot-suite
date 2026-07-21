@@ -1,5 +1,11 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { appendMessageToWaitingRun, resolveInboundRunAction } from "./gmail.ts";
+import {
+  appendAttachmentMarkers,
+  appendMessageToWaitingRun,
+  appendSignature,
+  formatFromHeader,
+  resolveInboundRunAction,
+} from "./gmail.ts";
 
 Deno.test("resolveInboundRunAction resumes a waiting_for_customer run", () => {
   assertEquals(resolveInboundRunAction("waiting_for_customer"), "resume");
@@ -54,4 +60,55 @@ Deno.test("appendMessageToWaitingRun appends without losing prior entries", () =
     { message_id: 1, received_at: "2026-07-19T00:00:00.000Z" },
     { message_id: 2, received_at: "2026-07-20T00:00:00.000Z" },
   ]);
+});
+
+Deno.test("formatFromHeader returns a quoted display name with the store name", () => {
+  const result = formatFromHeader("Exclusive Motors", "store@example.com");
+  assertEquals(result, '"Exclusive Motors" <store@example.com>');
+});
+
+Deno.test("formatFromHeader falls back to the bare address when store name is unset", () => {
+  assertEquals(formatFromHeader(null, "store@example.com"), "store@example.com");
+  assertEquals(formatFromHeader("   ", "store@example.com"), "store@example.com");
+});
+
+Deno.test("formatFromHeader escapes embedded quotes in the display name", () => {
+  const result = formatFromHeader('The "Best" Store', "store@example.com");
+  assertEquals(result, '"The \\"Best\\" Store" <store@example.com>');
+});
+
+Deno.test("appendSignature appends the configured signature when absent", () => {
+  const result = appendSignature("Thanks for reaching out.", "Sarah from Support");
+  assertEquals(result, "Thanks for reaching out.\n\nBest regards,\nSarah from Support");
+});
+
+Deno.test("appendSignature does not duplicate a signature already present", () => {
+  const body = "Thanks for reaching out.\n\nBest regards,\nSarah from Support";
+  assertEquals(appendSignature(body, "Sarah from Support"), body);
+});
+
+Deno.test("appendSignature does not double up when the AI already signed off with a different closing phrase", () => {
+  // composer.ts's prompt tells the AI to close with the exact sender name, but
+  // not in this literal "Best regards," phrasing - this is the real-world case
+  // an exact-block idempotency check would miss.
+  const body = "Thanks for reaching out.\n\nThanks,\nSarah from Support";
+  assertEquals(appendSignature(body, "Sarah from Support"), body);
+});
+
+Deno.test("appendSignature returns the body unchanged when no signature is configured", () => {
+  assertEquals(appendSignature("Thanks for reaching out.", null), "Thanks for reaching out.");
+  assertEquals(appendSignature("Thanks for reaching out.", "  "), "Thanks for reaching out.");
+});
+
+Deno.test("appendAttachmentMarkers appends one marker per filename", () => {
+  const result = appendAttachmentMarkers("Here is my order.", ["receipt.pdf", "photo.jpg"]);
+  assertEquals(result, "Here is my order.\n\n[attachment: receipt.pdf]\n[attachment: photo.jpg]");
+});
+
+Deno.test("appendAttachmentMarkers returns the text unchanged when there are no attachments", () => {
+  assertEquals(appendAttachmentMarkers("Here is my order.", []), "Here is my order.");
+});
+
+Deno.test("appendAttachmentMarkers works against an empty body", () => {
+  assertEquals(appendAttachmentMarkers("", ["photo.jpg"]), "[attachment: photo.jpg]");
 });

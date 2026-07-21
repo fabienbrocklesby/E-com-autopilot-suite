@@ -210,6 +210,9 @@ export interface GmailMessage {
 export interface GmailMessagePart {
   partId?: string;
   mimeType: string;
+  // Present (non-empty) only on attachment parts, not on inline body parts.
+  // Ref: Gmail API MessagePart resource, https://developers.google.com/gmail/api/reference/rest/v1/users.messages#MessagePart
+  filename?: string;
   headers: Array<{ name: string; value: string }>;
   body: { size: number; data?: string };
   parts?: GmailMessagePart[];
