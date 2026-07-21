@@ -8,7 +8,7 @@
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { threadsApi, playbooksApi, ApiRequestError } from "$lib/api";
-  import type { ThreadListItem, ThreadDetail, Draft, PlaybookRun } from "$lib/api";
+  import type { ThreadListItem, ThreadDetail, PlaybookRun } from "$lib/api";
   import { CheckCircle, AlertTriangle } from '@lucide/svelte';
   import { openSSE } from "$lib/sse";
 
@@ -35,9 +35,6 @@
 
   // Per-run editable reply body for pending_send approvals: runId → edited body
   let runBodies = $state<Record<number, string>>({});
-
-  // Per-draft edit state: draftId → edited body
-  let editingBodies = $state<Record<number, string>>({});
 
   // Group pending runs by reason
   let runsByReason = $derived(
@@ -96,36 +93,10 @@
     try {
       const res = await threadsApi.get(id);
       expandedThread = res.thread;
-      for (const d of res.thread.drafts) {
-        if (d.status === "pending") {
-          editingBodies[d.id] = d.body;
-        }
-      }
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load thread";
     } finally {
       detailLoading = false;
-    }
-  }
-
-  async function handleDraftAction(
-    threadId: number,
-    draft: Draft,
-    status: Draft["status"],
-  ) {
-    try {
-      const editedBody =
-        status === "approved" ? editingBodies[draft.id] : undefined;
-      await threadsApi.updateDraftStatus(threadId, draft.id, status, editedBody);
-      successMessage = `Draft ${status}.`;
-      setTimeout(() => { successMessage = null; }, 3000);
-      if (expandedThread?.id === threadId) {
-        const res = await threadsApi.get(threadId);
-        expandedThread = res.thread;
-      }
-      await load();
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to update draft";
     }
   }
 
@@ -376,77 +347,6 @@
           {/each}
         </div>
 
-        {#if expandedThread.drafts.length > 0}
-          <div class="drafts-section">
-            <h3>Drafts</h3>
-            {#each expandedThread.drafts as draft (draft.id)}
-              <div class="draft card">
-                <div class="draft-status-row">
-                  <span class="draft-status draft-status-{draft.status}"
-                    >{draft.status}</span
-                  >
-                  <span class="date"
-                    >{new Date(draft.created_at).toLocaleString()}</span
-                  >
-                  {#if draft.was_edited}
-                    <span class="edited-badge">edited</span>
-                  {/if}
-                </div>
-                {#if draft.status === "pending"}
-                  <textarea
-                    class="draft-editor"
-                    rows={10}
-                    bind:value={editingBodies[draft.id]}
-                  ></textarea>
-                  {#if editingBodies[draft.id] !== draft.body}
-                    <p class="edit-notice">
-                      Body edited - changes will be sent on approval.
-                    </p>
-                  {/if}
-                  <div class="draft-actions">
-                    <button
-                      class="btn btn-primary"
-                      onclick={() =>
-                        handleDraftAction(
-                          expandedThread!.id,
-                          draft,
-                          "approved",
-                        )}
-                    >
-                      Approve &amp; Send
-                    </button>
-                    <button
-                      class="btn btn-ghost"
-                      onclick={() => {
-                        editingBodies[draft.id] = draft.body;
-                      }}
-                    >
-                      Reset
-                    </button>
-                    <button
-                      class="btn btn-danger"
-                      onclick={() =>
-                        handleDraftAction(
-                          expandedThread!.id,
-                          draft,
-                          "rejected",
-                        )}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                {:else}
-                  <pre class="draft-body">{draft.final_body ?? draft.body}</pre>
-                  {#if draft.sent_at}
-                    <p class="sent-at">
-                      Sent {new Date(draft.sent_at).toLocaleString()}
-                    </p>
-                  {/if}
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
       {:else}
         <div class="select-prompt">Select a thread to review</div>
       {/if}
@@ -741,15 +641,6 @@
     font-weight: 500;
   }
 
-  .edited-badge {
-    background: rgba(59 130 246 / 0.15);
-    color: var(--color-info);
-    padding: 2px 7px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
   .thread-detail {
     min-height: 400px;
   }
@@ -804,18 +695,9 @@
     font-weight: 600;
   }
 
-  .date,
-  .sent-at {
-    color: var(--color-text-muted);
-  }
-
   .date {
+    color: var(--color-text-muted);
     margin-left: auto;
-  }
-
-  .sent-at {
-    font-size: 11px;
-    margin-top: 6px;
   }
 
   .direction-badge {
@@ -825,83 +707,6 @@
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .draft-status-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-
-  .draft-status {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  .draft-status-pending {
-    background: rgba(245 158 11 / 0.15);
-    color: var(--color-warning);
-  }
-  .draft-status-approved {
-    background: rgba(16 185 129 / 0.15);
-    color: var(--color-success);
-  }
-  .draft-status-rejected {
-    background: rgba(239 68 68 / 0.15);
-    color: var(--color-danger);
-  }
-  .draft-status-sent {
-    background: rgba(59 130 246 / 0.15);
-    color: var(--color-info);
-  }
-
-  .draft-editor {
-    width: 100%;
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    color: var(--color-text);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.5;
-    padding: 12px;
-    resize: vertical;
-    margin-bottom: 8px;
-  }
-
-  .draft-editor:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
-
-  .edit-notice {
-    font-size: 12px;
-    color: var(--color-info);
-    margin-bottom: 8px;
-  }
-
-  .draft-body {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--color-text-muted);
-    padding: 12px;
-    background: var(--color-bg);
-    border-radius: var(--radius);
-    border: 1px solid var(--color-border);
-    margin-bottom: 12px;
-  }
-
-  .draft-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
   }
 
   .card {
@@ -916,16 +721,6 @@
     color: var(--color-text-muted);
     padding: 60px;
     text-align: center;
-  }
-
-  .btn-danger {
-    background: rgba(239 68 68 / 0.1);
-    border-color: rgba(239 68 68 / 0.3);
-    color: var(--color-danger);
-  }
-
-  .btn-danger:hover {
-    background: rgba(239 68 68 / 0.2);
   }
 
   :global(.error-banner) {
@@ -955,14 +750,6 @@
 
     h2 {
       font-size: 15px;
-    }
-
-    .draft-actions {
-      flex-direction: column;
-    }
-
-    .draft-actions .btn {
-      width: 100%;
     }
   }
 </style>

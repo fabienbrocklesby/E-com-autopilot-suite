@@ -7,21 +7,15 @@ import { Hono } from "hono";
 import { execute, query, queryOne } from "../db/client.ts";
 import {
   AppError,
-  Draft,
-  Message,
   Thread,
   ThreadDetail,
   ThreadListItem,
-  UpdateDraftStatusPayload,
 } from "../types/index.ts";
 import { authMiddleware } from "../middleware/auth.ts";
 import { categoriseAndDraft } from "../services/categorisation.ts";
-import { sendReply } from "../services/gmail.ts";
-import { recordInteraction } from "../services/learning.ts";
 import { sendHumanReply } from "../services/human-reply.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
 import { publish } from "../services/event-bus.ts";
-import { resolveReplyAddress } from "../services/reply-address.ts";
 
 export const threadsRouter = new Hono();
 
@@ -155,121 +149,28 @@ threadsRouter.post("/:id/categorise", async (c) => {
   return c.json(result);
 });
 
-// GET /threads/:id/drafts - list drafts for a thread
-threadsRouter.get("/:id/drafts", async (c) => {
+// GET /threads/:id/drafts - retired. Playbook pending-sends and manual replies
+// are the single draft model now (docs/PLAYBOOK_ENGINE.md). The drafts table
+// is kept for historical data; do not drop it until a prod check confirms no
+// pending rows remain: SELECT count(*) FROM drafts WHERE status = 'pending';
+threadsRouter.get("/:id/drafts", (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid thread ID");
-
-  const drafts = await query(
-    "SELECT * FROM drafts WHERE thread_id = $1 ORDER BY created_at DESC",
-    [id],
+  throw new AppError(
+    410,
+    "Legacy draft endpoint retired. Use playbook runs (/playbooks/runs) and manual replies (/threads/:id/manual-reply) instead.",
   );
-  return c.json({ drafts });
 });
 
-// PATCH /threads/:id/drafts/:draftId - approve / reject / mark sent
-threadsRouter.patch("/:id/drafts/:draftId", async (c) => {
+// PATCH /threads/:id/drafts/:draftId - retired, see GET /threads/:id/drafts above.
+threadsRouter.patch("/:id/drafts/:draftId", (c) => {
   const threadId = parseInt(c.req.param("id"));
   const draftId = parseInt(c.req.param("draftId"));
   if (isNaN(threadId) || isNaN(draftId)) throw new AppError(400, "Invalid ID");
-
-  const body = await c.req.json<UpdateDraftStatusPayload>();
-  const validStatuses = ["pending", "approved", "rejected", "sent"];
-  if (!validStatuses.includes(body.status)) {
-    throw new AppError(422, `status must be one of: ${validStatuses.join(", ")}`);
-  }
-
-  // Load draft and thread upfront for tracking.
-  const [existingDraft, thread] = await Promise.all([
-    queryOne<Draft>("SELECT * FROM drafts WHERE id = $1 AND thread_id = $2", [draftId, threadId]),
-    queryOne<Thread>("SELECT * FROM threads WHERE id = $1", [threadId]),
-  ]);
-  if (!existingDraft) throw new AppError(404, "Draft not found");
-  if (!thread) throw new AppError(404, "Thread not found");
-
-  // When a draft is approved, send the reply via Gmail immediately.
-  if (body.status === "approved") {
-    const lastInbound = await queryOne<Message>(
-      "SELECT * FROM messages WHERE thread_id = $1 AND direction = 'inbound' ORDER BY received_at DESC LIMIT 1",
-      [threadId],
-    );
-    if (!lastInbound) throw new AppError(422, "No inbound message to reply to");
-    const replyAddress = resolveReplyAddress(lastInbound);
-
-    const tokenRow = await queryOne<{ email: string }>(
-      "SELECT email FROM oauth_tokens WHERE workspace_id = $1 ORDER BY id DESC LIMIT 1",
-      [thread.workspace_id],
-    );
-    if (!tokenRow) throw new AppError(500, "No connected Gmail account");
-
-    // Allow submitting an edited body alongside the approval.
-    const submittedBody = typeof body.body === "string" ? body.body.trim() : null;
-    const finalBody = submittedBody || existingDraft.body;
-    const wasEdited = submittedBody !== null && submittedBody !== existingDraft.body.trim();
-    const sentAt = new Date().toISOString();
-
-    await sendReply(
-      tokenRow.email,
-      thread.gmail_thread_id,
-      thread.subject,
-      replyAddress.address,
-      finalBody,
-      lastInbound.message_id_header,
-      thread.id,
-    );
-
-    // Mark draft as sent with full tracking metadata.
-    await execute(
-      `UPDATE drafts
-       SET status = 'sent', was_edited = $1, final_body = $2, sent_at = $3
-       WHERE id = $4`,
-      [wasEdited, finalBody, sentAt, draftId],
-    );
-    await execute("UPDATE threads SET status = 'replied' WHERE id = $1", [threadId]);
-
-    // Record the interaction for learning.
-    await recordInteraction({
-      workspaceId: thread.workspace_id,
-      threadId: thread.id,
-      categoryId: thread.category_id,
-      draftId: existingDraft.id,
-      outcome: wasEdited ? "edited" : "approved",
-      originalBody: existingDraft.body,
-      finalBody: finalBody,
-    }).catch((err) => console.error("[threads] Failed to record interaction:", err));
-  } else if (body.status === "rejected") {
-    await execute(
-      "UPDATE drafts SET status = 'rejected' WHERE id = $1",
-      [draftId],
-    );
-
-    // Record rejection for learning.
-    await recordInteraction({
-      workspaceId: thread.workspace_id,
-      threadId: thread.id,
-      categoryId: thread.category_id,
-      draftId: existingDraft.id,
-      outcome: "rejected",
-      originalBody: existingDraft.body,
-      finalBody: null,
-    }).catch((err) => console.error("[threads] Failed to record interaction:", err));
-  } else {
-    await execute(
-      "UPDATE drafts SET status = $1 WHERE id = $2 AND thread_id = $3",
-      [body.status, draftId, threadId],
-    );
-  }
-
-  const draft = await queryOne("SELECT * FROM drafts WHERE id = $1", [draftId]);
-  const threadItem = await fetchThreadListItem(threadId, thread.workspace_id);
-  if (threadItem) {
-    publish({
-      type: "thread_updated",
-      workspaceId: thread.workspace_id,
-      thread: threadItem as unknown as Record<string, unknown>,
-    });
-  }
-  return c.json({ draft });
+  throw new AppError(
+    410,
+    "Legacy draft endpoint retired. Use playbook runs (/playbooks/runs) and manual replies (/threads/:id/manual-reply) instead.",
+  );
 });
 
 // POST /threads/:id/manual-reply - operator sends a manual reply to the customer

@@ -131,13 +131,6 @@ export const threadsApi = {
 		}>(`/threads/${id}/categorise`, { method: 'POST' });
 	},
 
-	updateDraftStatus(threadId: number, draftId: number, status: Draft['status'], body?: string) {
-		return request<{ draft: Draft }>(`/threads/${threadId}/drafts/${draftId}`, {
-			method: 'PATCH',
-			body: JSON.stringify({ status, ...(body !== undefined ? { body } : {}) })
-		});
-	},
-
 	sendManualReply(threadId: number, body: string, workspaceId = 1) {
 		return request<{
 			messageSent: boolean;

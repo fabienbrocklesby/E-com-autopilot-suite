@@ -36,9 +36,6 @@ export async function categoriseAndDraft(threadId: number): Promise<{
 
   const workspaceId = thread.workspace_id;
 
-  const skip = await skipIfPendingDraft(thread);
-  if (skip) return skip;
-
   const [messages, categories, settingRows] = await Promise.all([
     query<Message>(
       "SELECT * FROM messages WHERE thread_id = $1 ORDER BY received_at ASC",
@@ -103,9 +100,6 @@ export async function categoriseFromGmailLabels(
   );
   if (!thread) throw new AppError(404, "Thread not found");
 
-  const skip = await skipIfPendingDraft(thread);
-  if (skip) return skip;
-
   const categories = await query<Category>(
     "SELECT * FROM categories WHERE workspace_id = $1 ORDER BY name ASC",
     [thread.workspace_id],
@@ -132,41 +126,6 @@ export async function categoriseFromGmailLabels(
     category ? 1 : 0,
     reasoning,
   );
-}
-
-async function skipIfPendingDraft(thread: Thread): Promise<
-  {
-    thread: Thread;
-    categoryId: number | null;
-    confidence: number;
-    reasoning: string;
-    draftCreated: boolean;
-  } | null
-> {
-  // If thread already has a category AND a pending draft, skip re-categorisation
-  // to avoid clobbering existing state. Resume logic is Phase 2.
-  if (thread.category_id === null) return null;
-
-  const existingPendingDraft = await queryOne(
-    "SELECT id FROM drafts WHERE thread_id = $1 AND status = 'pending'",
-    [thread.id],
-  );
-  if (!existingPendingDraft) return null;
-
-  console.log(
-    `[categorisation] Thread ${thread.id} already categorised with pending draft - skipping`,
-  );
-  const currentThread = await queryOne<Thread>(
-    "SELECT * FROM threads WHERE id = $1",
-    [thread.id],
-  ) as Thread;
-  return {
-    thread: currentThread,
-    categoryId: thread.category_id,
-    confidence: 1,
-    reasoning: "Already categorised with pending draft; skipping re-categorisation.",
-    draftCreated: false,
-  };
 }
 
 async function routeThreadToCategory(
