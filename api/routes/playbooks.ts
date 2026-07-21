@@ -814,12 +814,17 @@ playbooksRouter.post("/:id/dry-run", async (c) => {
   if (isNaN(id)) throw new AppError(400, "Invalid playbook ID");
 
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
-  const body = await c.req.json<{ email_content: string }>();
+  const body = await c.req.json<{ email_content: string; follow_up_message?: string }>();
 
   if (!body.email_content || typeof body.email_content !== "string") {
     throw new AppError(422, "email_content is required");
   }
 
-  const result = await dryRunPlaybook(id, body.email_content.trim(), workspaceId);
+  const followUpMessage =
+    typeof body.follow_up_message === "string" && body.follow_up_message.trim()
+      ? body.follow_up_message.trim()
+      : undefined;
+
+  const result = await dryRunPlaybook(id, body.email_content.trim(), workspaceId, followUpMessage);
   return c.json(result);
 });

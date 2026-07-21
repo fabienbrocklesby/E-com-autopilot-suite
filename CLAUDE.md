@@ -58,10 +58,11 @@ You have postgres, filesystem, playwright, context7, and svelte MCP servers. Use
 
 ## Known issues to be aware of
 
-- The evaluate handler only passes `required_context` variables to the AI, not the full context bag. This causes wrong decisions. Needs fixing.
-- The playbook design guide may over-generate sheet-integration steps for simple conversational flows. Needs the "complexity should match the description" principle added.
-- Escalation steps have hardcoded reason strings that don't reflect the actual cause of escalation (e.g. says "Could not find order" when the real cause was human rejection).
 - Some old playbooks (v1, v2) still use legacy step shapes (literal `message` in ask_customer, `branch` instead of `evaluate`). New playbooks should use the new shapes.
+- Shopify Admin API order lookups are not implemented; order data still comes from Google Sheets only. A future `find_order` step can write into `threads.brief.facts` the same way `find_sheet_row` does today.
+- The sheet-rules system (`/sheet-rules`, `/sheet-updates`) has not been migrated into playbooks yet. It still runs as a separate primitive alongside the playbook engine.
+- `categories.name` has no per-workspace unique constraint. This is a latent multi-tenant bug, harmless today because the app runs single-tenant.
+- Customer attachments are marked in the transcript (`[attachment: filename]`) but their content is not read or understood by the AI.
 
 ## Code quality bar
 

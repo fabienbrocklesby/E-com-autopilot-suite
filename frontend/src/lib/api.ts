@@ -568,10 +568,13 @@ export const playbooksApi = {
                 });
         },
 
-        dryRun(id: number, emailContent: string, workspaceId = 1) {
+        dryRun(id: number, emailContent: string, workspaceId = 1, followUpMessage?: string) {
                 return request<DryRunResult>(`/playbooks/${id}/dry-run?workspace_id=${workspaceId}`, {
                         method: 'POST',
-                        body: JSON.stringify({ email_content: emailContent })
+                        body: JSON.stringify({
+                                email_content: emailContent,
+                                ...(followUpMessage ? { follow_up_message: followUpMessage } : {})
+                        })
                 });
         },
 

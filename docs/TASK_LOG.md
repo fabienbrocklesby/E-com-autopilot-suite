@@ -11,6 +11,27 @@ Each entry:
 
 ---
 
+## 2026-07-20 - Product layer: review queue as home, human-looking replies, trust ramp
+
+**Problem:** `/review`, `/sheet-rules`, and `/sheet-updates` had no navigation links, so the purpose-built approval and manual-reply queue was undiscoverable. The dashboard ran two parallel draft models (the legacy `drafts` table and playbook pending-sends), outbound mail had no display name or consistent signature, and every category stayed on manual draft-only forever with no path to auto-send.
+
+**Changes made:**
+- `frontend/src/routes/+layout.svelte`: added a "Review" nav entry before "Playbooks" with a live badge (`attentionCountStore`). `/system` links to `/sheet-updates` and `/sheet-rules`.
+- `frontend/src/routes/review/+page.svelte` and `frontend/src/lib/components/ManualActionBanner.svelte`: subscribed the review queue to the workspace SSE channel, added a conflict-guard message when a run was already actioned elsewhere (409), added a "customer replied since this draft" notice with a one-click regenerate-draft action.
+- Retired the legacy `drafts` table flow from the UI (`threads/[id]/+page.svelte`, `review/+page.svelte`). `ManualReplyPanel` and playbook pending-sends are the single draft model everywhere now. `GET/PATCH /threads/:id/drafts*` return 410 Gone; the `drafts` table itself is untouched pending a prod check for pending rows. Removed the dead `skipIfPendingDraft` guard from `categorisation.ts`.
+- `api/services/gmail.ts`: outbound mail now sends `From: "Store Name" <address>` (falls back to the bare address when unset) and deterministically appends the configured signature once, to both playbook sends and manual replies. Inbound attachments are marked in the stored transcript as `[attachment: filename]`.
+- `api/services/playbook/trust-ramp.ts`: new `recordApprovalOutcome()` tracks a per-playbook approval streak. A clean, unedited approval increments it; an edit or rejection resets it; reaching `auto_send_streak_target` flips `reply_mode` to `auto_reply` and announces graduation over SSE and the alert webhook. `revertToDraftOnly()` powers a one-click revert from the playbooks list.
+- `api/services/playbook/dry-run.ts` and `parser.ts`: use `getModel(workspaceId)` instead of a hardcoded `gpt-4o`. Dry-run accepts an optional `followUpMessage` to simulate a mid-run customer reply and exercise the resume path.
+- `docs/PLAYBOOK_ENGINE.md`: added the `triage` step to the step types table and removed the deleted legacy auto-draft branch from the flow diagram. `CLAUDE.md` known-issues list replaced with the current, verified set.
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: all tests pass, including new `gmail_test.ts`, `trust-ramp_test.ts`, and `dry-run_test.ts`.
+- `deno check main.ts` passes.
+- `npm run check` in `frontend/` passes with 0 errors.
+- Playwright + postgres MCP (live stack): PENDING ops gate. The nav/badge/409 guard/regenerate/streak/graduation UI and the approve/edit/reject streak DB transitions are to be verified by Fabien against a running stack with seeded data; not run in the implementation environment.
+
+---
+
 ## 2026-07-20 - Reliability layer: escalation taxonomy, inbound-during-run survival, wedge-proofing
 
 **Problem:** Runs could wedge in `running` forever on a structural failure (missing thread, no
