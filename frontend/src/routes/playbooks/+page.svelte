@@ -9,7 +9,8 @@
   import { playbooksApi, categoriesApi } from "$lib/api";
   import { workspaceStore } from "$lib/stores";
   import type { Playbook, Category } from "$lib/api";
-  import { ClipboardList, Trash2 } from '@lucide/svelte';
+  import { ClipboardList, Trash2, CheckCircle, RefreshCw } from '@lucide/svelte';
+  import { openSSE } from "$lib/sse";
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -28,6 +29,7 @@
   let success = $state<string | null>(null);
   let currentWorkspaceId = $state(1);
   let mounted = $state(false);
+  let graduationBanner = $state<string | null>(null);
 
   const unsubWs = workspaceStore.subscribe((id) => {
     currentWorkspaceId = id;
@@ -89,6 +91,18 @@
     }
   }
 
+  async function revertToDraft(pb: Playbook) {
+    if (!confirm(`Revert "${pb.name}" to draft-only? This resets its approval streak to 0.`)) return;
+    error = null;
+    try {
+      await playbooksApi.revertToDraft(pb.id);
+      flash("Reverted to draft-only.");
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to revert";
+    }
+  }
+
   function flash(msg: string) {
     success = msg;
     setTimeout(() => { success = null; }, 3000);
@@ -108,6 +122,22 @@
     load();
     mounted = true;
   });
+
+  $effect(() => {
+    const wsId = currentWorkspaceId;
+    const es = openSSE('workspace', { workspace_id: wsId });
+
+    es.addEventListener('playbook_graduated', (e: Event) => {
+      const { playbook } = JSON.parse((e as MessageEvent).data) as {
+        playbook: { id: number; name: string };
+      };
+      graduationBanner = `"${playbook.name}" graduated to auto-send after a clean approval streak.`;
+      setTimeout(() => { graduationBanner = null; }, 8000);
+      load();
+    });
+
+    return () => es.close();
+  });
 </script>
 
 <svelte:head>
@@ -126,6 +156,11 @@
 {/if}
 {#if success}
   <div class="success-banner" transition:fade={{ duration: 150 }}>{success}</div>
+{/if}
+{#if graduationBanner}
+  <div class="graduation-banner" transition:fade={{ duration: 150 }}>
+    <CheckCircle size={16} /> {graduationBanner}
+  </div>
 {/if}
 
 {#if loading}
@@ -182,6 +217,18 @@
               </div>
               <div class="pb-actions">
                 <span class="status-dot" class:active={row.playbook.is_active} class:inactive={!row.playbook.is_active}></span>
+                {#if row.playbook.reply_mode === 'draft_only'}
+                  <span class="streak-badge" title="Consecutive clean approvals before auto-send">
+                    {row.playbook.approval_streak}/{row.playbook.auto_send_streak_target} clean approvals
+                  </span>
+                {:else}
+                  <span class="streak-badge streak-badge-graduated">
+                    <CheckCircle size={12} /> Auto-send
+                  </span>
+                  <button class="btn-action" onclick={() => revertToDraft(row.playbook!)}>
+                    <RefreshCw size={12} /> Revert to draft
+                  </button>
+                {/if}
                 <button class="btn-action" onclick={() => toggleActive(row.playbook!)}>
                   {row.playbook.is_active ? "Deactivate" : "Activate"}
                 </button>
@@ -316,6 +363,34 @@
   }
   .status-dot.active { background: var(--color-success); }
   .status-dot.inactive { background: var(--color-text-muted); }
+
+  .streak-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+  }
+
+  .streak-badge-graduated {
+    color: var(--color-success);
+    font-weight: 600;
+  }
+
+  .graduation-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16 185 129 / 0.1);
+    border: 1px solid rgba(16 185 129 / 0.3);
+    border-radius: var(--radius);
+    color: var(--color-success);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    font-weight: 500;
+  }
 
   .btn-action {
     display: inline-flex;

@@ -12,6 +12,7 @@ import { advanceRun } from "../services/playbook/mod.ts";
 import { finalizeEscalation, getRunSteps } from "../services/playbook/executor.ts";
 import { regeneratePendingDraft } from "../services/playbook/regenerate.ts";
 import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
+import { recordApprovalOutcome, revertToDraftOnly } from "../services/playbook/trust-ramp.ts";
 import { publish } from "../services/event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
 import type {
@@ -94,6 +95,8 @@ playbooksRouter.get("/runs", async (c) => {
   const runs = await query<
     PlaybookRun & {
       playbook_name: string;
+      approval_streak: number;
+      auto_send_streak_target: number;
       step_reason: string | null;
       step_capture_input: boolean;
       step_input_prompt: string | null;
@@ -103,7 +106,7 @@ playbooksRouter.get("/runs", async (c) => {
       step_missing: boolean;
     }
   >(
-    `SELECT pr.*, p.name AS playbook_name,
+    `SELECT pr.*, p.name AS playbook_name, p.approval_streak, p.auto_send_streak_target,
       -- manual_approval: reason, capture_input, input_prompt, reference_context
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
@@ -302,6 +305,10 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
         : output.pending_send as string;
       await sendApprovedReply(run, sendBody);
 
+      const wasEdited = typeof body.body === "string" && body.body.trim().length > 0 &&
+        body.body.trim() !== (output.pending_send as string).trim();
+      await recordApprovalOutcome(runId, wasEdited ? "approved_edited" : "approved_clean");
+
       const stepType = currentStep.type;
       const currentIndex = steps.findIndex((s) => s.id === currentStep.id);
 
@@ -465,6 +472,7 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
       : { ...run.context };
     const rejectionReason =
       `Rejected by human: draft for ${currentStep.type} step "${currentStep.id}" was not approved`;
+    await recordApprovalOutcome(runId, "rejected");
     await finalizeEscalation(
       runId,
       run.thread_id,
@@ -784,6 +792,17 @@ playbooksRouter.post("/:id/deactivate", async (c) => {
     "UPDATE playbooks SET is_active = false WHERE id = $1 RETURNING *",
     [id],
   );
+  if (!updated) throw new AppError(404, "Playbook not found");
+
+  return c.json({ playbook: updated });
+});
+
+// POST /playbooks/:id/revert-to-draft
+playbooksRouter.post("/:id/revert-to-draft", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  if (isNaN(id)) throw new AppError(400, "Invalid playbook ID");
+
+  const updated = await revertToDraftOnly(id);
   if (!updated) throw new AppError(404, "Playbook not found");
 
   return c.json({ playbook: updated });

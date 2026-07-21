@@ -25,6 +25,7 @@
   let detailLoading = $state(false);
   let error = $state<string | null>(null);
   let successMessage = $state<string | null>(null);
+  let graduationBanner = $state<string | null>(null);
 
   // Playbook runs waiting for human
   let pendingRuns = $state<PlaybookRun[]>([]);
@@ -167,6 +168,15 @@
       load(true);
     });
 
+    es.addEventListener('playbook_graduated', (e: Event) => {
+      const { playbook } = JSON.parse((e as MessageEvent).data) as {
+        playbook: { id: number; name: string };
+      };
+      graduationBanner = `"${playbook.name}" graduated to auto-send after a clean approval streak.`;
+      setTimeout(() => { graduationBanner = null; }, 8000);
+      load(true);
+    });
+
     return () => es.close();
   });
 </script>
@@ -188,6 +198,12 @@
   <div class="success-banner" transition:fade={{ duration: 150 }}>{successMessage}</div>
 {/if}
 
+{#if graduationBanner}
+  <div class="graduation-banner" transition:fade={{ duration: 150 }}>
+    <CheckCircle size={16} /> {graduationBanner}
+  </div>
+{/if}
+
 {#if loading}
   <div class="loading">Loading review queue…</div>
 {:else}
@@ -207,6 +223,9 @@
               <span class="approval-playbook">{run.playbook_name ?? `Playbook #${run.playbook_id}`}</span>
               <span class="approval-meta">Run #{run.id} · <a href="/threads/{run.thread_id}" class="thread-link">Thread #{run.thread_id}</a></span>
               <span class="approval-time">{new Date(run.updated_at).toLocaleString()}</span>
+              {#if run.auto_send_streak_target != null}
+                <span class="approval-streak">{run.approval_streak ?? 0}/{run.auto_send_streak_target} clean approvals</span>
+              {/if}
             </div>
             {#if run.step_pending_send}
               <div class="pending-send-area">
@@ -450,6 +469,25 @@
   .approval-time {
     font-size: 11px;
     color: var(--color-text-muted);
+  }
+
+  .approval-streak {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .graduation-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16 185 129 / 0.1);
+    border: 1px solid rgba(16 185 129 / 0.3);
+    border-radius: var(--radius);
+    color: var(--color-success);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    font-weight: 500;
   }
 
   .approval-actions {

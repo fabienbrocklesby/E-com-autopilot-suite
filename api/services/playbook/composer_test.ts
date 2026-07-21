@@ -33,6 +33,8 @@ function makePlaybook(): Playbook {
     writing_style: "friendly and professional",
     reply_mode: "draft_only",
     confidence_threshold: 0.8,
+    approval_streak: 0,
+    auto_send_streak_target: 10,
     created_at: new Date(),
     updated_at: new Date(),
   };

@@ -158,6 +158,8 @@ export interface Playbook {
   writing_style: string;
   reply_mode: "auto_reply" | "draft_only";
   confidence_threshold: number;
+  approval_streak: number;
+  auto_send_streak_target: number;
   created_at: Date;
   updated_at: Date;
 }
