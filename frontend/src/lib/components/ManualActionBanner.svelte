@@ -13,7 +13,7 @@
   import { fly } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import { untrack } from "svelte";
-  import { Bell, Mail, ExternalLink } from '@lucide/svelte';
+  import { Bell, Mail, ExternalLink, AlertTriangle } from '@lucide/svelte';
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -62,6 +62,25 @@
       ? draftBody.trim().length > 0
       : !captureInput || humanInput.trim().length > 0),
   );
+
+  let messagesSinceDraft = $derived.by(() => {
+    const raw = run.context?._messages_since_draft;
+    return Array.isArray(raw) ? (raw as Array<{ message_id: number | null; received_at: string }>) : [];
+  });
+  let regenerating = $state(false);
+
+  async function regenerateDraft() {
+    regenerating = true;
+    error = null;
+    try {
+      const res = await playbooksApi.regenerateDraft(run.id);
+      draftBody = res.body;
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to regenerate draft";
+    } finally {
+      regenerating = false;
+    }
+  }
 
   function formatKey(key: string): string {
     return key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
@@ -116,6 +135,15 @@
 
   {#if isPendingSend}
     <p class="banner-reason">Edit the AI-drafted reply if needed, then send.</p>
+    {#if messagesSinceDraft.length > 0}
+      <div class="stale-draft-notice">
+        <AlertTriangle size={14} />
+        <span>Customer replied since this draft was written.</span>
+        <button class="regen-btn" onclick={regenerateDraft} disabled={regenerating || submitting}>
+          {regenerating ? "Regenerating…" : "Regenerate draft"}
+        </button>
+      </div>
+    {/if}
     {#if sheetRowUrl}
       <a href={sheetRowUrl} target="_blank" rel="noopener noreferrer" class="sheet-link">
         <ExternalLink size={13} />
@@ -232,6 +260,46 @@
     margin: 0 0 1rem;
     line-height: 1.5;
     font-size: 0.95rem;
+  }
+
+  .stale-draft-notice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.875rem;
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: calc(var(--radius, 8px) - 2px);
+    color: var(--color-warning, #f59e0b);
+    font-size: 0.8125rem;
+    flex-wrap: wrap;
+  }
+
+  .stale-draft-notice span {
+    flex: 1;
+    min-width: 10rem;
+  }
+
+  .regen-btn {
+    background: transparent;
+    border: 1px solid rgba(245, 158, 11, 0.5);
+    color: var(--color-warning, #f59e0b);
+    padding: 0.3rem 0.75rem;
+    border-radius: calc(var(--radius, 8px) - 2px);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .regen-btn:hover:not(:disabled) {
+    background: rgba(245, 158, 11, 0.15);
+  }
+
+  .regen-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .reference-list {

@@ -612,6 +612,12 @@ export const playbooksApi = {
                 return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/reject`, { method: 'POST' });
         },
 
+        regenerateDraft(runId: number) {
+                return request<{ body: string }>(`/playbooks/runs/${runId}/regenerate-draft`, {
+                        method: 'POST'
+                });
+        },
+
         cancelRun(runId: number) {
                 return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/cancel`, { method: 'POST' });
         }

@@ -7,9 +7,10 @@
   import { onMount } from "svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { threadsApi, playbooksApi } from "$lib/api";
+  import { threadsApi, playbooksApi, ApiRequestError } from "$lib/api";
   import type { ThreadListItem, ThreadDetail, Draft, PlaybookRun } from "$lib/api";
-  import { CheckCircle } from '@lucide/svelte';
+  import { CheckCircle, AlertTriangle } from '@lucide/svelte';
+  import { openSSE } from "$lib/sse";
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -46,6 +47,26 @@
       return acc;
     }, {})
   );
+
+  let regeneratingRunId = $state<number | null>(null);
+
+  function messagesSinceDraft(run: PlaybookRun): Array<{ message_id: number | null; received_at: string }> {
+    const raw = run.context?._messages_since_draft;
+    return Array.isArray(raw) ? (raw as Array<{ message_id: number | null; received_at: string }>) : [];
+  }
+
+  async function regenerateDraft(runId: number) {
+    regeneratingRunId = runId;
+    error = null;
+    try {
+      const res = await playbooksApi.regenerateDraft(runId);
+      runBodies[runId] = res.body;
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to regenerate draft";
+    } finally {
+      regeneratingRunId = null;
+    }
+  }
 
   async function load() {
     loading = true;
@@ -120,7 +141,12 @@
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to approve";
+      if (e instanceof ApiRequestError && e.error.status === 409) {
+        error = "This action was already handled elsewhere.";
+        await load();
+      } else {
+        error = e instanceof Error ? e.message : "Failed to approve";
+      }
     } finally {
       runActioning = null;
     }
@@ -135,7 +161,12 @@
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to reject";
+      if (e instanceof ApiRequestError && e.error.status === 409) {
+        error = "This action was already handled elsewhere.";
+        await load();
+      } else {
+        error = e instanceof Error ? e.message : "Failed to reject";
+      }
     } finally {
       runActioning = null;
     }
@@ -144,6 +175,28 @@
   onMount(async () => {
     await load();
     mounted = true;
+  });
+
+  $effect(() => {
+    let connectionCount = 0;
+    const es = openSSE('workspace', { workspace_id: 1 });
+
+    es.addEventListener('open', () => {
+      connectionCount++;
+      // A reconnect after the first connection means we missed events while
+      // disconnected, so do a full reload rather than trust partial state.
+      if (connectionCount > 1) load();
+    });
+
+    es.addEventListener('thread_updated', () => {
+      load();
+    });
+
+    es.addEventListener('run_updated', () => {
+      load();
+    });
+
+    return () => es.close();
   });
 </script>
 
@@ -194,6 +247,19 @@
                     <span class="edited-notice">edited</span>
                   {/if}
                 </div>
+                {#if messagesSinceDraft(run).length > 0}
+                  <div class="stale-draft-notice">
+                    <AlertTriangle size={14} />
+                    <span>Customer replied since this draft was written.</span>
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      onclick={() => regenerateDraft(run.id)}
+                      disabled={regeneratingRunId === run.id}
+                    >
+                      {regeneratingRunId === run.id ? "Regenerating…" : "Regenerate draft"}
+                    </button>
+                  </div>
+                {/if}
                 <textarea
                   class="pending-send-textarea"
                   rows={6}
@@ -528,6 +594,24 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .stale-draft-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(245 158 11 / 0.1);
+    border: 1px solid rgba(245 158 11 / 0.35);
+    border-radius: var(--radius);
+    color: var(--color-warning);
+    font-size: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stale-draft-notice span {
+    flex: 1;
+    min-width: 160px;
   }
 
   .pending-send-header {
