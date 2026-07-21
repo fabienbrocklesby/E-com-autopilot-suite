@@ -91,11 +91,14 @@ export async function recordApprovalOutcome(
         reply_mode: updated.reply_mode,
       },
     });
+    // Graduation is a happy-path event: never let an alert-webhook failure
+    // surface a successful send + streak update as an approve error. Matches
+    // the .catch guard on every other sendAlert side effect (executor, workers).
     await sendAlert(run.workspace_id, "playbook_graduated", {
       playbook_id: updated.id,
       playbook_name: updated.name,
       category_id: updated.category_id,
-    });
+    }).catch(() => {});
   }
 
   return { graduated: transition.graduated };
