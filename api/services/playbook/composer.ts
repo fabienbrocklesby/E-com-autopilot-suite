@@ -102,6 +102,100 @@ export async function buildComposerContext(inputs: ComposerInputs): Promise<stri
 }
 
 /**
+ * Identity + anti-fabrication guard shared by every customer-facing prompt.
+ * The store IS the seller, so a reply must never hand the customer off to a
+ * "seller" third party, and the model must never invent facts it wasn't given.
+ * This is the rule that stops the failure that triggered this work: a Tracking
+ * Wanted reply that invented a seller email and told the customer to contact
+ * "the seller directly" for tracking we don't have. Kept as one exported
+ * constant so the reply and ask prompts carry the identical rule and cannot
+ * drift apart - the same reason this composer module exists.
+ */
+export const IDENTITY_AND_HONESTY_RULES =
+  `- You are writing as our store (see STORE CONTEXT) - you ARE the seller the customer bought from. Never tell the customer to contact "the seller", a supplier, or any other company or email address about their own order; they are already talking to us.
+- Only state facts present in STORE CONTEXT, WHAT WE KNOW, or the thread. Never invent or guess an order number, tracking number, email address, phone number, URL, price, refund amount, or delivery date. If the customer asks for something we don't have (e.g. a tracking number), say honestly that we don't have it to hand and give the real next step.`;
+
+/**
+ * Build the send_reply system prompt. Pure and exported so the exact prompt
+ * text (including the shared guard) is unit-testable without touching Postgres
+ * or OpenAI, mirroring assembleComposerContext.
+ */
+export function buildReplySystemPrompt(params: {
+  goal: string;
+  voice: string;
+  referenceContext: Record<string, unknown>;
+  composerContext: string;
+  senderName: string | null;
+}): string {
+  const { goal, voice, referenceContext, composerContext, senderName } = params;
+  return `Write a brief reply to this email thread.
+
+GOAL: ${goal}
+
+VOICE: ${voice}
+
+MUST REFERENCE NATURALLY (do not list robotically - weave into the message):
+${
+    Object.keys(referenceContext).length > 0
+      ? JSON.stringify(referenceContext, null, 2)
+      : "no specific values required"
+  }
+
+${composerContext}
+
+RULES:
+${IDENTITY_AND_HONESTY_RULES}
+- Brief. One short paragraph unless the customer asked multiple things.
+- Match the VOICE. Don't sound corporate unless the voice says so.
+- Reference facts from context naturally (e.g. the amount, order number) - don't list them like a form.
+- Don't start with "Thank you for" unless the voice specifically calls for it.${
+    senderName
+      ? `\n- Sign off using the exact name: ${senderName}`
+      : "\n- Do not include a sign-off or name placeholder."
+  }
+- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
+- Return ONLY the message body. No JSON, no subject line, no surrounding quotes.`;
+}
+
+/**
+ * Build the ask_customer decision system prompt. Pure and exported for the
+ * same unit-testing reason as buildReplySystemPrompt.
+ */
+export function buildAskSystemPrompt(params: {
+  goal: string;
+  voice: string;
+  composerContext: string;
+  senderName: string | null;
+}): string {
+  const { goal, voice, composerContext, senderName } = params;
+  return `You are helping a support agent handle an email thread. You write the next message to send to the customer.
+
+TASK: ${goal}
+
+VOICE: ${voice}
+
+${composerContext}
+
+YOUR DECISION - return one of:
+- {"action": "skip", "extracted": {"var1": "value", ...}, "reasoning": "..."} if the customer's messages already gave us what we need (even if loosely phrased)
+- {"action": "escalate", "reason": "..."} if the customer is frustrated, confused, repeating themselves, or this conversation is going in circles
+- {"action": "ask", "message": "..."} to write a brief, contextual message that references what the customer said and asks specifically for what's still missing
+
+RULES:
+${IDENTITY_AND_HONESTY_RULES}
+- Do not repeat a question that appears in PREVIOUS MESSAGES WE SENT.
+- Acknowledge the customer's most recent message before asking for anything.
+- Keep it brief - one short paragraph.
+- Match the VOICE.${
+    senderName
+      ? `\n- Sign off using the exact name: ${senderName}`
+      : "\n- Do not include a name placeholder."
+  }
+- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
+- Output JSON only. No preamble, no markdown.`;
+}
+
+/**
  * Decide what to do about a customer thread that's missing required
  * context: skip the ask (the answer was already in the conversation),
  * escalate (the thread has gone in circles), or ask (write the next
@@ -115,31 +209,12 @@ export async function composeAskDecision(
   const composerContext = await buildComposerContext(inputs);
   const resolvedVoice = voice ?? (ctx.playbook.writing_style || "friendly and professional");
 
-  const systemPrompt =
-    `You are helping a support agent handle an email thread. You write the next message to send to the customer.
-
-TASK: ${goal}
-
-VOICE: ${resolvedVoice}
-
-${composerContext}
-
-YOUR DECISION - return one of:
-- {"action": "skip", "extracted": {"var1": "value", ...}, "reasoning": "..."} if the customer's messages already gave us what we need (even if loosely phrased)
-- {"action": "escalate", "reason": "..."} if the customer is frustrated, confused, repeating themselves, or this conversation is going in circles
-- {"action": "ask", "message": "..."} to write a brief, contextual message that references what the customer said and asks specifically for what's still missing
-
-RULES:
-- Do not repeat a question that appears in PREVIOUS MESSAGES WE SENT.
-- Acknowledge the customer's most recent message before asking for anything.
-- Keep it brief - one short paragraph.
-- Match the VOICE.${
-      ctx.senderName
-        ? `\n- Sign off using the exact name: ${ctx.senderName}`
-        : "\n- Do not include a name placeholder."
-    }
-- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
-- Output JSON only. No preamble, no markdown.`;
+  const systemPrompt = buildAskSystemPrompt({
+    goal,
+    voice: resolvedVoice,
+    composerContext,
+    senderName: ctx.senderName,
+  });
 
   const model = await getModel(ctx.workspaceId);
   const response = await chatCompletion(
@@ -208,32 +283,13 @@ export async function composeReplyBody(
   const composerContext = await buildComposerContext(inputs);
   const resolvedVoice = voice ?? (ctx.playbook.writing_style || "friendly and professional");
 
-  const systemPrompt = `Write a brief reply to this email thread.
-
-GOAL: ${goal}
-
-VOICE: ${resolvedVoice}
-
-MUST REFERENCE NATURALLY (do not list robotically - weave into the message):
-${
-    Object.keys(referenceContext).length > 0
-      ? JSON.stringify(referenceContext, null, 2)
-      : "no specific values required"
-  }
-
-${composerContext}
-
-RULES:
-- Brief. One short paragraph unless the customer asked multiple things.
-- Match the VOICE. Don't sound corporate unless the voice says so.
-- Reference facts from context naturally (e.g. the amount, order number) - don't list them like a form.
-- Don't start with "Thank you for" unless the voice specifically calls for it.${
-    ctx.senderName
-      ? `\n- Sign off using the exact name: ${ctx.senderName}`
-      : "\n- Do not include a sign-off or name placeholder."
-  }
-- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
-- Return ONLY the message body. No JSON, no subject line, no surrounding quotes.`;
+  const systemPrompt = buildReplySystemPrompt({
+    goal,
+    voice: resolvedVoice,
+    referenceContext,
+    composerContext,
+    senderName: ctx.senderName,
+  });
 
   const model = await getModel(ctx.workspaceId);
   const response = await chatCompletion(

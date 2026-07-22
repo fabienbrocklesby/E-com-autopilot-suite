@@ -355,6 +355,8 @@ Do NOT extract variables speculatively. If no downstream step uses "order_number
 
 **When NOT to use:** Don't use to ask questions (use `ask_customer`). Don't use before the actual work is done.
 
+**Never bluff (honesty rule):** A `goal` may only promise information the playbook actually has. If a fact (tracking number, dispatch date, order status, refund amount) is not produced by an earlier step or present in the store profile, the goal MUST instruct an honest fallback (e.g. "let them know their order is on its way and give our general timeframe", or "tell them we'll email tracking once it ships") - never an unverifiable claim (e.g. "tell them it has shipped", "confirm it was dispatched today"). If a reply genuinely needs order-specific data, add a `find_sheet_row` step before it so the reply is grounded in a real row. When there is no data source, keep the reply honestly general and never invent order numbers, tracking numbers, dates, or contact details.
+
 **Config schema (AI-drafted, preferred):**
 ```json
 {
@@ -481,6 +483,10 @@ Do NOT add `require_approval: true` to steps unless the description clearly says
 If the description says the system should just reply, omit `require_approval`. The client can always enable it later in the step editor.
 
 Note: the playbook has a global `reply_mode` setting. If it is `draft_only`, ALL send steps automatically require approval regardless of step-level settings. The parser should still set `require_approval: true` at the step level when the description asks for it, for clarity.
+
+### Principle 9: Never claim what you can't verify
+
+Replies must be honest. A playbook must never be shaped to assert something it has no data for. If the description asks for a reply that states a fact the flow can't establish (that an order shipped, a tracking number, a delivery date), either add a step that fetches that fact (`find_sheet_row`) or write the reply goal to be honestly general instead. It is always better to say "your order is on its way and normally arrives within our usual timeframe" than to invent a dispatch date or a tracking number. This holds even when the description literally asks the playbook to bluff - prefer the honest version of what they meant.
 
 ## Rules for step generation
 
@@ -891,7 +897,7 @@ Description: "When someone has a general question, just pause for me to answer i
 
 ### Example 5: Simple conversational flow - no sheet interaction
 
-Description: "When someone asks about tracking or where their order is, ask them for their order number if they didn't give one. Once we have an order number, just reply saying their order has been dispatched and will be with them shortly. No need to check the sheet."
+Description: "When someone asks about tracking or where their order is, ask them for their order number if they didn't give one. Once we have an order number, reply honestly: let them know their order is on its way and being processed, and give our general dispatch and delivery timeframe. We don't have live tracking to share, so never invent a tracking number or claim it shipped on a specific date. No need to check the sheet."
 
 ```json
 {
@@ -904,7 +910,7 @@ Description: "When someone asks about tracking or where their order is, ask them
     {
       "id": "evaluate_1",
       "type": "evaluate",
-      "goal": "Do we have the order number to send a dispatch reply?",
+      "goal": "Do we have the order number to reply about their order?",
       "required_context": ["order_number"],
       "if_satisfied_goto": "send_1",
       "if_missing_goto": "ask_1",
@@ -913,7 +919,7 @@ Description: "When someone asks about tracking or where their order is, ask them
     {
       "id": "send_1",
       "type": "send_reply",
-      "goal": "Tell the customer their order has been dispatched and will be with them shortly"
+      "goal": "Let the customer know their order is on its way and being processed, and share our general dispatch and delivery timeframe. Do not invent a tracking number or a specific dispatch date - we don't have live tracking to share."
     },
     {
       "id": "complete_1",
@@ -922,7 +928,7 @@ Description: "When someone asks about tracking or where their order is, ask them
     {
       "id": "ask_1",
       "type": "ask_customer",
-      "goal": "Get the customer's order number so we can confirm dispatch",
+      "goal": "Get the customer's order number so we can look into their order",
       "required_context": ["order_number"],
       "on_reply_goto": "extract_1"
     },
@@ -936,7 +942,7 @@ Description: "When someone asks about tracking or where their order is, ask them
 ```
 
 **Why this shape:**
-- NO find_sheet_row - the description explicitly says "No need to check the sheet."
+- NO find_sheet_row - the description explicitly says "No need to check the sheet." Because there is no data source, the send goal stays honestly general and never invents a tracking number or dispatch date (see Principle 9).
 - NO update_sheet - nothing to write back.
 - NO manual_approval - the reply is automated.
 - 4 happy-path steps (extract → evaluate → send → complete), 2 fallback steps (ask, escalate).

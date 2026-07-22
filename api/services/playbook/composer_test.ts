@@ -1,5 +1,10 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { assembleComposerContext } from "./composer.ts";
+import {
+  assembleComposerContext,
+  buildAskSystemPrompt,
+  buildReplySystemPrompt,
+  IDENTITY_AND_HONESTY_RULES,
+} from "./composer.ts";
 import type { ComposerInputs } from "./composer.ts";
 import type { ThreadBrief } from "./brief.ts";
 import type { Playbook, PlaybookRun, RunContext } from "./types.ts";
@@ -143,4 +148,50 @@ Deno.test("assembleComposerContext filters ctx.variables through isPresent for W
   assertStringIncludes(knowSection, "order_number");
   assertStringIncludes(knowSection, "quantity");
   assertEquals(knowSection.includes("customer_name"), false);
+});
+
+Deno.test("IDENTITY_AND_HONESTY_RULES anchors identity as the seller and forbids fabrication", () => {
+  // The store IS the seller: replies must never send the customer elsewhere.
+  assertStringIncludes(IDENTITY_AND_HONESTY_RULES, "you ARE the seller");
+  // Hard anti-fabrication rule covering the exact values GPT-4o was inventing
+  // (a made-up seller email, tracking numbers, delivery dates).
+  assertStringIncludes(IDENTITY_AND_HONESTY_RULES, "Never invent or guess");
+  assertStringIncludes(IDENTITY_AND_HONESTY_RULES, "tracking number");
+  assertStringIncludes(IDENTITY_AND_HONESTY_RULES, "email address");
+});
+
+Deno.test("buildReplySystemPrompt carries the shared guard and preserves existing reply rules", () => {
+  const prompt = buildReplySystemPrompt({
+    goal: "Reply about their order",
+    voice: "friendly NZ",
+    referenceContext: { order_number: "4521" },
+    composerContext: "STORE CONTEXT:\nSTORE: Exclusive Motors",
+    senderName: "Kieran",
+  });
+
+  // New guard is present verbatim (same source as the ask path - no drift).
+  assertStringIncludes(prompt, IDENTITY_AND_HONESTY_RULES);
+  // Existing behaviour still intact.
+  assertStringIncludes(prompt, "Reply about their order");
+  assertStringIncludes(prompt, "friendly NZ");
+  assertStringIncludes(prompt, "Sign off using the exact name: Kieran");
+  assertStringIncludes(prompt, "STORE: Exclusive Motors");
+  assertStringIncludes(prompt, "Return ONLY the message body");
+});
+
+Deno.test("buildAskSystemPrompt carries the shared guard and preserves existing ask rules", () => {
+  const prompt = buildAskSystemPrompt({
+    goal: "Ask for the order number",
+    voice: "friendly NZ",
+    composerContext: "STORE CONTEXT:\nSTORE: Exclusive Motors",
+    senderName: null,
+  });
+
+  // Same guard string as the reply path.
+  assertStringIncludes(prompt, IDENTITY_AND_HONESTY_RULES);
+  // Existing behaviour still intact.
+  assertStringIncludes(prompt, "Ask for the order number");
+  assertStringIncludes(prompt, "Output JSON only");
+  // senderName null keeps the no-name-placeholder rule.
+  assertStringIncludes(prompt, "Do not include a name placeholder");
 });
