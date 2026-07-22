@@ -3,7 +3,7 @@
  * Calls AI for extract steps, but does NOT send emails or write to sheets.
  */
 import { queryOne } from "../../db/client.ts";
-import { chatCompletion } from "../ai.ts";
+import { chatCompletion, getModel } from "../ai.ts";
 import type {
   AskCustomerStep,
   BranchStep,
@@ -51,10 +51,30 @@ function nextStep(steps: PlaybookStep[], currentId: string): string | null {
   return idx >= 0 && idx < steps.length - 1 ? steps[idx + 1].id : null;
 }
 
+/**
+ * Decides whether a simulated follow-up message should be consumed at this
+ * ask_customer pause, and if so, the updated email content and next step.
+ * Pure so the resume-path branching is unit-testable without a live playbook.
+ */
+export function resolveSimulatedFollowUp(
+  askStep: AskCustomerStep,
+  currentEmailContent: string,
+  followUpMessage: string | undefined,
+  followUpConsumed: boolean,
+): { consumed: false } | { consumed: true; nextEmailContent: string; nextStepId: string } {
+  if (!followUpMessage || followUpConsumed) return { consumed: false };
+  return {
+    consumed: true,
+    nextEmailContent: `${currentEmailContent}\n\n---\n\n[Simulated customer reply]\n${followUpMessage}`,
+    nextStepId: askStep.on_reply_goto,
+  };
+}
+
 export async function dryRunPlaybook(
   playbookId: number,
   emailContent: string,
   workspaceId: number,
+  followUpMessage?: string,
 ): Promise<DryRunResult> {
   const playbook = await queryOne<Playbook>(
     "SELECT * FROM playbooks WHERE id = $1 AND workspace_id = $2",
@@ -66,12 +86,15 @@ export async function dryRunPlaybook(
     ? JSON.parse(playbook.steps)
     : playbook.steps;
 
+  const model = await getModel(workspaceId);
   const context: Record<string, unknown> = {};
   const trace: DryRunTraceEntry[] = [];
   const MAX_ITERATIONS = 50;
   let iterations = 0;
   let currentStepId: string | null = steps.length > 0 ? steps[0].id : null;
   let finalStatus: DryRunResult["finalStatus"] = "complete";
+  let currentEmailContent = emailContent;
+  let followUpConsumed = false;
 
   while (currentStepId && iterations < MAX_ITERATIONS) {
     iterations++;
@@ -94,13 +117,13 @@ export async function dryRunPlaybook(
         const prompt =
           `Extract the following variables from this email. Return JSON with the variable names as keys and null for missing values.\nVariables: ${
             extractStep.variables.join(", ")
-          }\n\nEmail:\n${emailContent}`;
+          }\n\nEmail:\n${currentEmailContent}`;
         let extracted: Record<string, unknown> = {};
         let aiResponse = "";
         try {
           aiResponse = await chatCompletion(
             [{ role: "user", content: prompt }],
-            "gpt-4o",
+            model,
             { type: "json_object" },
           );
           extracted = JSON.parse(aiResponse);
@@ -151,6 +174,27 @@ export async function dryRunPlaybook(
           : `[AI would ask for: ${(askStep.required_context ?? []).join(", ")} - goal: ${
             askStep.goal ?? "gather info"
           }]`;
+
+        const followUp = resolveSimulatedFollowUp(
+          askStep,
+          currentEmailContent,
+          followUpMessage,
+          followUpConsumed,
+        );
+        if (followUp.consumed) {
+          followUpConsumed = true;
+          currentEmailContent = followUp.nextEmailContent;
+          trace.push({
+            stepId: step.id,
+            stepType: step.type,
+            status: "success",
+            summary: `Simulated customer reply received, resuming at ${followUp.nextStepId}`,
+            messageSent: message,
+          });
+          currentStepId = followUp.nextStepId;
+          break;
+        }
+
         trace.push({
           stepId: step.id,
           stepType: step.type,
@@ -197,14 +241,14 @@ ROUTES:
 ${routeLines}
 
 EMAIL:
-${emailContent}
+${currentEmailContent}
 
 Return JSON only with route, confidence, and reasoning.`;
         let aiResponse = "";
         try {
           aiResponse = await chatCompletion(
             [{ role: "user", content: prompt }],
-            "gpt-4o",
+            model,
             { type: "json_object" },
           );
           const resolved = resolveTriageDecision(triageStep, JSON.parse(aiResponse));

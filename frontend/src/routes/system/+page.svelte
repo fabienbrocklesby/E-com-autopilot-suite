@@ -79,6 +79,12 @@
     </div>
   </div>
 
+  <div class="quick-links">
+    <a href="/sheet-updates">Sheet Updates</a>
+    <a href="/sheet-rules">Sheet Rules</a>
+    <a href="/system/failed-ingestions">Failed Ingestions</a>
+  </div>
+
   {#if error}
     <div class="error" transition:fade={{ duration: 150 }}>{error}</div>
   {:else if loading && !stats}
@@ -196,6 +202,9 @@
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
   .header h1 { margin: 0; font-size: 1.5rem; }
   .header-right { display: flex; align-items: center; gap: 1rem; }
+  .quick-links { display: flex; gap: 1rem; margin-bottom: 1.25rem; }
+  .quick-links a { font-size: 0.85rem; color: var(--color-primary); text-decoration: none; }
+  .quick-links a:hover { text-decoration: underline; }
   .refresh-info { font-size: 0.8rem; color: var(--color-text-muted); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.25rem; }
   .card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 1.25rem; }

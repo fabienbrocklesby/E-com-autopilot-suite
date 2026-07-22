@@ -7,7 +7,12 @@ export type BusEvent =
   | { type: "message_created"; workspaceId: number; threadId: number; message: Message }
   | { type: "run_updated"; workspaceId: number; threadId: number; run: PlaybookRun & { playbook_name?: string } }
   | { type: "step_execution_created"; workspaceId: number; runId: number; threadId: number; execution: StepExecution }
-  | { type: "step_execution_updated"; workspaceId: number; runId: number; threadId: number; execution: StepExecution };
+  | { type: "step_execution_updated"; workspaceId: number; runId: number; threadId: number; execution: StepExecution }
+  | {
+      type: "playbook_graduated";
+      workspaceId: number;
+      playbook: { id: number; name: string; category_id: number | null; reply_mode: string };
+    };
 
 const subscribers = new Map<number, Set<(event: BusEvent) => void>>();
 

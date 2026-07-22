@@ -9,8 +9,10 @@ import { authMiddleware } from "../middleware/auth.ts";
 import { parsePlaybook, parsePlaybookStep } from "../services/playbook/parser.ts";
 import { dryRunPlaybook } from "../services/playbook/dry-run.ts";
 import { advanceRun } from "../services/playbook/mod.ts";
-import { getRunSteps } from "../services/playbook/executor.ts";
+import { finalizeEscalation, getRunSteps } from "../services/playbook/executor.ts";
+import { regeneratePendingDraft } from "../services/playbook/regenerate.ts";
 import { sendApprovedReply } from "../services/playbook/approval-sender.ts";
+import { recordApprovalOutcome, revertToDraftOnly } from "../services/playbook/trust-ramp.ts";
 import { publish } from "../services/event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
 import type {
@@ -93,6 +95,8 @@ playbooksRouter.get("/runs", async (c) => {
   const runs = await query<
     PlaybookRun & {
       playbook_name: string;
+      approval_streak: number;
+      auto_send_streak_target: number;
       step_reason: string | null;
       step_capture_input: boolean;
       step_input_prompt: string | null;
@@ -102,7 +106,7 @@ playbooksRouter.get("/runs", async (c) => {
       step_missing: boolean;
     }
   >(
-    `SELECT pr.*, p.name AS playbook_name,
+    `SELECT pr.*, p.name AS playbook_name, p.approval_streak, p.auto_send_streak_target,
       -- manual_approval: reason, capture_input, input_prompt, reference_context
       CASE WHEN pr.status = 'waiting_for_human'
         THEN (
@@ -301,6 +305,10 @@ playbooksRouter.post("/runs/:runId/approve", async (c) => {
         : output.pending_send as string;
       await sendApprovedReply(run, sendBody);
 
+      const wasEdited = typeof body.body === "string" && body.body.trim().length > 0 &&
+        body.body.trim() !== (output.pending_send as string).trim();
+      await recordApprovalOutcome(runId, wasEdited ? "approved_edited" : "approved_clean");
+
       const stepType = currentStep.type;
       const currentIndex = steps.findIndex((s) => s.id === currentStep.id);
 
@@ -452,30 +460,31 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   }
 
   // For pending_send approvals (ask_customer/send_reply with require_approval),
-  // rejection means "don't send this" — escalate the run.
+  // rejection means "don't send this": escalate directly via the shared helper,
+  // since there is no on_reject step to route to (that wiring only exists on
+  // manual_approval steps, handled below).
   if (currentStep.type === "ask_customer" || currentStep.type === "send_reply") {
-    await execute(
-      "UPDATE playbook_runs SET status = 'escalated', updated_at = NOW() WHERE id = $1",
-      [runId],
+    // Converges with the manual_approval reject flow below: both end up calling
+    // finalizeEscalation, so both record a real reason, surface the thread for
+    // review, fire the alert, and publish SSE the same way.
+    const currentContext = typeof run.context === "string"
+      ? JSON.parse(run.context)
+      : { ...run.context };
+    const rejectionReason =
+      `Rejected by human: draft for ${currentStep.type} step "${currentStep.id}" was not approved`;
+    await recordApprovalOutcome(runId, "rejected");
+    await finalizeEscalation(
+      runId,
+      run.thread_id,
+      run.workspace_id,
+      currentContext,
+      run.current_step_id,
+      rejectionReason,
     );
     const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [
       runId,
     ]);
-    publish({
-      type: "run_updated",
-      workspaceId: run.workspace_id,
-      threadId: run.thread_id,
-      run: { ...run, status: "escalated" },
-    });
-    const rejEscThreadItem = await fetchThreadListItem(run.thread_id, run.workspace_id);
-    if (rejEscThreadItem) {
-      publish({
-        type: "thread_updated",
-        workspaceId: run.workspace_id,
-        thread: rejEscThreadItem as unknown as Record<string, unknown>,
-      });
-    }
-    return c.json({ run: updated, result: { action: "escalated" } });
+    return c.json({ run: updated, result: { action: "escalated", reason: rejectionReason } });
   }
 
   if (currentStep.type !== "manual_approval") {
@@ -516,6 +525,14 @@ playbooksRouter.post("/runs/:runId/reject", async (c) => {
   const result = await advanceRun(runId);
   const updated = await queryOne<PlaybookRun>("SELECT * FROM playbook_runs WHERE id = $1", [runId]);
   return c.json({ run: updated, result });
+});
+
+// POST /playbooks/runs/:runId/regenerate-draft
+playbooksRouter.post("/runs/:runId/regenerate-draft", async (c) => {
+  const runId = parseInt(c.req.param("runId"));
+  if (isNaN(runId)) throw new AppError(400, "Invalid run ID");
+  const result = await regeneratePendingDraft(runId);
+  return c.json(result);
 });
 
 // POST /playbooks/runs/:runId/cancel
@@ -780,18 +797,34 @@ playbooksRouter.post("/:id/deactivate", async (c) => {
   return c.json({ playbook: updated });
 });
 
+// POST /playbooks/:id/revert-to-draft
+playbooksRouter.post("/:id/revert-to-draft", async (c) => {
+  const id = parseInt(c.req.param("id"));
+  if (isNaN(id)) throw new AppError(400, "Invalid playbook ID");
+
+  const updated = await revertToDraftOnly(id);
+  if (!updated) throw new AppError(404, "Playbook not found");
+
+  return c.json({ playbook: updated });
+});
+
 // POST /playbooks/:id/dry-run
 playbooksRouter.post("/:id/dry-run", async (c) => {
   const id = parseInt(c.req.param("id"));
   if (isNaN(id)) throw new AppError(400, "Invalid playbook ID");
 
   const workspaceId = parseInt(c.req.query("workspace_id") ?? "1");
-  const body = await c.req.json<{ email_content: string }>();
+  const body = await c.req.json<{ email_content: string; follow_up_message?: string }>();
 
   if (!body.email_content || typeof body.email_content !== "string") {
     throw new AppError(422, "email_content is required");
   }
 
-  const result = await dryRunPlaybook(id, body.email_content.trim(), workspaceId);
+  const followUpMessage =
+    typeof body.follow_up_message === "string" && body.follow_up_message.trim()
+      ? body.follow_up_message.trim()
+      : undefined;
+
+  const result = await dryRunPlaybook(id, body.email_content.trim(), workspaceId, followUpMessage);
   return c.json(result);
 });

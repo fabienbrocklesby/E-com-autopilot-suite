@@ -2,6 +2,7 @@
  * Playbook engine types.
  * Mirrors the data model from docs/PLAYBOOK_ENGINE.md.
  */
+import type { Message } from "../../types/index.ts";
 
 // ─── Step definitions (stored in playbooks.steps JSONB) ───────────────────────
 
@@ -57,7 +58,10 @@ export interface EvaluateStep {
   if_satisfied_goto: string;
   /** Step to jump to when required info is missing */
   if_missing_goto: string;
-  /** Step to jump to when AI detects something wrong even with info present */
+  /** Step to jump to when AI detects something wrong even with info present.
+   *  @deprecated no longer read by the evaluate handler's AI escalate path, which now
+   *  returns an `escalate` decision directly with the AI's real reason. Kept so already-
+   *  parsed playbooks with this field configured don't lose data. */
   if_escalate_goto: string;
   optional_context?: string[];
 }
@@ -154,6 +158,8 @@ export interface Playbook {
   writing_style: string;
   reply_mode: "auto_reply" | "draft_only";
   confidence_threshold: number;
+  approval_streak: number;
+  auto_send_streak_target: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -209,16 +215,13 @@ export interface RunContext {
   workspaceId: number;
   /** The full context bag - handlers read and write to this */
   variables: Record<string, unknown>;
-  /** All messages on this thread, oldest first */
-  messages: Array<{
-    id: number;
-    from_address: string;
-    body_plain: string;
-    body_html: string;
-    direction: "inbound" | "outbound";
-    received_at: Date;
-    message_id_header: string | null;
-  }>;
+  /**
+   * All messages on this thread, oldest first. Widened to the canonical
+   * Message shape (rather than a hand-rolled subset) so the brief service's
+   * shouldRegenerateSummary/ensureBriefSummary (Message[]-typed) can take
+   * ctx.messages directly without every handler re-shaping it.
+   */
+  messages: Message[];
   /** The connected email address for sending */
   email: string;
   /** The Gmail thread ID */
@@ -240,6 +243,7 @@ export type StepDecision =
     delaySec?: number;
   }
   | { action: "complete" }
+  | { action: "escalate"; reason: string }
   | { action: "fail"; error: string; retriable?: boolean };
 
 export interface StepResult {

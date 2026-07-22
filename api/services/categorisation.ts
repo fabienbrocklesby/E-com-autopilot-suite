@@ -4,7 +4,7 @@
  * has an active playbook. Without a playbook the thread is placed in_review
  * for manual handling. The legacy auto-draft flow is removed.
  */
-import { query, queryOne, transaction } from "../db/client.ts";
+import { execute, query, queryOne, transaction } from "../db/client.ts";
 import { AppError, Category, Message, OAuthToken, Setting, Thread } from "../types/index.ts";
 import { categoriseEmail } from "./ai.ts";
 import { applyLabel } from "./gmail.ts";
@@ -13,6 +13,7 @@ import { startRun } from "./playbook/executor.ts";
 import type { Playbook, PlaybookRun } from "./playbook/types.ts";
 import { publish } from "./event-bus.ts";
 import { fetchThreadListItem } from "../db/queries.ts";
+import { sendAlert } from "./alerts.ts";
 
 /**
  * Categorise a thread and route it to the appropriate playbook.
@@ -34,9 +35,6 @@ export async function categoriseAndDraft(threadId: number): Promise<{
   if (!thread) throw new AppError(404, "Thread not found");
 
   const workspaceId = thread.workspace_id;
-
-  const skip = await skipIfPendingDraft(thread);
-  if (skip) return skip;
 
   const [messages, categories, settingRows] = await Promise.all([
     query<Message>(
@@ -102,9 +100,6 @@ export async function categoriseFromGmailLabels(
   );
   if (!thread) throw new AppError(404, "Thread not found");
 
-  const skip = await skipIfPendingDraft(thread);
-  if (skip) return skip;
-
   const categories = await query<Category>(
     "SELECT * FROM categories WHERE workspace_id = $1 ORDER BY name ASC",
     [thread.workspace_id],
@@ -131,41 +126,6 @@ export async function categoriseFromGmailLabels(
     category ? 1 : 0,
     reasoning,
   );
-}
-
-async function skipIfPendingDraft(thread: Thread): Promise<
-  {
-    thread: Thread;
-    categoryId: number | null;
-    confidence: number;
-    reasoning: string;
-    draftCreated: boolean;
-  } | null
-> {
-  // If thread already has a category AND a pending draft, skip re-categorisation
-  // to avoid clobbering existing state. Resume logic is Phase 2.
-  if (thread.category_id === null) return null;
-
-  const existingPendingDraft = await queryOne(
-    "SELECT id FROM drafts WHERE thread_id = $1 AND status = 'pending'",
-    [thread.id],
-  );
-  if (!existingPendingDraft) return null;
-
-  console.log(
-    `[categorisation] Thread ${thread.id} already categorised with pending draft - skipping`,
-  );
-  const currentThread = await queryOne<Thread>(
-    "SELECT * FROM threads WHERE id = $1",
-    [thread.id],
-  ) as Thread;
-  return {
-    thread: currentThread,
-    categoryId: thread.category_id,
-    confidence: 1,
-    reasoning: "Already categorised with pending draft; skipping re-categorisation.",
-    draftCreated: false,
-  };
 }
 
 async function routeThreadToCategory(
@@ -232,6 +192,7 @@ async function routeThreadToCategory(
           await startRun(workspaceId, threadId, playbook.id);
         } catch (err) {
           console.error(`[categorisation] Playbook run failed for thread ${threadId}:`, err);
+          await handleStartRunFailure(workspaceId, threadId, err);
         }
       }
 
@@ -291,6 +252,35 @@ async function routeThreadToCategory(
   return { thread: updatedThread, categoryId, confidence, reasoning, draftCreated: false };
 }
 
+/**
+ * startRun can still throw outside advanceRun's own containment (executor.ts's
+ * loadRunSetup/failRun) - e.g. the playbook row disappearing between
+ * validation and the INSERT here. Previously this was a bare console.error
+ * with no DB write at all: the thread stayed wherever it was and nobody was
+ * ever alerted. Exported for categorisation_test.ts.
+ */
+export async function handleStartRunFailure(
+  workspaceId: number,
+  threadId: number,
+  err: unknown,
+): Promise<void> {
+  await execute("UPDATE threads SET status = 'in_review' WHERE id = $1", [threadId]);
+  await sendAlert(workspaceId, "run_failed", {
+    thread_id: threadId,
+    reason: `startRun failed: ${String(err)}`,
+  }).catch(() => {});
+}
+
+/**
+ * Cancels any active run before a fresh category assignment. Reachable from two
+ * places: the explicit "recategorise this thread" route (a deliberate human
+ * override - always allowed to cancel) and this file's own routeThreadToCategory,
+ * called from the automatic ingest pipeline in gmail.ts. As of the inbound-run
+ * lifecycle rework (design doc 3.2), gmail.ts's ingestMessage only reaches
+ * routeThreadToCategory when resolveInboundRunAction returns "none" - i.e. there
+ * is no active run left to cancel - so this function is structurally a no-op on
+ * the automatic path and only ever does real work on the explicit route.
+ */
 async function cancelActiveRunsForRecategorisation(
   workspaceId: number,
   threadId: number,

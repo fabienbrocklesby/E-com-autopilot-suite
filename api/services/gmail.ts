@@ -7,8 +7,8 @@ import { execute, query, queryOne, transaction } from "../db/client.ts";
 import { AppError, Category, GmailMessage, GmailThread, Message, Setting } from "../types/index.ts";
 import { categoriseAndDraft, categoriseFromGmailLabels } from "./categorisation.ts";
 import { getGoogleAccessToken } from "./google-auth.ts";
-import { resumeRun } from "./playbook/executor.ts";
-import type { PlaybookRun } from "./playbook/types.ts";
+import { advanceRun, resumeRun } from "./playbook/executor.ts";
+import type { PlaybookRun, RunStatus } from "./playbook/types.ts";
 import { logger } from "./logger.ts";
 import { rateLimitedCall } from "./rate_limit.ts";
 import { publish } from "./event-bus.ts";
@@ -254,6 +254,7 @@ async function ingestMessage(
 
   // Gmail gives us the whole conversation here. Store every missing message before
   // categorisation so AI/playbooks can see context from threads that existed pre-launch.
+  let currentInsertedMessageId: number | null = null;
   for (const parsedMessage of parsedMessages) {
     const insertedMsg = await queryOne<Message>(
       `INSERT INTO messages
@@ -280,6 +281,9 @@ async function ingestMessage(
         threadId: threadRow.id,
         message: insertedMsg,
       });
+      if (parsedMessage.gmailMessageId === currentMessage.gmailMessageId) {
+        currentInsertedMessageId = insertedMsg.id;
+      }
     }
   }
 
@@ -290,22 +294,49 @@ async function ingestMessage(
     return;
   }
 
-  // Phase 2: Check if this thread has an active playbook run waiting for customer reply.
+  // A thread with any non-terminal run is never recategorised (design doc 3.2) - a new
+  // inbound message must never destroy an active run. Recategorisation below only ever
+  // runs when there is no active run for this thread.
   const activeRun = await queryOne<PlaybookRun>(
     `SELECT * FROM playbook_runs
-     WHERE thread_id = $1 AND status = 'waiting_for_customer'
+     WHERE thread_id = $1
+       AND status IN ('running', 'waiting_for_customer', 'waiting_for_human', 'waiting_to_send', 'retrying')
      ORDER BY created_at DESC LIMIT 1`,
     [threadRow.id],
   );
 
-  if (activeRun) {
-    logger.info("gmail.resume_playbook_run", { thread_id: threadRow.id, run_id: activeRun.id });
-    try {
-      await resumeRun(activeRun.id);
-    } catch (err) {
-      logger.error("gmail.resume_run_failed", { run_id: activeRun.id, error: String(err) });
+  switch (resolveInboundRunAction(activeRun?.status ?? null)) {
+    case "resume": {
+      logger.info("gmail.resume_playbook_run", { thread_id: threadRow.id, run_id: activeRun!.id });
+      try {
+        await resumeRun(activeRun!.id);
+      } catch (err) {
+        logger.error("gmail.resume_run_failed", { run_id: activeRun!.id, error: String(err) });
+      }
+      return;
     }
-    return;
+    case "attach_to_waiting_human": {
+      await attachMessageToWaitingRun(
+        activeRun!,
+        currentInsertedMessageId,
+        currentMessage.receivedAt,
+      );
+      return;
+    }
+    case "requeue_send": {
+      await requeuePendingSend(activeRun!);
+      return;
+    }
+    case "store_only": {
+      logger.info("gmail.inbound_during_active_run", {
+        thread_id: threadRow.id,
+        run_id: activeRun!.id,
+        run_status: activeRun!.status,
+      });
+      return;
+    }
+    case "none":
+      break; // no active run - fall through to recategorisation
   }
 
   const gmailLabelsAuthoritative = await isGmailLabelsAuthoritative(workspaceId);
@@ -320,6 +351,114 @@ async function ingestMessage(
 
   // Run the AI categorisation pipeline (which may route to a playbook for new threads).
   await categoriseAndDraft(threadRow.id);
+}
+
+export type InboundRunAction =
+  | "resume"
+  | "attach_to_waiting_human"
+  | "requeue_send"
+  | "store_only"
+  | "none";
+
+/**
+ * Maps a thread's active playbook run status to what an inbound customer
+ * message should do to it. The rule behind every branch (design doc 3.2): a
+ * new message never destroys an active run. Only "none" (no active run, or a
+ * terminal one) allows the thread to fall through to recategorisation.
+ */
+export function resolveInboundRunAction(runStatus: RunStatus | null): InboundRunAction {
+  switch (runStatus) {
+    case "waiting_for_customer":
+      return "resume";
+    case "waiting_for_human":
+      return "attach_to_waiting_human";
+    case "waiting_to_send":
+      return "requeue_send";
+    case "running":
+    case "retrying":
+      return "store_only";
+    default:
+      // null (no active run), complete, failed, escalated, cancelled.
+      return "none";
+  }
+}
+
+/**
+ * Appends a newly-arrived message marker to a waiting_for_human run's context
+ * so the approval UI can show "customer replied since this draft was written"
+ * and offer regeneration (Task 8). Pure so the append logic is unit-testable
+ * without a database round trip.
+ */
+export function appendMessageToWaitingRun(
+  context: Record<string, unknown>,
+  entry: { message_id: number | null; received_at: string },
+): Record<string, unknown> {
+  const existing = Array.isArray(context._messages_since_draft)
+    ? context._messages_since_draft
+    : [];
+  return { ...context, _messages_since_draft: [...existing, entry] };
+}
+
+async function attachMessageToWaitingRun(
+  run: PlaybookRun,
+  messageId: number | null,
+  receivedAt: string,
+): Promise<void> {
+  const currentContext = typeof run.context === "string"
+    ? JSON.parse(run.context)
+    : { ...run.context };
+  const updatedContext = appendMessageToWaitingRun(currentContext, {
+    message_id: messageId,
+    received_at: receivedAt,
+  });
+  const updatedRun = await queryOne<PlaybookRun & { playbook_name: string }>(
+    `UPDATE playbook_runs pr SET context = $1
+     FROM playbooks p WHERE pr.playbook_id = p.id AND pr.id = $2
+     RETURNING pr.*, p.name AS playbook_name`,
+    [JSON.stringify(updatedContext), run.id],
+  );
+  if (updatedRun) {
+    publish({
+      type: "run_updated",
+      workspaceId: run.workspace_id,
+      threadId: run.thread_id,
+      run: updatedRun,
+    });
+  }
+  logger.info("gmail.inbound_during_waiting_for_human", {
+    run_id: run.id,
+    thread_id: run.thread_id,
+  });
+}
+
+export async function requeuePendingSend(run: PlaybookRun): Promise<void> {
+  // current_step_id already points at the send_reply step - a paused
+  // waiting_to_send run never advances its cursor (see executor.ts's pause
+  // case). Clearing send_after and setting the run back to running re-enters
+  // that same step, which reloads the full transcript (including this new
+  // message) and re-queues the delayed send.
+  //
+  // A customer-driven requeue is external progress, not a spin loop, so the
+  // stale pending-send execution rows for this step are deleted here: they are
+  // superseded pending-send attempts (the new message means the reply gets
+  // recomposed), and clearing them stops repeated legitimate requeues from
+  // accumulating toward the loop detector's 3-strikes escalation.
+  await transaction(async (tx) => {
+    await tx.queryArray(
+      "DELETE FROM playbook_step_executions WHERE run_id = $1 AND step_id = $2",
+      [run.id, run.current_step_id],
+    );
+    await tx.queryArray(
+      "UPDATE playbook_runs SET status = 'running', send_after = NULL WHERE id = $1",
+      [run.id],
+    );
+  });
+  logger.info("gmail.inbound_during_waiting_to_send", { run_id: run.id, thread_id: run.thread_id });
+  try {
+    await advanceRun(run.id);
+  } catch (err) {
+    logger.error("gmail.requeue_send_failed", { run_id: run.id, error: String(err) });
+  }
 }
 
 interface ParsedGmailMessage {
@@ -339,8 +478,11 @@ function parseGmailMessageForIngest(
   accountEmail: string,
 ): ParsedGmailMessage {
   const from = headerValue(gmailMsg, "From") ?? "";
-  const { plain, html } = extractBody(gmailMsg);
-  const readablePlain = getReadableEmailText({ body_plain: plain, body_html: html });
+  const { plain, html, attachmentFilenames } = extractBody(gmailMsg);
+  const readablePlain = appendAttachmentMarkers(
+    getReadableEmailText({ body_plain: plain, body_html: html }),
+    attachmentFilenames,
+  );
   const hasSentLabel = gmailMsg.labelIds?.includes("SENT") ?? false;
   const fromNormalised = from.toLowerCase();
   const accountNormalised = accountEmail.toLowerCase();
@@ -386,11 +528,17 @@ function headerValue(msg: GmailMessage, name: string): string | undefined {
 }
 
 /** Recursively extract plain text and HTML body from a Gmail message part. */
-function extractBody(msg: GmailMessage): { plain: string; html: string } {
+function extractBody(
+  msg: GmailMessage,
+): { plain: string; html: string; attachmentFilenames: string[] } {
   let plain = "";
   let html = "";
+  const attachmentFilenames: string[] = [];
 
   function walk(part: GmailMessage["payload"]): void {
+    if (part.filename && part.filename.trim().length > 0) {
+      attachmentFilenames.push(part.filename);
+    }
     if (part.mimeType === "text/plain" && part.body.data) {
       plain += decodeBase64Utf8(part.body.data);
     } else if (part.mimeType === "text/html" && part.body.data) {
@@ -402,7 +550,18 @@ function extractBody(msg: GmailMessage): { plain: string; html: string } {
   }
 
   walk(msg.payload);
-  return { plain, html };
+  return { plain, html, attachmentFilenames };
+}
+
+/**
+ * Appends one "[attachment: filename]" line per attachment so the stored
+ * transcript, and anything reading body_plain (composer, evaluate, triage),
+ * can acknowledge attachments even though their content is never read.
+ */
+export function appendAttachmentMarkers(text: string, filenames: string[]): string {
+  if (filenames.length === 0) return text;
+  const markers = filenames.map((name) => `[attachment: ${name}]`).join("\n");
+  return text ? `${text}\n\n${markers}` : markers;
 }
 
 function textToHtml(text: string): string {
@@ -411,6 +570,46 @@ function textToHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
   return `<html><body><p>${escaped.replace(/\n/g, "<br>")}</p></body></html>`;
+}
+
+/**
+ * Builds an RFC 5322 From header with an optional quoted display name.
+ * Ref: RFC 5322 section 3.4, https://www.rfc-editor.org/rfc/rfc5322#section-3.4
+ */
+export function formatFromHeader(storeName: string | null, email: string): string {
+  const trimmed = storeName?.trim();
+  if (!trimmed) return email;
+  const escaped = trimmed.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `"${escaped}" <${email}>`;
+}
+
+/**
+ * Deterministically appends the store's configured signature to a reply
+ * body. `senderName` is `settings.sender_name` (the only per-workspace
+ * "signature" this codebase has - there is no separate freeform
+ * signature-text setting, and the Settings page itself documents and
+ * previews this exact "Best regards,\n{name}" format to the merchant).
+ * Appends nothing when no name is configured.
+ *
+ * Idempotent, but not just against its own exact output: composer.ts's
+ * prompts already tell the AI to close the body with this same name in its
+ * own words ("Thanks, Kieran", "Cheers, Kieran", ...), so an exact-block
+ * match alone would almost never catch that and would double the sign-off
+ * on nearly every send. Instead this checks whether the sender's name
+ * already appears in the body's last line - true for any phrasing the AI
+ * used - and skips appending when it does.
+ */
+export function appendSignature(body: string, senderName: string | null): string {
+  const trimmedName = senderName?.trim();
+  if (!trimmedName) return body;
+
+  const trimmedBody = body.trimEnd();
+  const lines = trimmedBody.split("\n");
+  const lastLine = lines[lines.length - 1]?.trim() ?? "";
+  if (lastLine.includes(trimmedName)) return trimmedBody;
+
+  const signatureBlock = `Best regards,\n${trimmedName}`;
+  return `${trimmedBody}\n\n${signatureBlock}`;
 }
 
 /**
@@ -431,11 +630,29 @@ export async function sendReply(
   dbThreadId?: number,
   workspaceId = 1,
 ): Promise<void> {
+  // Look up the store display name and signature once, up front, so every
+  // reply path (playbook auto-send, draft approval, ask_customer, manual
+  // reply) gets the same human-looking From header and sign-off without
+  // each caller repeating the lookup.
+  const [workspaceRow, signatureRow] = await Promise.all([
+    queryOne<{ store_name: string | null }>(
+      "SELECT store_name FROM workspaces WHERE id = $1",
+      [workspaceId],
+    ),
+    queryOne<{ value: string }>(
+      "SELECT value FROM settings WHERE workspace_id = $1 AND key = 'sender_name'",
+      [workspaceId],
+    ),
+  ]);
+
+  const fromHeader = formatFromHeader(workspaceRow?.store_name ?? null, email);
+  const signedBody = appendSignature(body, signatureRow?.value ?? null);
+
   // Build an RFC 2822 reply message.
   // If we have the original email's Message-ID, use it for proper threading.
   // The threadId in the API request also helps Gmail place the sent message.
   const headers = [
-    `From: ${email}`,
+    `From: ${fromHeader}`,
     `To: ${replyToAddress}`,
     `Subject: Re: ${subject.replace(/^Re:\s*/i, "")}`,
     "MIME-Version: 1.0",
@@ -449,7 +666,7 @@ export async function sendReply(
     headers.push(`References: ${mid}`);
   }
 
-  const rawMessage = [...headers, "", textToHtml(body)].join("\r\n");
+  const rawMessage = [...headers, "", textToHtml(signedBody)].join("\r\n");
 
   // base64url encode (no padding, URL-safe chars).
   const encoded = btoa(unescape(encodeURIComponent(rawMessage)))
@@ -476,13 +693,15 @@ export async function sendReply(
   // without waiting for the Pub/Sub webhook (which can take minutes).
   // The webhook will hit ON CONFLICT DO NOTHING when it eventually fires.
   if (dbThreadId) {
+    // Store the signed body (what was actually sent), not the raw pre-signature
+    // body, so the dashboard's transcript matches what the customer received.
     const sentMsg = await queryOne<Message>(
       `INSERT INTO messages
          (thread_id, gmail_message_id, from_address, body_plain, body_html, received_at, direction, message_id_header)
        VALUES ($1, $2, $3, $4, $5, $6, 'outbound', NULL)
        ON CONFLICT (gmail_message_id) DO NOTHING
        RETURNING *`,
-      [dbThreadId, sent.id, email, body, "", new Date().toISOString()],
+      [dbThreadId, sent.id, email, signedBody, "", new Date().toISOString()],
     );
     if (sentMsg) {
       publish({ type: "message_created", workspaceId, threadId: dbThreadId, message: sentMsg });

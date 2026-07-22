@@ -11,7 +11,17 @@
  */
 import type { EvaluateStep, PlaybookStep, RunContext, StepHandler, StepResult } from "../types.ts";
 import { chatCompletion, getModel } from "../../ai.ts";
-import { formatTranscript } from "../../email-text.ts";
+import { ensureBriefSummary, getThreadBrief } from "../brief.ts";
+import { formatBriefBlock, formatCappedTranscript, isPresent } from "../context-utils.ts";
+
+/**
+ * Maps the AI's raw escalate reason to the run's escalation_reason. Pure,
+ * same reasoning as ask_customer's version - unit-testable without the
+ * chatCompletion call.
+ */
+export function resolveEvaluateEscalateReason(reason: string | undefined): string {
+  return reason && reason.trim() ? reason : "evaluate AI escalated without a stated reason";
+}
 
 export const evaluateHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -21,10 +31,7 @@ export const evaluateHandler: StepHandler = {
     // ── Deterministic pre-check ─────────────────────────────────────────────
     // If every required variable has a non-null, non-empty value, skip the AI
     // call entirely. Zero tokens, zero risk of goal-string misinterpretation.
-    const missing = requiredContext.filter((key) => {
-      const val = ctx.variables[key];
-      return val === null || val === undefined || val === "";
-    });
+    const missing = requiredContext.filter((key) => !isPresent(ctx.variables[key]));
 
     if (missing.length === 0) {
       console.log(
@@ -43,10 +50,15 @@ export const evaluateHandler: StepHandler = {
     // ── AI path: something is missing ──────────────────────────────────────
     // Show the AI the FULL context bag so it can spot info that the extract
     // step may have missed (e.g. the customer quoted their order number in a
-    // free-text reply that wasn't formally extracted).
+    // free-text reply that wasn't formally extracted). Uses the same capped
+    // transcript and thread-brief block the composer builds for customer-
+    // facing replies, instead of a hardcoded last-3-messages window, so a
+    // long thread's earlier facts and summary are visible here too.
     // No GOAL string - the AI's job is variable presence/validity, not intent.
-    const recentMessages = ctx.messages.slice(-3);
-    const recentMessagesText = formatTranscript(recentMessages);
+    const brief = await getThreadBrief(ctx.threadId);
+    const summary = await ensureBriefSummary(ctx.workspaceId, ctx.threadId, ctx.messages);
+    const transcriptText = formatCappedTranscript(ctx.messages, summary);
+    const briefBlock = formatBriefBlock(brief);
 
     const model = await getModel(ctx.workspaceId);
 
@@ -54,13 +66,17 @@ export const evaluateHandler: StepHandler = {
       `You are checking whether a customer support workflow has everything it needs to proceed to the next step.
 ${ctx.storeProfile ? `\nStore context:\n${ctx.storeProfile}\n` : ""}
 REQUIRED VARIABLES (all must be present and valid for the workflow to continue):
-${requiredContext.map((key) => `- ${key}: ${ctx.variables[key] ?? "(MISSING)"}`).join("\n")}
+${
+        requiredContext.map((key) =>
+          `- ${key}: ${isPresent(ctx.variables[key]) ? ctx.variables[key] : "(MISSING)"}`
+        ).join("\n")
+      }
 
 FULL CONTEXT (everything we know so far):
 ${JSON.stringify(ctx.variables, null, 2)}
-
-RECENT CONVERSATION (last 3 messages):
-${recentMessagesText}
+${briefBlock ? `\n${briefBlock}\n` : ""}
+THREAD TRANSCRIPT:
+${transcriptText}
 
 YOUR TASK:
 Check each REQUIRED VARIABLE:
@@ -122,12 +138,16 @@ Output JSON only. No markdown, no explanation outside the JSON.`;
     }
 
     if (parsed.action === "escalate") {
-      console.log(
-        `[playbook] evaluate: AI escalated - ${parsed.reason} for run ${ctx.run.id}`,
-      );
+      // Terminate directly with the AI's real reason instead of routing to
+      // if_escalate_goto - that field pointed at a step with a hardcoded reason
+      // string that didn't reflect what actually went wrong (see CLAUDE.md
+      // known issues). The field stays on the type for old playbooks; this
+      // handler just stops reading it.
+      const reason = resolveEvaluateEscalateReason(parsed.reason);
+      console.log(`[playbook] evaluate: AI escalated - ${reason} for run ${ctx.run.id}`);
       return {
-        decision: { action: "advance_to", stepId: evalStep.if_escalate_goto },
-        output: { action: "escalated", reason: parsed.reason },
+        decision: { action: "escalate", reason },
+        output: { action: "escalated", reason },
         aiCalls,
       };
     }

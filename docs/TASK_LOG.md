@@ -11,6 +11,137 @@ Each entry:
 
 ---
 
+## 2026-07-20 - Product layer: review queue as home, human-looking replies, trust ramp
+
+**Problem:** `/review`, `/sheet-rules`, and `/sheet-updates` had no navigation links, so the purpose-built approval and manual-reply queue was undiscoverable. The dashboard ran two parallel draft models (the legacy `drafts` table and playbook pending-sends), outbound mail had no display name or consistent signature, and every category stayed on manual draft-only forever with no path to auto-send.
+
+**Changes made:**
+- `frontend/src/routes/+layout.svelte`: added a "Review" nav entry before "Playbooks" with a live badge (`attentionCountStore`). `/system` links to `/sheet-updates` and `/sheet-rules`.
+- `frontend/src/routes/review/+page.svelte` and `frontend/src/lib/components/ManualActionBanner.svelte`: subscribed the review queue to the workspace SSE channel, added a conflict-guard message when a run was already actioned elsewhere (409), added a "customer replied since this draft" notice with a one-click regenerate-draft action.
+- Retired the legacy `drafts` table flow from the UI (`threads/[id]/+page.svelte`, `review/+page.svelte`). `ManualReplyPanel` and playbook pending-sends are the single draft model everywhere now. `GET/PATCH /threads/:id/drafts*` return 410 Gone; the `drafts` table itself is untouched pending a prod check for pending rows. Removed the dead `skipIfPendingDraft` guard from `categorisation.ts`.
+- `api/services/gmail.ts`: outbound mail now sends `From: "Store Name" <address>` (falls back to the bare address when unset) and deterministically appends the configured signature once, to both playbook sends and manual replies. Inbound attachments are marked in the stored transcript as `[attachment: filename]`.
+- `api/services/playbook/trust-ramp.ts`: new `recordApprovalOutcome()` tracks a per-playbook approval streak. A clean, unedited approval increments it; an edit or rejection resets it; reaching `auto_send_streak_target` flips `reply_mode` to `auto_reply` and announces graduation over SSE and the alert webhook. `revertToDraftOnly()` powers a one-click revert from the playbooks list.
+- `api/services/playbook/dry-run.ts` and `parser.ts`: use `getModel(workspaceId)` instead of a hardcoded `gpt-4o`. Dry-run accepts an optional `followUpMessage` to simulate a mid-run customer reply and exercise the resume path.
+- `docs/PLAYBOOK_ENGINE.md`: added the `triage` step to the step types table and removed the deleted legacy auto-draft branch from the flow diagram. `CLAUDE.md` known-issues list replaced with the current, verified set.
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: all tests pass, including new `gmail_test.ts`, `trust-ramp_test.ts`, and `dry-run_test.ts`.
+- `deno check main.ts` passes.
+- `npm run check` in `frontend/` passes with 0 errors.
+- Playwright + postgres MCP (live stack): PENDING ops gate. The nav/badge/409 guard/regenerate/streak/graduation UI and the approve/edit/reject streak DB transitions are to be verified by Fabien against a running stack with seeded data; not run in the implementation environment.
+
+---
+
+## 2026-07-20 - Reliability layer: escalation taxonomy, inbound-during-run survival, wedge-proofing
+
+**Problem:** Runs could wedge in `running` forever on a structural failure (missing thread, no
+OAuth token, a deleted playbook) with nothing visible to a human. Escalation reasons were
+frequently wrong (a hardcoded step string, not the real cause), and the two reject flows
+(pending-send vs `manual_approval`) didn't converge, so one of them recorded no reason, never
+moved the thread to `in_review`, and never alerted. An inbound customer message during an active
+run (`waiting_for_human`, `waiting_to_send`) would destroy that run and start a fresh one,
+silently discarding a pending draft or a customer's reply. Timeout and retry workers hand-rolled
+their own "mark escalated" logic and never published `run_updated` over SSE.
+
+**Changes made:**
+- `api/services/playbook/executor.ts`: added `finalizeEscalation` as the single code path that
+  ever writes `status = 'escalated'` (real reason recorded, thread moved to `in_review`, alert
+  fired, SSE published) and `failRun`/`loadRunSetup`/`buildRunContext` as the equivalent
+  containment for genuine structural failures (`status = 'failed'`), so `advanceRun` never leaves
+  a run wedged with nothing surfaced. Every escalation path - loop detection, the 50-step cap,
+  the new `escalate` step decision, both human-reject flows in `routes/playbooks.ts`, and the
+  timeout/retry workers - now goes through one of these two functions.
+- `api/services/playbook/handlers/escalate.ts`, `ask_customer.ts`, `evaluate.ts`: escalation
+  reason precedence is now `_rejection_source` (explicit human rejection) over
+  `_escalation_reason` (a dynamic reason an upstream step already computed) over the step's own
+  static config reason, so "Could not find order in sheet" no longer shows up when the real cause
+  was something else. `evaluate.ts`'s AI escalate path no longer routes through
+  `if_escalate_goto` (a step with a hardcoded reason) - it returns the `escalate` decision
+  directly with the AI's real stated reason.
+- `api/services/gmail.ts`: `resolveInboundRunAction` maps a thread's active run status to what an
+  inbound message should do to it - resume a `waiting_for_customer` run, attach the message to a
+  `waiting_for_human` run's context (`_messages_since_draft`) instead of cancelling it, requeue a
+  `waiting_to_send` run's delayed send, or leave a `running`/`retrying` run alone. A new message
+  never destroys an active run; only a thread with no active (or a terminal) run falls through to
+  recategorisation.
+- `api/services/categorisation.ts`: `handleStartRunFailure` surfaces the thread for review and
+  alerts when `startRun` throws, instead of a bare `console.error` that left the thread wherever
+  it was with nobody notified.
+- `api/services/alerts.ts`: added the `run_failed` alert event alongside the existing
+  `run_escalated`.
+- `api/services/playbook/regenerate.ts`: `regeneratePendingDraft`/`applyRegeneratedDraft` let a
+  stale `waiting_for_human` draft (one where the customer replied again before it was approved)
+  be re-composed against the current transcript and replaced in place, clearing
+  `_messages_since_draft` and appending the regeneration's AI call onto the step execution's
+  existing `ai_calls` audit trail rather than replacing it.
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: all tests pass, including
+  `escalate_test.ts`, `ask_customer_test.ts`, `evaluate_test.ts`, `executor_test.ts`,
+  `timeout_worker_test.ts`, `retry_worker_test.ts`, `playbooks_test.ts`, `gmail_test.ts`,
+  `categorisation_test.ts`, and `regenerate_test.ts` (run against a real local Postgres per this
+  phase's `[DB]`/`[DB+AUTH]` convention).
+- `deno check main.ts` passes.
+- Manual verification (Task 6 and Task 8's manual-verification sections above): PENDING. Both an
+  inbound message surviving `waiting_for_human`/`waiting_to_send` without cancelling the run, and
+  `regenerate-draft` replacing a stale pending send without advancing or re-pausing it, rely on a
+  real Gmail/OpenAI call with no mock seam in this codebase, so neither has actually been run
+  through the manual steps yet. This is a human ops gate that still needs to happen before the
+  reliability layer is considered fully verified end to end.
+
+---
+
+## 2026-07-20 - AI layer: thread brief memory and a unified reply composer
+
+**Problem:** `ask_customer` and `send_reply` each built their own prompt context and had quietly
+drifted (different transcript windows, different presence checks), and neither `evaluate` nor
+`triage` saw any durable memory of a thread, so a second run on the same thread (recategorised,
+or the customer returning weeks later) started from an empty context bag. Long threads also sent
+their full transcript on every AI call with no cap.
+
+**Changes made:**
+- `api/db/migrations/028_thread_brief_and_streaks.sql`: added `threads.brief JSONB` (durable
+  per-thread facts plus a lazily regenerated summary) and two playbook trust-ramp columns used by
+  a later phase.
+- `api/services/playbook/brief.ts`: `getThreadBrief`, `mergeBriefFacts`, `ensureBriefSummary`
+  (regenerates the summary only past 8 messages and only when the brief predates the latest
+  message) and the pure `shouldRegenerateSummary` decision behind it.
+- `api/services/playbook/context-utils.ts`: `isPresent` (one presence check replacing two that
+  used to disagree), `formatCappedTranscript` (full transcript at or under 30 messages, summary
+  plus the last 10 messages beyond that), and `formatBriefBlock` (renders a thread's facts and
+  summary as a THREAD BRIEF prompt section).
+- `api/services/playbook/composer.ts`: new `assembleComposerContext`/`buildComposerContext`,
+  `composeAskDecision`, `composeReplyBody` - the single place `ask_customer.ts` and
+  `send_reply.ts` now build their prompts, replacing their divergent copies.
+- `api/services/playbook/handlers/evaluate.ts` and `handlers/triage.ts`: switched from a
+  hardcoded last-3-messages window (evaluate) and the uncapped full transcript (triage) to
+  `formatCappedTranscript`, and both now prepend `formatBriefBlock`'s THREAD BRIEF section so
+  these routing decisions see the same facts/summary the composer sees for customer-facing
+  replies. `evaluate.ts`'s REQUIRED VARIABLES prompt line also moved off `?? "(MISSING)"` onto
+  `isPresent`, so an empty-string variable is no longer shown as a real value there while also
+  being flagged missing elsewhere in the same prompt.
+- `api/services/playbook/types.ts` / `executor.ts`: `RunContext.messages` widened to the
+  canonical `Message` type (landed slightly earlier than this entry, as part of the thread-brief
+  work, since `ensureBriefSummary` needed it).
+
+**Validation:**
+- `deno test --allow-net --allow-env --allow-read` in `api/`: `ok | 32 passed | 0 failed`
+  (brief_test.ts, context-utils_test.ts, composer_test.ts, plus the pre-existing 29).
+- `deno check main.ts` passes.
+- `deno lint` shows the same 11 pre-existing problems as before this change, none in the files
+  touched here.
+- Manual verification: `dry-run.ts` (the playbook sandbox route) turned out to be a fully
+  separate hardcoded simulator that never calls `composer.ts`/`brief.ts`/the real handlers, so it
+  could not be used to observe the composed prompt as originally planned. Ran
+  `assembleComposerContext` directly instead against a synthetic 35-message thread: confirmed the
+  output contains a `THREAD BRIEF` block, an `EARLIER CONVERSATION (summary):` line, and only the
+  last 10 messages, matching what `ask_customer`/`send_reply` now send. `evaluate`/`triage`'s
+  capped-transcript and brief-block behaviour is covered by `context-utils_test.ts` plus code
+  review of both handlers, since exercising them live needs Postgres and a real thread brief
+  that this repo has no fixture/mocking layer for yet.
+
+---
+
 ## 2026-05-24 - Production Google OAuth invalid_grant incident
 
 **Problem:** Production polling for `exclusivemotors12@gmail.com` failed with Google OAuth `invalid_grant` during refresh. Production `/auth/status` showed the stored access token expired at `2026-05-07T01:20:13.475Z`, so the app had been unable to refresh Gmail access for weeks.

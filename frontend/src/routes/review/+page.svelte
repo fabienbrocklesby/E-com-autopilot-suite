@@ -7,9 +7,10 @@
   import { onMount } from "svelte";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
-  import { threadsApi, playbooksApi } from "$lib/api";
-  import type { ThreadListItem, ThreadDetail, Draft, PlaybookRun } from "$lib/api";
-  import { CheckCircle } from '@lucide/svelte';
+  import { threadsApi, playbooksApi, ApiRequestError } from "$lib/api";
+  import type { ThreadListItem, ThreadDetail, PlaybookRun } from "$lib/api";
+  import { CheckCircle, AlertTriangle } from '@lucide/svelte';
+  import { openSSE } from "$lib/sse";
 
   const prefersReducedMotion =
     typeof window !== "undefined"
@@ -24,6 +25,7 @@
   let detailLoading = $state(false);
   let error = $state<string | null>(null);
   let successMessage = $state<string | null>(null);
+  let graduationBanner = $state<string | null>(null);
 
   // Playbook runs waiting for human
   let pendingRuns = $state<PlaybookRun[]>([]);
@@ -35,9 +37,6 @@
   // Per-run editable reply body for pending_send approvals: runId → edited body
   let runBodies = $state<Record<number, string>>({});
 
-  // Per-draft edit state: draftId → edited body
-  let editingBodies = $state<Record<number, string>>({});
-
   // Group pending runs by reason
   let runsByReason = $derived(
     pendingRuns.reduce<Record<string, PlaybookRun[]>>((acc, run) => {
@@ -47,8 +46,28 @@
     }, {})
   );
 
-  async function load() {
-    loading = true;
+  let regeneratingRunId = $state<number | null>(null);
+
+  function messagesSinceDraft(run: PlaybookRun): Array<{ message_id: number | null; received_at: string }> {
+    const raw = run.context?._messages_since_draft;
+    return Array.isArray(raw) ? (raw as Array<{ message_id: number | null; received_at: string }>) : [];
+  }
+
+  async function regenerateDraft(runId: number) {
+    regeneratingRunId = runId;
+    error = null;
+    try {
+      const res = await playbooksApi.regenerateDraft(runId);
+      runBodies[runId] = res.body;
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to regenerate draft";
+    } finally {
+      regeneratingRunId = null;
+    }
+  }
+
+  async function load(silent = false) {
+    if (!silent) loading = true;
     error = null;
     try {
       const [threadsRes, runsRes] = await Promise.all([
@@ -66,7 +85,7 @@
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load review queue";
     } finally {
-      loading = false;
+      if (!silent) loading = false;
     }
   }
 
@@ -75,36 +94,10 @@
     try {
       const res = await threadsApi.get(id);
       expandedThread = res.thread;
-      for (const d of res.thread.drafts) {
-        if (d.status === "pending") {
-          editingBodies[d.id] = d.body;
-        }
-      }
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load thread";
     } finally {
       detailLoading = false;
-    }
-  }
-
-  async function handleDraftAction(
-    threadId: number,
-    draft: Draft,
-    status: Draft["status"],
-  ) {
-    try {
-      const editedBody =
-        status === "approved" ? editingBodies[draft.id] : undefined;
-      await threadsApi.updateDraftStatus(threadId, draft.id, status, editedBody);
-      successMessage = `Draft ${status}.`;
-      setTimeout(() => { successMessage = null; }, 3000);
-      if (expandedThread?.id === threadId) {
-        const res = await threadsApi.get(threadId);
-        expandedThread = res.thread;
-      }
-      await load();
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to update draft";
     }
   }
 
@@ -120,7 +113,12 @@
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to approve";
+      if (e instanceof ApiRequestError && e.error.status === 409) {
+        error = "This action was already handled elsewhere.";
+        await load();
+      } else {
+        error = e instanceof Error ? e.message : "Failed to approve";
+      }
     } finally {
       runActioning = null;
     }
@@ -135,7 +133,12 @@
       setTimeout(() => { successMessage = null; }, 3000);
       await load();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to reject";
+      if (e instanceof ApiRequestError && e.error.status === 409) {
+        error = "This action was already handled elsewhere.";
+        await load();
+      } else {
+        error = e instanceof Error ? e.message : "Failed to reject";
+      }
     } finally {
       runActioning = null;
     }
@@ -144,6 +147,37 @@
   onMount(async () => {
     await load();
     mounted = true;
+  });
+
+  $effect(() => {
+    let connectionCount = 0;
+    const es = openSSE('workspace', { workspace_id: 1 });
+
+    es.addEventListener('open', () => {
+      connectionCount++;
+      // A reconnect after the first connection means we missed events while
+      // disconnected, so do a full reload rather than trust partial state.
+      if (connectionCount > 1) load();
+    });
+
+    es.addEventListener('thread_updated', () => {
+      load(true);
+    });
+
+    es.addEventListener('run_updated', () => {
+      load(true);
+    });
+
+    es.addEventListener('playbook_graduated', (e: Event) => {
+      const { playbook } = JSON.parse((e as MessageEvent).data) as {
+        playbook: { id: number; name: string };
+      };
+      graduationBanner = `"${playbook.name}" graduated to auto-send after a clean approval streak.`;
+      setTimeout(() => { graduationBanner = null; }, 8000);
+      load(true);
+    });
+
+    return () => es.close();
   });
 </script>
 
@@ -162,6 +196,12 @@
 
 {#if successMessage}
   <div class="success-banner" transition:fade={{ duration: 150 }}>{successMessage}</div>
+{/if}
+
+{#if graduationBanner}
+  <div class="graduation-banner" transition:fade={{ duration: 150 }}>
+    <CheckCircle size={16} /> {graduationBanner}
+  </div>
 {/if}
 
 {#if loading}
@@ -183,6 +223,9 @@
               <span class="approval-playbook">{run.playbook_name ?? `Playbook #${run.playbook_id}`}</span>
               <span class="approval-meta">Run #{run.id} · <a href="/threads/{run.thread_id}" class="thread-link">Thread #{run.thread_id}</a></span>
               <span class="approval-time">{new Date(run.updated_at).toLocaleString()}</span>
+              {#if run.auto_send_streak_target != null}
+                <span class="approval-streak">{run.approval_streak ?? 0}/{run.auto_send_streak_target} clean approvals</span>
+              {/if}
             </div>
             {#if run.step_pending_send}
               <div class="pending-send-area">
@@ -194,6 +237,19 @@
                     <span class="edited-notice">edited</span>
                   {/if}
                 </div>
+                {#if messagesSinceDraft(run).length > 0}
+                  <div class="stale-draft-notice">
+                    <AlertTriangle size={14} />
+                    <span>Customer replied since this draft was written.</span>
+                    <button
+                      class="btn btn-ghost btn-sm"
+                      onclick={() => regenerateDraft(run.id)}
+                      disabled={regeneratingRunId === run.id}
+                    >
+                      {regeneratingRunId === run.id ? "Regenerating…" : "Regenerate draft"}
+                    </button>
+                  </div>
+                {/if}
                 <textarea
                   class="pending-send-textarea"
                   rows={6}
@@ -227,7 +283,7 @@
               <button
                 class="btn btn-primary"
                 onclick={() => approveRun(run.id, run.step_capture_input ?? false)}
-                disabled={runActioning === run.id}
+                disabled={runActioning === run.id || regeneratingRunId === run.id}
               >
                 {runActioning === run.id ? "…" : "Approve"}
               </button>
@@ -310,77 +366,6 @@
           {/each}
         </div>
 
-        {#if expandedThread.drafts.length > 0}
-          <div class="drafts-section">
-            <h3>Drafts</h3>
-            {#each expandedThread.drafts as draft (draft.id)}
-              <div class="draft card">
-                <div class="draft-status-row">
-                  <span class="draft-status draft-status-{draft.status}"
-                    >{draft.status}</span
-                  >
-                  <span class="date"
-                    >{new Date(draft.created_at).toLocaleString()}</span
-                  >
-                  {#if draft.was_edited}
-                    <span class="edited-badge">edited</span>
-                  {/if}
-                </div>
-                {#if draft.status === "pending"}
-                  <textarea
-                    class="draft-editor"
-                    rows={10}
-                    bind:value={editingBodies[draft.id]}
-                  ></textarea>
-                  {#if editingBodies[draft.id] !== draft.body}
-                    <p class="edit-notice">
-                      Body edited - changes will be sent on approval.
-                    </p>
-                  {/if}
-                  <div class="draft-actions">
-                    <button
-                      class="btn btn-primary"
-                      onclick={() =>
-                        handleDraftAction(
-                          expandedThread!.id,
-                          draft,
-                          "approved",
-                        )}
-                    >
-                      Approve &amp; Send
-                    </button>
-                    <button
-                      class="btn btn-ghost"
-                      onclick={() => {
-                        editingBodies[draft.id] = draft.body;
-                      }}
-                    >
-                      Reset
-                    </button>
-                    <button
-                      class="btn btn-danger"
-                      onclick={() =>
-                        handleDraftAction(
-                          expandedThread!.id,
-                          draft,
-                          "rejected",
-                        )}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                {:else}
-                  <pre class="draft-body">{draft.final_body ?? draft.body}</pre>
-                  {#if draft.sent_at}
-                    <p class="sent-at">
-                      Sent {new Date(draft.sent_at).toLocaleString()}
-                    </p>
-                  {/if}
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
       {:else}
         <div class="select-prompt">Select a thread to review</div>
       {/if}
@@ -486,6 +471,25 @@
     color: var(--color-text-muted);
   }
 
+  .approval-streak {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  .graduation-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16 185 129 / 0.1);
+    border: 1px solid rgba(16 185 129 / 0.3);
+    border-radius: var(--radius);
+    color: var(--color-success);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
   .approval-actions {
     display: flex;
     gap: 8px;
@@ -528,6 +532,24 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .stale-draft-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(245 158 11 / 0.1);
+    border: 1px solid rgba(245 158 11 / 0.35);
+    border-radius: var(--radius);
+    color: var(--color-warning);
+    font-size: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stale-draft-notice span {
+    flex: 1;
+    min-width: 160px;
   }
 
   .pending-send-header {
@@ -657,15 +679,6 @@
     font-weight: 500;
   }
 
-  .edited-badge {
-    background: rgba(59 130 246 / 0.15);
-    color: var(--color-info);
-    padding: 2px 7px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
   .thread-detail {
     min-height: 400px;
   }
@@ -720,18 +733,9 @@
     font-weight: 600;
   }
 
-  .date,
-  .sent-at {
-    color: var(--color-text-muted);
-  }
-
   .date {
+    color: var(--color-text-muted);
     margin-left: auto;
-  }
-
-  .sent-at {
-    font-size: 11px;
-    margin-top: 6px;
   }
 
   .direction-badge {
@@ -741,83 +745,6 @@
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .draft-status-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
-
-  .draft-status {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  .draft-status-pending {
-    background: rgba(245 158 11 / 0.15);
-    color: var(--color-warning);
-  }
-  .draft-status-approved {
-    background: rgba(16 185 129 / 0.15);
-    color: var(--color-success);
-  }
-  .draft-status-rejected {
-    background: rgba(239 68 68 / 0.15);
-    color: var(--color-danger);
-  }
-  .draft-status-sent {
-    background: rgba(59 130 246 / 0.15);
-    color: var(--color-info);
-  }
-
-  .draft-editor {
-    width: 100%;
-    background: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    color: var(--color-text);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.5;
-    padding: 12px;
-    resize: vertical;
-    margin-bottom: 8px;
-  }
-
-  .draft-editor:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
-
-  .edit-notice {
-    font-size: 12px;
-    color: var(--color-info);
-    margin-bottom: 8px;
-  }
-
-  .draft-body {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--color-text-muted);
-    padding: 12px;
-    background: var(--color-bg);
-    border-radius: var(--radius);
-    border: 1px solid var(--color-border);
-    margin-bottom: 12px;
-  }
-
-  .draft-actions {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
   }
 
   .card {
@@ -832,16 +759,6 @@
     color: var(--color-text-muted);
     padding: 60px;
     text-align: center;
-  }
-
-  .btn-danger {
-    background: rgba(239 68 68 / 0.1);
-    border-color: rgba(239 68 68 / 0.3);
-    color: var(--color-danger);
-  }
-
-  .btn-danger:hover {
-    background: rgba(239 68 68 / 0.2);
   }
 
   :global(.error-banner) {
@@ -871,14 +788,6 @@
 
     h2 {
       font-size: 15px;
-    }
-
-    .draft-actions {
-      flex-direction: column;
-    }
-
-    .draft-actions .btn {
-      width: 100%;
     }
   }
 </style>

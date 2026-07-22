@@ -5,7 +5,7 @@
 	import { onNavigate } from '$app/navigation';
 	import { workspacesApi, type Workspace } from '$lib/api';
 	import { workspaceStore, attentionCountStore } from '$lib/stores';
-	import { Inbox, BookOpen, Settings, Plane, Menu, X } from '@lucide/svelte';
+	import { Inbox, CheckCircle, BookOpen, Settings, Plane, Menu, X } from '@lucide/svelte';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -69,6 +69,7 @@
 
 	const navLinks = [
 		{ href: '/', label: 'Inbox', icon: Inbox },
+		{ href: '/review', label: 'Review', icon: CheckCircle },
 		{ href: '/playbooks', label: 'Playbooks', icon: BookOpen },
 		{ href: '/settings', label: 'Settings', icon: Settings },
 	];
@@ -153,7 +154,7 @@
 					>
 						<span class="nav-icon"><Icon size={16} /></span>
 						{label}
-						{#if href === '/' && attentionCount > 0}
+						{#if (href === '/' || href === '/review') && attentionCount > 0}
 							<span class="nav-badge">{attentionCount}</span>
 						{/if}
 					</a>

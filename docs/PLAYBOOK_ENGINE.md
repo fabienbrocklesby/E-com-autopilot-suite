@@ -60,6 +60,7 @@ playbook_step_executions
 | `ask_customer` | AI-driven: writes a contextual message to gather missing info. Skips if info already present. Escalates if conversation is stuck. | `goal: string, required_context: string[], on_reply_goto: string, voice_hint?: string, message?: string` (message is legacy fallback) | pause(waiting_for_customer) or advance_to or fail |
 | `branch` | Deterministic routing on a simple condition. Use only for literal null/value checks. | `condition: string, if_true: string, if_false: string` | advance to chosen step |
 | `evaluate` | AI-driven three-way routing. Use when the decision requires judgment: "do we have enough info?", "is the conversation stuck?". | `goal: string, required_context: string[], if_satisfied_goto: string, if_missing_goto: string, if_escalate_goto: string` | advance to chosen step |
+| `triage` | AI-driven route selection for intent/actionability decisions ("is this worth replying to?", "which workflow applies?"). Distinct from `evaluate`, which is a variable-presence gate rather than an intent router. | `goal: string, routes: [{label, description, goto}], fallback_goto: string, confidence_threshold?: number` | advance to the chosen route, or `fallback_goto` when unsure, invalid, or below threshold |
 | `manual_approval` | Hold for human. Captures free-text input (e.g. Stripe transaction ID) when `capture_input: true`. | `reason: string, capture_input?: boolean, input_prompt?: string, input_context_key?: string, on_approve: string, on_reject: string` | pause(waiting_for_human) |
 | `send_reply` | Send reply. Preferred: AI-drafted from goal + reference_context. Fallback: literal message. | `goal?: string, reference_context?: string[], voice_hint?: string, message?: string` | advance |
 | `complete` | End the run cleanly | none | complete |
@@ -88,12 +89,12 @@ playbook_step_executions
           │        └────┬───────┬───┘
           │             │ yes   │ no
           │             ▼       ▼
-          │      ┌──────────┐ ┌──────────────┐
-          │      │ Create   │ │ Legacy:      │
-          │      │ run, run │ │ categorise + │
-          │      │ from     │ │ draft +      │
-          │      │ step 1   │ │ auto-reply   │
-          │      └────┬─────┘ └──────────────┘
+          │      ┌──────────┐ ┌────────────────┐
+          │      │ Create   │ │ Place thread    │
+          │      │ run, run │ │ in_review for   │
+          │      │ from     │ │ manual triage   │
+          │      │ step 1   │ └────────────────┘
+          │      └────┬─────┘
           │           │
           ▼           ▼
        ┌───────────────────────┐
@@ -108,6 +109,8 @@ playbook_step_executions
        │ - if 'fail', escalate │
        └───────────────────────┘
 ```
+
+Note: "Place thread in_review for manual triage" is a terminal state for that path, there is no run to hand off to the step executor loop, since no playbook exists for the category. This replaces the removed legacy behaviour, which used to auto-generate a draft in the now-retired `drafts` table.
 
 ## Plain-language to structured magic
 

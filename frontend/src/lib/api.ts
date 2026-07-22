@@ -131,13 +131,6 @@ export const threadsApi = {
 		}>(`/threads/${id}/categorise`, { method: 'POST' });
 	},
 
-	updateDraftStatus(threadId: number, draftId: number, status: Draft['status'], body?: string) {
-		return request<{ draft: Draft }>(`/threads/${threadId}/drafts/${draftId}`, {
-			method: 'PATCH',
-			body: JSON.stringify({ status, ...(body !== undefined ? { body } : {}) })
-		});
-	},
-
 	sendManualReply(threadId: number, body: string, workspaceId = 1) {
 		return request<{
 			messageSent: boolean;
@@ -470,6 +463,8 @@ export interface Playbook {
         writing_style: string;
         reply_mode: 'auto_reply' | 'draft_only';
         confidence_threshold: number;
+        approval_streak: number;
+        auto_send_streak_target: number;
         created_at: string;
         updated_at: string;
 }
@@ -496,6 +491,9 @@ export interface PlaybookRun {
         step_pending_send?: string | null;
         // True when an old run points at a step that no longer exists in its playbook snapshot.
         step_missing?: boolean | null;
+        // Trust-ramp streak fields, joined from the run's playbook.
+        approval_streak?: number;
+        auto_send_streak_target?: number;
 }
 
 export interface StepExecution {
@@ -570,10 +568,13 @@ export const playbooksApi = {
                 });
         },
 
-        dryRun(id: number, emailContent: string, workspaceId = 1) {
+        dryRun(id: number, emailContent: string, workspaceId = 1, followUpMessage?: string) {
                 return request<DryRunResult>(`/playbooks/${id}/dry-run?workspace_id=${workspaceId}`, {
                         method: 'POST',
-                        body: JSON.stringify({ email_content: emailContent })
+                        body: JSON.stringify({
+                                email_content: emailContent,
+                                ...(followUpMessage ? { follow_up_message: followUpMessage } : {})
+                        })
                 });
         },
 
@@ -583,6 +584,10 @@ export const playbooksApi = {
 
         deactivate(id: number) {
                 return request<{ playbook: Playbook }>(`/playbooks/${id}/deactivate`, { method: 'POST' });
+        },
+
+        revertToDraft(id: number) {
+                return request<{ playbook: Playbook }>(`/playbooks/${id}/revert-to-draft`, { method: 'POST' });
         },
 
         listRuns(params: { thread_id?: number; playbook_id?: number; workspace_id?: number; status?: string }) {
@@ -610,6 +615,12 @@ export const playbooksApi = {
 
         rejectRun(runId: number) {
                 return request<{ run: PlaybookRun }>(`/playbooks/runs/${runId}/reject`, { method: 'POST' });
+        },
+
+        regenerateDraft(runId: number) {
+                return request<{ body: string }>(`/playbooks/runs/${runId}/regenerate-draft`, {
+                        method: 'POST'
+                });
         },
 
         cancelRun(runId: number) {

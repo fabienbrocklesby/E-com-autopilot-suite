@@ -7,9 +7,11 @@ import { logger } from "./logger.ts";
 
 export type AlertEvent =
   | "run_escalated"
+  | "run_failed"
   | "ingestion_failed_permanently"
   | "circuit_breaker_opened"
-  | "rate_limit_sustained";
+  | "rate_limit_sustained"
+  | "playbook_graduated";
 
 export async function sendAlert(
   workspaceId: number,

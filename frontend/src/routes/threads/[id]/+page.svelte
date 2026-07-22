@@ -8,7 +8,7 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { threadsApi, playbooksApi, workspacesApi } from "$lib/api";
-  import type { ThreadDetail, Draft, Message, PlaybookRun, StepExecution, Workspace } from "$lib/api";
+  import type { ThreadDetail, Message, PlaybookRun, StepExecution, Workspace } from "$lib/api";
   import ManualActionBanner from "$lib/components/ManualActionBanner.svelte";
   import ManualReplyPanel from "$lib/components/ManualReplyPanel.svelte";
   import { Zap, PlusCircle, TableProperties, Pencil, MessageCircleQuestion, Scale, GitBranch, Hand, Send, CheckCircle, AlertTriangle, ExternalLink } from '@lucide/svelte';
@@ -303,19 +303,6 @@
     }
   }
 
-  async function handleDraftAction(draftId: number, status: Draft["status"]) {
-    try {
-      await threadsApi.updateDraftStatus(threadId, draftId, status);
-      success = `Draft ${status}.`;
-      setTimeout(() => {
-        success = null;
-      }, 3000);
-      await load();
-    } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to update draft";
-    }
-  }
-
   const ACTIVE_RUN_STATUSES = ["running", "waiting_for_customer", "waiting_for_human", "retrying"];
 
   let activeRuns = $derived(runs.filter((r) => ACTIVE_RUN_STATUSES.includes(r.status)));
@@ -552,27 +539,6 @@
           </div>
         {/each}
       </div>
-
-      {#if thread.drafts.length > 0}
-        <div class="drafts-section">
-          <h3>Drafts ({thread.drafts.length})</h3>
-          {#each thread.drafts as draft (draft.id)}
-            <div class="draft card">
-              <div class="draft-header">
-                <span class="draft-status draft-{draft.status}">{draft.status}</span>
-                <span class="date">{new Date(draft.created_at).toLocaleString()}</span>
-              </div>
-              <pre class="draft-body">{draft.body}</pre>
-              {#if draft.status === "pending"}
-                <div class="draft-actions">
-                  <button class="btn btn-primary" onclick={() => handleDraftAction(draft.id, "approved")}>Approve & Send</button>
-                  <button class="btn btn-ghost" onclick={() => handleDraftAction(draft.id, "rejected")}>Reject</button>
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
 
       <ManualReplyPanel {threadId} onSent={load} />
     </div>
@@ -905,42 +871,6 @@
     min-height: 180px;
     box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
   }
-
-  /* ─── Drafts ─── */
-  .drafts-section h3 { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
-
-  .draft-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
-  .draft-status {
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  .draft-pending { background: rgba(245 158 11 / 0.15); color: var(--color-warning); }
-  .draft-approved { background: rgba(16 185 129 / 0.15); color: var(--color-success); }
-  .draft-rejected { background: rgba(239 68 68 / 0.15); color: var(--color-danger); }
-  .draft-sent { background: rgba(99 102 241 / 0.15); color: var(--color-primary); }
-
-  .draft-body {
-    font-family: var(--font);
-    font-size: 13px;
-    line-height: 1.7;
-    white-space: pre-wrap;
-    background: var(--color-surface-2);
-    padding: 14px;
-    border-radius: var(--radius);
-    margin-bottom: 14px;
-  }
-
-  .draft-actions { display: flex; gap: 10px; }
 
   /* ─── Right: Context sidebar ─── */
   .context-col {

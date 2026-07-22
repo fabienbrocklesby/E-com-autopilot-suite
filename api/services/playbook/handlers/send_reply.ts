@@ -5,9 +5,10 @@
  */
 import type { PlaybookStep, RunContext, SendReplyStep, StepHandler, StepResult } from "../types.ts";
 import { sendReply } from "../../gmail.ts";
-import { chatCompletion, getModel } from "../../ai.ts";
-import { formatTranscript } from "../../email-text.ts";
 import { resolveReplyAddress } from "../../reply-address.ts";
+import { composeReplyBody } from "../composer.ts";
+import type { AiCall } from "../composer.ts";
+import { isPresent } from "../context-utils.ts";
 
 export const sendReplyHandler: StepHandler = {
   async execute(step: PlaybookStep, ctx: RunContext): Promise<StepResult> {
@@ -23,9 +24,9 @@ export const sendReplyHandler: StepHandler = {
     const replyAddress = resolveReplyAddress(lastInbound);
 
     let body: string;
-    let aiCalls:
-      | Array<{ model: string; prompt: string; response: string; tokens: undefined }>
-      | undefined;
+    // AiCall matches StepResult.aiCalls' element shape exactly (see composer.ts) -
+    // reused here instead of re-declared so this doesn't drift from that type again.
+    let aiCalls: AiCall[] | undefined;
 
     const hasLiteralMessage = typeof sendStep.message === "string";
     const hasGoal = !!sendStep.goal;
@@ -38,67 +39,29 @@ export const sendReplyHandler: StepHandler = {
       (sendStep.message && typeof sendStep.message === "object" &&
         "ai_generate_using_category_voice" in (sendStep.message as object))
     ) {
-      // AI-drafted path
-      // Resolve writing voice: step-level override → playbook default → fallback
-      const voice = sendStep.voice_hint ??
-        (ctx.playbook.writing_style || "friendly and professional");
+      // AI-drafted path - composer owns prompt assembly (thread brief, capped
+      // transcript, sign-off/voice rules) so this and ask_customer stop
+      // maintaining their own divergent copies of the same context-building.
+      // aiCall is kept in aiCalls below so playbook_step_executions.ai_calls
+      // is unchanged by moving prompt construction into the composer.
       const goal = sendStep.goal ??
         "Write a helpful and contextual reply to close out this interaction";
 
-      // Build reference context values
-      const refs: Record<string, unknown> = {};
+      const referenceContext: Record<string, unknown> = {};
       for (const key of (sendStep.reference_context ?? [])) {
-        if (ctx.variables[key] != null) refs[key] = ctx.variables[key];
+        if (isPresent(ctx.variables[key])) referenceContext[key] = ctx.variables[key];
       }
 
-      const recentMessages = ctx.messages.slice(-3);
-      const transcript = formatTranscript(recentMessages);
-
-      const model = await getModel(ctx.workspaceId);
-
-      const systemPrompt = `Write a brief reply to this email thread.
-
-GOAL: ${goal}
-
-VOICE: ${voice}
-${ctx.senderName ? `\nSIGN OFF AS: ${ctx.senderName}` : ""}
-${
-        ctx.storeProfile
-          ? `\nSTORE CONTEXT (use naturally where relevant, do not mention robotically):\n${ctx.storeProfile}`
-          : ""
-      }
-
-MUST REFERENCE NATURALLY (do not list robotically - weave into the message):
-${Object.keys(refs).length > 0 ? JSON.stringify(refs, null, 2) : "no specific values required"}
-
-FULL CONTEXT FOR THIS RUN:
-${JSON.stringify(ctx.variables, null, 2)}
-
-RECENT THREAD:
-${transcript}
-
-RULES:
-- Brief. One short paragraph unless the customer asked multiple things.
-- Match the VOICE. Don't sound corporate unless the voice says so.
-- Reference facts from context naturally (e.g. the amount, order number) - don't list them like a form.
-- Don't start with "Thank you for" unless the voice specifically calls for it.${
-        ctx.senderName
-          ? `\n- Sign off using the exact name: ${ctx.senderName}`
-          : "\n- Do not include a sign-off or name placeholder."
-      }
-- NEVER use placeholder text like [Your Name], [Name], or any text in square brackets.
-- Return ONLY the message body. No JSON, no subject line, no surrounding quotes.`;
-
-      const response = await chatCompletion(
-        [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: "Write the reply." },
-        ],
-        model,
-      );
-
-      body = response.trim();
-      aiCalls = [{ model, prompt: systemPrompt, response, tokens: undefined }];
+      const composed = await composeReplyBody({
+        ctx,
+        goal,
+        voice: sendStep.voice_hint,
+        requiredContext: [],
+        priorSent: [],
+        referenceContext,
+      });
+      body = composed.body;
+      aiCalls = [composed.aiCall];
     } else {
       return {
         decision: { action: "fail", error: "send_reply: no message or goal provided" },

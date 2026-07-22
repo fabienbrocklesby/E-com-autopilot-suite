@@ -8,7 +8,7 @@
  * In development, the cache is bypassed so edits take effect immediately.
  */
 import { query } from "../../db/client.ts";
-import { chatCompletion } from "../ai.ts";
+import { chatCompletion, getModel } from "../ai.ts";
 import { join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import type { PlaybookStep } from "./types.ts";
 
@@ -106,12 +106,13 @@ export async function parsePlaybook(
     `## Workspace context\n\n${workspaceContext}${categoryContext}`,
   );
 
+  const model = await getModel(workspaceId);
   const content = await chatCompletion(
     [
       { role: "system", content: systemPrompt },
       { role: "user", content: `Convert this to steps:\n\n${description}` },
     ],
-    "gpt-4o",
+    model,
     { type: "json_object" },
   );
 
@@ -256,12 +257,13 @@ ${contextLines.join("\n")}
 
 Respond with a single JSON object (no array wrapper) representing one playbook step.`;
 
+  const model = await getModel(workspaceId);
   const content = await chatCompletion(
     [
       { role: "system", content: systemPrompt },
       { role: "user", content: `Generate a single step for: ${description}` },
     ],
-    "gpt-4o",
+    model,
     { type: "json_object" },
   );
 
